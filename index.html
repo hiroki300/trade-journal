@@ -345,12 +345,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini速報</button>
     <button class="mode-btn" id="modeC" onclick="setMode('c')">🧠 Claude戦略</button>
   </div>
-  <div class="cscroll" id="cMsgs">
-    <div class="cmsg">
-      <div class="cav">🤝</div>
-      <div class="cb">こんにちは！合議モードでお答えします。<br>🤖<b>Gemini</b>が最新市場情報を、🧠<b>Claude</b>が戦略・判断をお伝えします。<br>右上でモードを切替えられます。</div>
-    </div>
-  </div>
+  <div class="cscroll" id="cMsgs"></div>
   <div class="cbar">
     <textarea class="cin" id="cinp" placeholder="質問を入力…" rows="1"
       oninput="autoH(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();doChat();}"></textarea>
