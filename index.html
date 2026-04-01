@@ -131,10 +131,78 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .empty{text-align:center;padding:36px 20px;color:var(--t3);font-size:13px;}
 .empty .ei{font-size:36px;margin-bottom:8px;}
 .sec-lbl{font-size:11px;color:var(--t3);font-weight:700;letter-spacing:.06em;margin-bottom:6px;}
-
-/* コストバッジ */
 .cost-note{font-size:10px;color:var(--t3);text-align:right;margin-bottom:8px;}
 .cost-note span{background:var(--s2);padding:2px 7px;border-radius:5px;}
+
+/* ── スクリーンショット読み込み ── */
+.ss-zone{
+  border:2px dashed var(--border);border-radius:12px;
+  padding:18px 14px;text-align:center;margin-bottom:12px;
+  cursor:pointer;transition:border-color .2s,background .2s;
+  background:var(--s1);position:relative;
+}
+.ss-zone:hover,.ss-zone.drag{border-color:var(--acc);background:rgba(59,130,246,.05);}
+.ss-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.ss-zone-icon{font-size:28px;margin-bottom:6px;}
+.ss-zone-txt{font-size:13px;font-weight:600;color:var(--t2);}
+.ss-zone-sub{font-size:11px;color:var(--t3);margin-top:3px;}
+.ss-type-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;}
+.ss-type{
+  padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);
+  background:var(--s1);color:var(--t3);font-size:11px;font-weight:700;
+  text-align:center;cursor:pointer;transition:.15s;
+}
+.ss-type.on{border-color:var(--acc);color:var(--acc);background:rgba(59,130,246,.08);}
+.ss-preview{
+  width:100%;max-height:160px;object-fit:contain;
+  border-radius:8px;border:1px solid var(--border);
+  margin-bottom:10px;display:none;
+}
+.ss-result{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:12px;margin-bottom:10px;
+  font-size:12px;line-height:1.8;color:var(--t2);
+  display:none;white-space:pre-wrap;max-height:200px;overflow-y:auto;
+}
+.ss-result.show{display:block;}
+.btn-ss{background:linear-gradient(135deg,#4285f4,#0ea5e9);margin-bottom:8px;}
+.btn-apply{background:linear-gradient(135deg,#059669,#0284c7);}
+
+/* ── ウォッチリスト ── */
+.wrow{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;}
+.winfo{flex:1;}
+.wnm{font-size:13px;font-weight:700;}
+.wmeta{font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:2px;}
+.wtag{font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(59,130,246,.12);color:var(--acc);margin-left:4px;}
+.wdel{background:none;border:none;color:var(--t3);font-size:14px;cursor:pointer;padding:4px;}
+
+/* モーダル風確認ダイアログ */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.7);
+  z-index:500;display:flex;align-items:flex-end;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+.modal-overlay.on{opacity:1;pointer-events:all;}
+.modal{
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:16px 16px 0 0;width:100%;padding:16px;
+  max-height:80vh;overflow-y:auto;
+  transform:translateY(100%);transition:transform .25s;
+}
+.modal-overlay.on .modal{transform:translateY(0);}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:12px;}
+.modal-item{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:11px 12px;margin-bottom:8px;
+}
+.modal-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.modal-item-name{font-size:14px;font-weight:700;}
+.modal-item-meta{font-size:11px;color:var(--t3);font-family:var(--mono);}
+.modal-chk{width:20px;height:20px;accent-color:var(--acc);}
+.modal-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+.btn-sm{border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:700;padding:11px;cursor:pointer;}
+.btn-cancel{background:var(--s2);color:var(--t2);border:1px solid var(--border);}
+.btn-import{background:linear-gradient(135deg,#059669,#0284c7);}
 </style>
 </head>
 <body>
@@ -148,6 +216,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="tab on" onclick="go('dash')"><span class="ti">📊</span>概況</div>
   <div class="tab" onclick="go('trade')"><span class="ti">💱</span>売買</div>
   <div class="tab" onclick="go('hold')"><span class="ti">💼</span>保有</div>
+  <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
   <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
   <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
 </nav>
@@ -172,6 +241,49 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
 <!-- 売買 -->
 <div class="page" id="page-trade">
+
+  <!-- ── スクリーンショット読み込み ── -->
+  <div style="margin-bottom:14px">
+    <div class="sec-lbl">📷 SBI証券スクリーンショットから自動読み込み</div>
+
+    <!-- 読み込み種別 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
+      <div class="ss-type on" id="sst-hold" onclick="setSsType('hold')">💼 保有銘柄</div>
+      <div class="ss-type" id="sst-hist" onclick="setSsType('hist')">📋 約定履歴</div>
+      <div class="ss-type" id="sst-pnl" onclick="setSsType('pnl')">💰 損益履歴</div>
+      <div class="ss-type" id="sst-watch" onclick="setSsType('watch')">👁 ウォッチ</div>
+    </div>
+
+    <!-- ドロップゾーン -->
+    <div class="ss-zone" id="ssZone"
+      ondragover="event.preventDefault();this.classList.add('drag')"
+      ondragleave="this.classList.remove('drag')"
+      ondrop="onDrop(event)">
+      <input type="file" accept="image/*" onchange="onFileSelect(event)">
+      <div class="ss-zone-icon">📸</div>
+      <div class="ss-zone-txt">タップして画像を選ぶ</div>
+      <div class="ss-zone-sub">SBI証券のスクリーンショットをそのまま貼り付けてOK</div>
+    </div>
+
+    <!-- プレビュー -->
+    <img id="ssPreview" class="ss-preview">
+
+    <!-- 解析ボタン -->
+    <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshot()" style="display:none">
+      🤖 Geminiで読み取る
+    </button>
+
+    <!-- 解析結果 -->
+    <div class="ss-result" id="ssResult"></div>
+
+    <!-- 取り込みボタン -->
+    <button class="btn btn-apply" id="ssApplyBtn" onclick="showImportModal()" style="display:none">
+      ✅ 上記の内容を取り込む
+    </button>
+  </div>
+
+  <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:10px">
+    <div class="sec-lbl">✏️ 手動で記録</div>
   <select class="fi" id="ta" onchange="onAct()">
     <option value="buy">🟢 買い（新規）</option>
     <option value="sell">🔴 売り（決済）</option>
@@ -192,6 +304,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div style="margin-top:8px"><label class="fl">メモ（任意）</label><input class="fi" id="tmemo" placeholder="エントリー理由など" style="margin-bottom:0"></div>
   </div>
   <button class="btn btnb" id="tBtn" style="margin-top:10px" onclick="doTrade()">💱 買いを記録する</button>
+  </div><!-- /手動記録 -->
   <div class="sec-lbl" style="margin-top:14px">売買履歴</div>
   <div id="tHist"></div>
 </div>
@@ -199,6 +312,18 @@ select.fi{appearance:none;-webkit-appearance:none;}
 <!-- 保有 -->
 <div class="page" id="page-hold">
   <div id="hList"></div>
+</div>
+
+<!-- 注目（ウォッチリスト） -->
+<div class="page" id="page-watch">
+  <div class="sec-lbl">👁 注目銘柄ウォッチリスト</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <input class="fi" id="wCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:80px;flex:none;margin-bottom:0">
+    <input class="fi" id="wName" type="text" placeholder="銘柄名" style="flex:1;margin-bottom:0">
+    <input class="fi" id="wTag" type="text" placeholder="メモ" style="flex:1;margin-bottom:0">
+    <button class="btn btnb" style="width:52px;padding:0;font-size:20px;margin-top:0" onclick="addWatch()">＋</button>
+  </div>
+  <div id="watchList"></div>
 </div>
 
 <!-- 振り返り -->
@@ -236,16 +361,28 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </div>
 <div class="toast" id="toast"></div>
 
+<!-- スクリーンショット取り込み確認モーダル -->
+<div class="modal-overlay" id="importModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-title">📥 取り込む内容を確認</div>
+    <div id="modalItems"></div>
+    <div class="modal-btns">
+      <button class="btn-sm btn-cancel" onclick="closeModal()">キャンセル</button>
+      <button class="btn-sm btn-import" onclick="doImport()">✅ 取り込む</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ★ APIキー（ここを書き換えてください）
 const GEMINI_KEY    = "AIzaSyDVB3ddn1aP7H8laYa5PVVD7J3CWkHcHgg";
 const ANTHROPIC_KEY = "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";
 
 // ストレージ
-const KH="tj_h4",KT="tj_t4",KC="tj_c4";
+const KH="tj_h4",KT="tj_t4",KC="tj_c4",KW="tj_w1";
 const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d;}catch{return d;}};
 const sv=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
-let H=ld(KH,[]),T=ld(KT,[]),cash=ld(KC,0);
+let H=ld(KH,[]),T=ld(KT,[]),cash=ld(KC,0),W=ld(KW,[]);
 
 const D=new Date(),TODAY=D.toISOString().slice(0,10);
 document.getElementById("ds").textContent=
@@ -254,12 +391,13 @@ document.getElementById("cashIn").value=cash||"";
 
 // タブ
 function go(id){
-  const ids=["dash","trade","hold","rev","chat"];
+  const ids=["dash","trade","hold","watch","rev","chat"];
   document.querySelectorAll(".tab").forEach((t,i)=>t.classList.toggle("on",ids[i]===id));
   document.querySelectorAll(".page").forEach(p=>p.classList.toggle("on",p.id==="page-"+id));
   if(id==="dash")rDash();
   if(id==="hold")rHold();
   if(id==="trade")rTH();
+  if(id==="watch")rWatch();
 }
 
 function saveCash(){cash=parseFloat(document.getElementById("cashIn").value)||0;sv(KC,cash);calcS();}
@@ -329,6 +467,31 @@ function uCP(cd,v){const h=H.find(h=>h.cd===cd);if(h){h.cp=parseFloat(v)||h.bp;s
 function delH(cd){if(!confirm("削除しますか？"))return;H=H.filter(h=>h.cd!==cd);sv(KH,H);rHold();toast("削除しました");}
 function rHold(){document.getElementById("hList").innerHTML=H.length?H.map(h=>hHTML(h,false)).join(""):`<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>`;}
 
+// ── ウォッチリスト ──
+function addWatch(){
+  const cd=document.getElementById("wCode").value.trim();
+  const nm=document.getElementById("wName").value.trim();
+  const tag=document.getElementById("wTag").value.trim();
+  if(!cd||!nm){toast("⚠️ コードと銘柄名は必須");return;}
+  if(W.find(w=>w.cd===cd)){toast("すでに追加済みです");return;}
+  W.push({cd,nm,tag,dt:TODAY});sv(KW,W);
+  ["wCode","wName","wTag"].forEach(id=>document.getElementById(id).value="");
+  rWatch();toast(`👁 ${nm} を追加`);
+}
+function delWatch(cd){W=W.filter(w=>w.cd!==cd);sv(KW,W);rWatch();}
+function rWatch(){
+  const el=document.getElementById("watchList");
+  if(!W.length){el.innerHTML=`<div class="empty"><div class="ei">👁</div>ウォッチリストなし<br>注目銘柄を登録しておくと振り返りで分析されます</div>`;return;}
+  el.innerHTML=W.map(w=>`
+    <div class="wrow">
+      <div class="winfo">
+        <div class="wnm">${w.nm}<span class="wtag">${w.cd}</span></div>
+        <div class="wmeta">${w.tag||"メモなし"} / 登録${w.dt}</div>
+      </div>
+      <button class="wdel" onclick="delWatch('${w.cd}')">🗑</button>
+    </div>`).join("");
+}
+
 function onAct(){
   const b=document.getElementById("ta").value==="buy";
   document.getElementById("buyEx").style.display=b?"":"none";
@@ -369,13 +532,15 @@ function rTH(){document.getElementById("tHist").innerHTML=T.length?[...T].revers
 
 // ポートフォリオ文字列
 function pfS(){
-  if(!H.length)return"保有銘柄なし（現金のみ）";
-  const hs=H.map(h=>{const cp=h.cp||h.bp,pct=((cp-h.bp)/h.bp*100).toFixed(1);
-    return `${h.cd} ${h.nm}: ${h.sh}株 買値${h.bp}円 現値${cp}円(${pct>=0?"+":""}${pct}%) 損切${h.sl||"未"}→目標${h.tgt||"未"}`;
-  }).join("\n");
+  const hs=H.length
+    ?H.map(h=>{const cp=h.cp||h.bp,pct=((cp-h.bp)/h.bp*100).toFixed(1);
+      return `${h.cd} ${h.nm}: ${h.sh}株 買値${h.bp}円 現値${cp}円(${pct>=0?"+":""}${pct}%) 損切${h.sl||"未"}→目標${h.tgt||"未"}`;
+    }).join("\n")
+    :"保有銘柄なし（現金のみ）";
   const td=T.filter(t=>t.dt===TODAY);
   const ts=td.length?"\n本日売買: "+td.map(t=>`${t.a==="buy"?"買":"売"} ${t.nm} ${t.p}円×${t.sh}株`).join(", "):"";
-  return hs+ts+`\n残金: ${Math.round(cash).toLocaleString()}円`;
+  const ws=W.length?"\nウォッチ中: "+W.map(w=>`${w.cd} ${w.nm}`).join(", "):"";
+  return hs+ts+ws+`\n残金: ${Math.round(cash).toLocaleString()}円`;
 }
 
 // ══ 振り返り設定 ══
@@ -600,8 +765,256 @@ async function callClaude(prompt,sys,history){
 let tt;
 function toast(m){const e=document.getElementById("toast");e.textContent=m;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2600);}
 
+// ══ スクリーンショット読み込み ══
+let ssType="hold";   // hold / hist / pnl
+let ssImageB64=null;
+let parsedItems=[];  // 解析結果
+
+function setSsType(t){
+  ssType=t;
+  ["hold","hist","pnl","watch"].forEach(x=>{
+    document.getElementById("sst-"+x).classList.toggle("on",x===t);
+  });
+}
+
+function onFileSelect(e){
+  const file=e.target.files[0];
+  if(file)loadImage(file);
+}
+function onDrop(e){
+  e.preventDefault();
+  document.getElementById("ssZone").classList.remove("drag");
+  const file=e.dataTransfer.files[0];
+  if(file&&file.type.startsWith("image/"))loadImage(file);
+}
+function loadImage(file){
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const prev=document.getElementById("ssPreview");
+    prev.src=ev.target.result;
+    prev.style.display="block";
+    ssImageB64=ev.target.result.split(",")[1];
+    document.getElementById("ssAnalyzeBtn").style.display="block";
+    document.getElementById("ssResult").classList.remove("show");
+    document.getElementById("ssApplyBtn").style.display="none";
+    parsedItems=[];
+  };
+  reader.readAsDataURL(file);
+}
+
+async function analyzeScreenshot(){
+  if(!ssImageB64){toast("⚠️ 画像を選んでください");return;}
+  const btn=document.getElementById("ssAnalyzeBtn");
+  btn.disabled=true;btn.textContent="🤖 読み取り中...";
+
+  // ── 汎用プロンプト（証券会社を問わない）──
+  const prompts={
+    hold:`この画像は証券会社アプリの保有銘柄一覧画面です（SBI・楽天・松井・マネックスなど）。
+画面から保有銘柄の情報を読み取り、以下のJSON配列を返してください。
+証券コードが見えない場合はnullにしてください。
+
+[{
+  "code": "証券コード4桁またはnull",
+  "name": "銘柄名",
+  "shares": 保有株数(数値),
+  "buy_price": 平均取得単価または買値(数値・円),
+  "current_price": 現在値または時価(数値・円)
+}]
+
+JSONのみ・マークダウン不要。読み取れない項目はnull。`,
+
+    hist:`この画像は証券会社アプリの約定履歴・注文履歴・取引履歴画面です。
+画面から売買情報を読み取り、以下のJSON配列を返してください。
+
+[{
+  "action": "buy"（買い）または"sell"（売り）,
+  "code": "証券コード4桁またはnull",
+  "name": "銘柄名",
+  "shares": 株数(数値),
+  "price": 約定価格(数値・円),
+  "date": "YYYY-MM-DD形式（不明ならnull）"
+}]
+
+JSONのみ・マークダウン不要。読み取れない項目はnull。`,
+
+    pnl:`この画像は証券会社アプリの損益・実現損益・譲渡損益画面です。
+画面から損益情報を読み取り、以下のJSON配列を返してください。
+
+[{
+  "code": "証券コード4桁またはnull",
+  "name": "銘柄名",
+  "realized_pnl": 実現損益(数値・円・マイナスあり),
+  "shares": 売却株数(数値またはnull),
+  "sell_price": 売却単価(数値またはnull),
+  "buy_price": 取得単価(数値またはnull),
+  "date": "YYYY-MM-DD形式（不明ならnull）"
+}]
+
+JSONのみ・マークダウン不要。読み取れない項目はnull。`,
+
+    watch:`この画像は証券会社アプリまたは投資情報サイトのウォッチリスト・注目銘柄・スクリーニング結果画面です。
+画面に表示されている銘柄を読み取り、以下のJSON配列を返してください。
+
+[{
+  "code": "証券コード4桁またはnull",
+  "name": "銘柄名",
+  "current_price": 現在値（数値またはnull）,
+  "tag": "表示されているテーマ・セクター・メモ（なければ空文字）"
+}]
+
+JSONのみ・マークダウン不要。読み取れない項目はnull。`
+  };
+
+  try{
+    const body={
+      contents:[{
+        parts:[
+          {text:prompts[ssType]},
+          {inline_data:{mime_type:"image/jpeg",data:ssImageB64}}
+        ]
+      }],
+      generationConfig:{maxOutputTokens:2000,temperature:0.1}
+    };
+    const r=await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+      {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}
+    );
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const d=await r.json();
+    let raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+    raw=raw.replace(/```json|```/g,"").trim();
+    const s=raw.indexOf("["),e=raw.lastIndexOf("]");
+    if(s<0||e<0)throw new Error("銘柄情報を読み取れませんでした");
+    parsedItems=JSON.parse(raw.slice(s,e+1));
+
+    const resEl=document.getElementById("ssResult");
+    resEl.classList.add("show");
+
+    if(ssType==="hold"){
+      resEl.textContent=parsedItems.map(i=>`${i.code||"?"} ${i.name}\n  ${i.shares}株 / 取得単価 ${i.buy_price?.toLocaleString()||"?"}円 / 現在値 ${i.current_price?.toLocaleString()||"?"}円`).join("\n\n");
+    }else if(ssType==="hist"){
+      resEl.textContent=parsedItems.map(i=>`${i.action==="buy"?"🟢買":"🔴売"} ${i.code||"?"} ${i.name}\n  ${i.shares}株 × ${i.price?.toLocaleString()||"?"}円 (${i.date||"日付不明"})`).join("\n\n");
+    }else if(ssType==="pnl"){
+      resEl.textContent=parsedItems.map(i=>`${i.code||"?"} ${i.name}\n  実現損益: ${i.realized_pnl!=null?(i.realized_pnl>=0?"+":"")+i.realized_pnl?.toLocaleString()+"円":"不明"} (${i.date||"日付不明"})`).join("\n\n");
+    }else{
+      resEl.textContent=parsedItems.map(i=>`${i.code||"?"} ${i.name}${i.current_price?" "+i.current_price.toLocaleString()+"円":""}\n  ${i.tag||"メモなし"}`).join("\n\n");
+    }
+
+    if(parsedItems.length>0){
+      document.getElementById("ssApplyBtn").style.display="block";
+    }else{
+      resEl.textContent="銘柄情報が読み取れませんでした。\n画面全体が写っているスクショを使ってください。";
+    }
+  }catch(e){
+    const resEl=document.getElementById("ssResult");
+    resEl.classList.add("show");
+    resEl.textContent=`⚠️ ${e.message}\n\nヒント: 証券コードや銘柄名が見える画面のスクリーンショットを使ってください。`;
+  }
+  btn.disabled=false;btn.textContent="🤖 Geminiで読み取る";
+}
+
+// 取り込み確認モーダル
+function showImportModal(){
+  if(!parsedItems.length)return;
+  const el=document.getElementById("modalItems");
+  const fmtItem=(item,i,lines)=>`
+    <div class="modal-item">
+      <div class="modal-item-top">
+        <div>
+          <div class="modal-item-name">${lines[0]}</div>
+          <div class="modal-item-meta">${lines[1]}</div>
+        </div>
+        <input type="checkbox" class="modal-chk" id="mchk${i}" checked>
+      </div>
+    </div>`;
+  if(ssType==="hold"){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,[
+      `${it.code||"?"} ${it.name}`,
+      `${it.shares||"?"}株 / 取得単価 ${it.buy_price?.toLocaleString()||"?"}円 / 現在値 ${it.current_price?.toLocaleString()||"?"}円`
+    ])).join("");
+  }else if(ssType==="hist"){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,[
+      `${it.action==="buy"?"🟢買":"🔴売"} ${it.code||"?"} ${it.name}`,
+      `${it.shares||"?"}株 × ${it.price?.toLocaleString()||"?"}円 / ${it.date||"日付不明"}`
+    ])).join("");
+  }else if(ssType==="pnl"){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,[
+      `${it.code||"?"} ${it.name}`,
+      `実現損益 ${it.realized_pnl!=null?(it.realized_pnl>=0?"+":"")+it.realized_pnl?.toLocaleString()+"円":"不明"} / ${it.date||"日付不明"}`
+    ])).join("");
+  }else{
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,[
+      `${it.code||"?"} ${it.name}`,
+      `${it.current_price?it.current_price.toLocaleString()+"円 / ":""}${it.tag||"メモなし"}`
+    ])).join("");
+  }
+  document.getElementById("importModal").classList.add("on");
+}
+function closeModal(){document.getElementById("importModal").classList.remove("on");}
+
+function doImport(){
+  const checked=parsedItems.filter((_,i)=>document.getElementById("mchk"+i)?.checked);
+  let count=0;
+  if(ssType==="hold"){
+    for(const it of checked){
+      const cd=String(it.code||"").trim(), nm=String(it.name||"").trim();
+      if(!nm)continue;
+      const idx=H.findIndex(h=>h.cd===(cd||nm));
+      if(idx>=0){if(it.current_price)H[idx].cp=it.current_price;}
+      else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:"SS取込",dt:TODAY});
+      count++;
+    }
+    sv(KH,H);
+  }else if(ssType==="hist"){
+    for(const it of checked){
+      const cd=String(it.code||"").trim(), nm=String(it.name||"").trim();
+      if(!nm)continue;
+      if(T.find(t=>t.cd===cd&&t.p===it.price&&t.dt===it.date&&t.a===it.action))continue;
+      let pnl=null;
+      if(it.action==="buy"){
+        const idx=H.findIndex(h=>h.cd===(cd||nm));
+        if(idx>=0){const ex=H[idx],tot=ex.sh+(it.shares||0);H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+(it.price||0)*(it.shares||0))/tot*10)/10};}
+        else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:"SS取込",dt:it.date||TODAY});
+        sv(KH,H);
+      }else{
+        const h=H.find(h=>h.cd===(cd||nm));
+        if(h){pnl=(it.price-h.bp)*(it.shares||0);if(h.sh<=(it.shares||0))H=H.filter(hh=>hh.cd!==h.cd);else h.sh-=(it.shares||0);sv(KH,H);}
+      }
+      T.push({id:Date.now()+Math.random(),a:it.action,cd:cd||nm,nm,sh:it.shares||0,p:it.price||0,dt:it.date||TODAY,pnl});
+      count++;
+    }
+    sv(KT,T);
+  }else if(ssType==="pnl"){
+    for(const it of checked){
+      const cd=String(it.code||"").trim(), nm=String(it.name||"").trim();
+      if(!nm)continue;
+      if(T.find(t=>t.cd===cd&&t.dt===it.date&&t.a==="sell"))continue;
+      T.push({id:Date.now()+Math.random(),a:"sell",cd:cd||nm,nm,sh:it.shares||0,p:it.sell_price||0,dt:it.date||TODAY,pnl:it.realized_pnl||0});
+      count++;
+    }
+    sv(KT,T);
+  }else{
+    for(const it of checked){
+      const cd=String(it.code||"").trim(), nm=String(it.name||"").trim();
+      if(!nm)continue;
+      if(W.find(w=>w.cd===(cd||nm)))continue;
+      W.push({cd:cd||nm,nm,tag:it.tag||"",dt:TODAY});
+      count++;
+    }
+    sv(KW,W);
+  }
+  closeModal();calcS();rTH();rHold();rWatch();
+  toast(`✅ ${count}件を取り込みました`);
+  parsedItems=[];ssImageB64=null;
+  ["ssPreview","ssAnalyzeBtn","ssApplyBtn"].forEach(id=>{
+    const e=document.getElementById(id);
+    if(e)e.style.display="none";
+  });
+  document.getElementById("ssResult").classList.remove("show");
+}
+
 // 初期化
-calcS();rTH();
+calcS();rTH();rWatch();
 </script>
 </body>
 </html>
