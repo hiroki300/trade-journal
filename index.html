@@ -132,6 +132,45 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
 .ldg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t3);padding:4px 0;}
 
+
+/* ── APIキー設定モーダル ── */
+.key-modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.85);
+  z-index:900;display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+.key-modal{
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:16px;width:100%;max-width:420px;padding:20px;
+}
+.key-modal-title{font-size:16px;font-weight:700;margin-bottom:4px;}
+.key-modal-sub{font-size:12px;color:var(--t3);margin-bottom:16px;line-height:1.6;}
+.key-row{margin-bottom:12px;}
+.key-label{font-size:11px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px;}
+.key-input{
+  width:100%;background:var(--s2);border:1.5px solid var(--border);
+  border-radius:8px;color:var(--text);font-family:var(--mono);
+  font-size:13px;padding:10px 12px;outline:none;
+  transition:border-color .15s;
+}
+.key-input:focus{border-color:var(--acc);}
+.key-input::placeholder{color:var(--t3);}
+.key-save-btn{
+  width:100%;background:linear-gradient(135deg,#1d4ed8,#0891b2);
+  border:none;border-radius:10px;color:#fff;
+  font-size:15px;font-weight:700;padding:13px;cursor:pointer;
+  margin-top:4px;
+}
+.key-skip{
+  display:block;text-align:center;font-size:12px;color:var(--t3);
+  margin-top:10px;cursor:pointer;text-decoration:underline;
+}
+/* ヘッダーの設定ボタン */
+.hdr-key-btn{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:7px;color:var(--t2);font-size:11px;font-weight:700;
+  padding:5px 10px;cursor:pointer;white-space:nowrap;
+}
 .toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:9px 18px;font-size:13px;font-weight:600;opacity:0;transition:all .25s;pointer-events:none;z-index:999;white-space:nowrap;}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
 .empty{text-align:center;padding:36px 20px;color:var(--t3);font-size:13px;}
@@ -215,7 +254,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
 <header>
   <div class="logo">📒 Trade<span>Journal</span></div>
-  <div id="ds"></div>
+  <div style="display:flex;align-items:center;gap:8px"><div id="ds"></div><button class="hdr-key-btn" onclick="openKeyModal()">🔑 API設定</button></div>
 </header>
 
 <nav>
@@ -260,23 +299,26 @@ select.fi{appearance:none;-webkit-appearance:none;}
       <div class="ss-type" id="sst-watch" onclick="setSsType('watch')">👁 ウォッチ</div>
     </div>
 
-    <!-- ドロップゾーン（Android Chrome対応） -->
-    <input type="file" accept="image/*" id="ssFileInput" style="display:none" onchange="onFileSelect(event)">
+    <!-- ドロップゾーン（複数枚対応・最大20枚） -->
+    <input type="file" accept="image/*" id="ssFileInput" style="display:none" multiple onchange="onFileSelect(event)">
     <div class="ss-zone" id="ssZone" onclick="document.getElementById('ssFileInput').click()"
       ondragover="event.preventDefault();this.classList.add('drag')"
       ondragleave="this.classList.remove('drag')"
       ondrop="onDrop(event)">
       <div class="ss-zone-icon">📸</div>
-      <div class="ss-zone-txt">タップして画像を選ぶ</div>
-      <div class="ss-zone-sub">スクリーンショットをそのまま選択してOK</div>
+      <div class="ss-zone-txt">タップして画像を選ぶ（最大20枚）</div>
+      <div class="ss-zone-sub">複数枚まとめて選択OK・一括で読み取ります</div>
     </div>
 
-    <!-- プレビュー -->
-    <img id="ssPreview" class="ss-preview">
+    <!-- 複数プレビュー -->
+    <div id="ssPreviewList" style="display:none;margin-bottom:10px">
+      <div id="ssPreviewGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px"></div>
+      <div id="ssFileCount" style="font-size:12px;color:var(--t2);text-align:center"></div>
+    </div>
 
     <!-- 解析ボタン -->
-    <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshot()" style="display:none">
-      🤖 Geminiで読み取る
+    <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshots()" style="display:none">
+      🤖 Geminiで一括読み取る
     </button>
 
     <!-- 解析結果 -->
@@ -374,10 +416,33 @@ select.fi{appearance:none;-webkit-appearance:none;}
   </div>
 </div>
 
+<!-- APIキー設定モーダル -->
+<div class="key-modal-overlay" id="keyModal" style="display:none">
+  <div class="key-modal">
+    <div class="key-modal-title">🔑 APIキーを設定</div>
+    <div class="key-modal-sub">
+      キーはこのスマホのみに保存されます。<br>
+      GitHubには一切アップロードされません。<br><br>
+      <b>Gemini:</b> aistudio.google.com → Get API key<br>
+      <b>Anthropic:</b> console.anthropic.com → API Keys
+    </div>
+    <div class="key-row">
+      <label class="key-label">🤖 Gemini API Key</label>
+      <input class="key-input" id="keyGemini" type="password" placeholder="AIzaSy...">
+    </div>
+    <div class="key-row">
+      <label class="key-label">🧠 Anthropic API Key</label>
+      <input class="key-input" id="keyAnthropic" type="password" placeholder="sk-ant-...">
+    </div>
+    <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
+    <span class="key-skip" onclick="closeKeyModal()">あとで設定する（一部機能が使えません）</span>
+  </div>
+</div>
+
 <script>
-// ★ APIキー（ここを書き換えてください）
-const GEMINI_KEY    = "AIzaSyDVB3ddn1aP7H8laYa5PVVD7J3CWkHcHgg";
-const ANTHROPIC_KEY = "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";
+// ★ APIキー（localStorageから読み込み・起動時に設定画面で入力）
+let GEMINI_KEY    = localStorage.getItem("tj_gk")||"";
+let ANTHROPIC_KEY = localStorage.getItem("tj_ck")||"";
 
 // ストレージ
 const KH="tj_h4",KT="tj_t4",KC="tj_c4",KW="tj_w1";
@@ -790,148 +855,167 @@ let ssType="hold";   // hold / hist / pnl
 let ssImageB64=null;
 let parsedItems=[];  // 解析結果
 
+
+// ══ APIキー設定 ══
+function openKeyModal(){
+  document.getElementById("keyModal").style.display="flex";
+  document.getElementById("keyGemini").value=GEMINI_KEY;
+  document.getElementById("keyAnthropic").value=ANTHROPIC_KEY;
+}
+function closeKeyModal(){
+  document.getElementById("keyModal").style.display="none";
+}
+function saveKeys(){
+  const gk=document.getElementById("keyGemini").value.trim();
+  const ck=document.getElementById("keyAnthropic").value.trim();
+  if(!gk||!ck){toast("⚠️ 両方のキーを入力してください");return;}
+  GEMINI_KEY=gk; ANTHROPIC_KEY=ck;
+  localStorage.setItem("tj_gk",gk);
+  localStorage.setItem("tj_ck",ck);
+  closeKeyModal();
+  toast("✅ APIキーを保存しました");
+}
+
+// ══ 複数画像処理 ══
+let ssImageList=[]; // [{b64, name}]
+
 function setSsType(t){
   ssType=t;
   ["hold","hist","pnl","watch"].forEach(x=>{
     document.getElementById("sst-"+x).classList.toggle("on",x===t);
   });
 }
-
 function onFileSelect(e){
-  const file=e.target.files[0];
-  if(file)loadImage(file);
+  const files=Array.from(e.target.files).slice(0,20);
+  if(files.length)loadImages(files);
 }
 function onDrop(e){
   e.preventDefault();
   document.getElementById("ssZone").classList.remove("drag");
-  const file=e.dataTransfer.files[0];
-  if(file&&file.type.startsWith("image/"))loadImage(file);
+  const files=Array.from(e.dataTransfer.files)
+    .filter(f=>f.type.startsWith("image/")).slice(0,20);
+  if(files.length)loadImages(files);
 }
-function loadImage(file){
-  const reader=new FileReader();
-  reader.onload=ev=>{
-    const prev=document.getElementById("ssPreview");
-    prev.src=ev.target.result;
-    prev.style.display="block";
-    ssImageB64=ev.target.result.split(",")[1];
+function loadImages(files){
+  ssImageList=[];
+  document.getElementById("ssPreviewGrid").innerHTML="";
+  const reads=files.map(file=>new Promise(res=>{
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const b64=ev.target.result.split(",")[1];
+      ssImageList.push({b64,name:file.name});
+      // サムネ
+      const img=document.createElement("img");
+      img.src=ev.target.result;
+      img.style.cssText="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border)";
+      document.getElementById("ssPreviewGrid").appendChild(img);
+      res();
+    };
+    reader.readAsDataURL(file);
+  }));
+  Promise.all(reads).then(()=>{
+    document.getElementById("ssPreviewList").style.display="block";
+    document.getElementById("ssFileCount").textContent=`${ssImageList.length}枚選択済み`;
     document.getElementById("ssAnalyzeBtn").style.display="block";
     document.getElementById("ssResult").classList.remove("show");
     document.getElementById("ssApplyBtn").style.display="none";
     parsedItems=[];
-  };
-  reader.readAsDataURL(file);
+  });
 }
 
-async function analyzeScreenshot(){
-  if(!ssImageB64){toast("⚠️ 画像を選んでください");return;}
+async function analyzeScreenshots(){
+  if(!ssImageList.length){toast("⚠️ 画像を選んでください");return;}
+  if(!GEMINI_KEY){openKeyModal();return;}
   const btn=document.getElementById("ssAnalyzeBtn");
-  btn.disabled=true;btn.textContent="🤖 読み取り中...";
+  btn.disabled=true;
 
-  // ── 汎用プロンプト（証券会社を問わない）──
   const prompts={
-    hold:`この画像は証券会社アプリの保有銘柄一覧画面です（SBI・楽天・松井・マネックスなど）。
+    hold:`この画像は証券会社アプリの保有銘柄一覧画面です。
 画面から保有銘柄の情報を読み取り、以下のJSON配列を返してください。
-証券コードが見えない場合はnullにしてください。
-
-[{
-  "code": "証券コード4桁またはnull",
-  "name": "銘柄名",
-  "shares": 保有株数(数値),
-  "buy_price": 平均取得単価または買値(数値・円),
-  "current_price": 現在値または時価(数値・円)
-}]
-
+[{"code":"証券コード4桁またはnull","name":"銘柄名","shares":保有株数,"buy_price":平均取得単価,"current_price":現在値}]
 JSONのみ・マークダウン不要。読み取れない項目はnull。`,
-
-    hist:`この画像は証券会社アプリの約定履歴・注文履歴・取引履歴画面です。
-画面から売買情報を読み取り、以下のJSON配列を返してください。
-
-[{
-  "action": "buy"（買い）または"sell"（売り）,
-  "code": "証券コード4桁またはnull",
-  "name": "銘柄名",
-  "shares": 株数(数値),
-  "price": 約定価格(数値・円),
-  "date": "YYYY-MM-DD形式（不明ならnull）"
-}]
-
-JSONのみ・マークダウン不要。読み取れない項目はnull。`,
-
-    pnl:`この画像は証券会社アプリの損益・実現損益・譲渡損益画面です。
-画面から損益情報を読み取り、以下のJSON配列を返してください。
-
-[{
-  "code": "証券コード4桁またはnull",
-  "name": "銘柄名",
-  "realized_pnl": 実現損益(数値・円・マイナスあり),
-  "shares": 売却株数(数値またはnull),
-  "sell_price": 売却単価(数値またはnull),
-  "buy_price": 取得単価(数値またはnull),
-  "date": "YYYY-MM-DD形式（不明ならnull）"
-}]
-
-JSONのみ・マークダウン不要。読み取れない項目はnull。`,
-
-    watch:`この画像は証券会社アプリまたは投資情報サイトのウォッチリスト・注目銘柄・スクリーニング結果画面です。
-画面に表示されている銘柄を読み取り、以下のJSON配列を返してください。
-
-[{
-  "code": "証券コード4桁またはnull",
-  "name": "銘柄名",
-  "current_price": 現在値（数値またはnull）,
-  "tag": "表示されているテーマ・セクター・メモ（なければ空文字）"
-}]
-
-JSONのみ・マークダウン不要。読み取れない項目はnull。`
+    hist:`この画像は証券会社アプリの約定・取引履歴画面です。
+[{"action":"buy"or"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD"}]
+JSONのみ・マークダウン不要。`,
+    pnl:`この画像は証券会社の損益・実現損益画面です。
+[{"code":"証券コード","name":"銘柄名","realized_pnl":実現損益,"shares":売却株数,"sell_price":売却単価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]
+JSONのみ・マークダウン不要。`,
+    watch:`この画像はウォッチリストや銘柄一覧画面です。
+[{"code":"証券コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]
+JSONのみ・マークダウン不要。`
   };
 
-  try{
-    const body={
-      contents:[{
-        parts:[
+  const resEl=document.getElementById("ssResult");
+  resEl.classList.add("show");
+  resEl.textContent="";
+  parsedItems=[];
+  let successCount=0;
+
+  for(let i=0;i<ssImageList.length;i++){
+    const img=ssImageList[i];
+    btn.textContent=`🤖 読み取り中... ${i+1}/${ssImageList.length}枚`;
+    resEl.textContent+=`
+[${i+1}/${ssImageList.length}] ${img.name} 解析中...
+`;
+    try{
+      const body={
+        contents:[{parts:[
           {text:prompts[ssType]},
-          {inline_data:{mime_type:"image/jpeg",data:ssImageB64}}
-        ]
-      }],
-      generationConfig:{maxOutputTokens:2000,temperature:0.1}
-    };
-    const r=await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-      {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}
-    );
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
-    const d=await r.json();
-    let raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
-    raw=raw.replace(/```json|```/g,"").trim();
-    const s=raw.indexOf("["),e=raw.lastIndexOf("]");
-    if(s<0||e<0)throw new Error("銘柄情報を読み取れませんでした");
-    parsedItems=JSON.parse(raw.slice(s,e+1));
-
-    const resEl=document.getElementById("ssResult");
-    resEl.classList.add("show");
-
-    if(ssType==="hold"){
-      resEl.textContent=parsedItems.map(i=>`${i.code||"?"} ${i.name}\n  ${i.shares}株 / 取得単価 ${i.buy_price?.toLocaleString()||"?"}円 / 現在値 ${i.current_price?.toLocaleString()||"?"}円`).join("\n\n");
-    }else if(ssType==="hist"){
-      resEl.textContent=parsedItems.map(i=>`${i.action==="buy"?"🟢買":"🔴売"} ${i.code||"?"} ${i.name}\n  ${i.shares}株 × ${i.price?.toLocaleString()||"?"}円 (${i.date||"日付不明"})`).join("\n\n");
-    }else if(ssType==="pnl"){
-      resEl.textContent=parsedItems.map(i=>`${i.code||"?"} ${i.name}\n  実現損益: ${i.realized_pnl!=null?(i.realized_pnl>=0?"+":"")+i.realized_pnl?.toLocaleString()+"円":"不明"} (${i.date||"日付不明"})`).join("\n\n");
-    }else{
-      resEl.textContent=parsedItems.map(i=>`${i.code||"?"} ${i.name}${i.current_price?" "+i.current_price.toLocaleString()+"円":""}\n  ${i.tag||"メモなし"}`).join("\n\n");
+          {inline_data:{mime_type:"image/jpeg",data:img.b64}}
+        ]}],
+        generationConfig:{maxOutputTokens:2000,temperature:0.1}
+      };
+      const r=await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}
+      );
+      if(!r.ok)throw new Error(`HTTP ${r.status} - APIキーを確認してください`);
+      const d=await r.json();
+      let raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      raw=raw.replace(/```json|```/g,"").trim();
+      const s=raw.indexOf("["),e=raw.lastIndexOf("]");
+      if(s<0||e<0)throw new Error("銘柄情報を読み取れませんでした");
+      const items=JSON.parse(raw.slice(s,e+1));
+      // 重複除外してマージ
+      for(const item of items){
+        const exists=parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
+        if(!exists)parsedItems.push(item);
+      }
+      resEl.textContent+=`  ✅ ${items.length}件検出
+`;
+      successCount++;
+    }catch(e){
+      resEl.textContent+=`  ⚠️ ${e.message}
+`;
     }
-
-    if(parsedItems.length>0){
-      document.getElementById("ssApplyBtn").style.display="block";
-    }else{
-      resEl.textContent="銘柄情報が読み取れませんでした。\n画面全体が写っているスクショを使ってください。";
-    }
-  }catch(e){
-    const resEl=document.getElementById("ssResult");
-    resEl.classList.add("show");
-    resEl.textContent=`⚠️ ${e.message}\n\nヒント: 証券コードや銘柄名が見える画面のスクリーンショットを使ってください。`;
+    await new Promise(r=>setTimeout(r,500)); // レート制限対策
   }
-  btn.disabled=false;btn.textContent="🤖 Geminiで読み取る";
+
+  resEl.textContent+=`
+──────
+合計 ${parsedItems.length}件を検出（${successCount}/${ssImageList.length}枚成功）
+
+`;
+
+  // 結果サマリー表示
+  if(ssType==="hold"){
+    resEl.textContent+=parsedItems.map(i=>`${i.code||"?"} ${i.name}  ${i.shares||"?"}株 買値${i.buy_price?.toLocaleString()||"?"}円 現値${i.current_price?.toLocaleString()||"?"}円`).join("
+");
+  }else if(ssType==="hist"){
+    resEl.textContent+=parsedItems.map(i=>`${i.action==="buy"?"🟢買":"🔴売"} ${i.code||"?"} ${i.name}  ${i.shares||"?"}株×${i.price?.toLocaleString()||"?"}円 (${i.date||"日付不明"})`).join("
+");
+  }else if(ssType==="pnl"){
+    resEl.textContent+=parsedItems.map(i=>`${i.code||"?"} ${i.name}  実現損益${i.realized_pnl!=null?(i.realized_pnl>=0?"+":"")+i.realized_pnl?.toLocaleString()+"円":"不明"} (${i.date||"日付不明"})`).join("
+");
+  }else{
+    resEl.textContent+=parsedItems.map(i=>`${i.code||"?"} ${i.name}  ${i.tag||""}`).join("
+");
+  }
+
+  if(parsedItems.length>0)document.getElementById("ssApplyBtn").style.display="block";
+  btn.disabled=false;btn.textContent="🤖 Geminiで一括読み取る";
 }
+
 
 // 取り込み確認モーダル
 function showImportModal(){
@@ -1035,6 +1119,10 @@ function doImport(){
 
 // 初期化
 calcS();rTH();rWatch();
+// APIキー未設定なら設定画面を表示
+if(!GEMINI_KEY||!ANTHROPIC_KEY){
+  document.getElementById("keyModal").style.display="flex";
+}
 </script>
 </body>
 </html>
