@@ -170,6 +170,11 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
   <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
   <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
+  <div style="padding: 0 14px 10px;">
+    <button class="btn btn-apply" onclick="syncWithAI()" style="font-size: 13px; padding: 8px;">
+        🔄 AI分析(v6)と同期する
+    </button>
+</div>
 </nav>
 <div class="pages">
 
@@ -965,6 +970,52 @@ function doImport() {
 // 初期化
 calcS(); rTH(); rWatch();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
+
+
+// GitHubのRawデータURL（あなた専用に書き換えてください）
+const GITHUB_USER = "hiroki300";
+const REPO_NAME = "stock-checker ";
+const WEEKLY_URL = `https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/main/weekly_results.json`;
+
+async function syncWithAI() {
+    toast("🤖 AI分析データを同期中...");
+    try {
+        const response = await fetch(WEEKLY_URL);
+        const data = await response.json();
+        
+        // 1. S/Aランク銘柄をウォッチリストに自動反映
+        const aiWatch = data.filter(d => d.rank === 'S' || d.rank === 'A').map(d => ({
+            cd: d.code,
+            nm: d.name,
+            tag: `AI:${d.total}点[${d.rank}]`,
+            dt: d.analyzed_at.slice(0, 10)
+        }));
+        
+        // 既存のウォッチリストとマージ（重複排除）
+        aiWatch.forEach(newW => {
+            if (!W.find(w => w.cd === newW.cd)) W.push(newW);
+        });
+        
+        sv(KW, W);
+        rWatch();
+        
+        // 2. 保有銘柄のATR損切りラインを自動提案（もし一致すれば）
+        H.forEach(h => {
+            const aiInfo = data.find(d => d.code === h.cd);
+            if (aiInfo) {
+                h.memo = `AI目標:${aiInfo.target}円 / ${aiInfo.rank}ランク`;
+            }
+        });
+        sv(KH, H);
+        
+        toast("✅ 同期完了！S/Aランク銘柄を追加しました");
+    } catch (e) {
+        toast("⚠️ 同期エラー。URLまたはリポジトリ設定を確認してください");
+    }
+}
+
+
+  
 </script>
 <script>
 if('serviceWorker' in navigator){
