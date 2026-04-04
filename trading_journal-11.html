@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Trade Journal</title>
+<meta name="theme-color" content="#111827">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TradeJournal">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap');
+:root{
+  --bg:#0b0f18;--s1:#111827;--s2:#1a2236;--border:#1e2d45;
+  --acc:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;
+  --gem:#4285f4;--cld:#d97706;
+  --text:#e2e8f0;--t2:#94a3b8;--t3:#4b6088;
+  --font:'Noto Sans JP',sans-serif;--mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+button,select,input,.tab,.ss-type,.ss-zone,.mode-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation;cursor:pointer;}
+html,body{height:100%;}
+body{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;flex-direction:column;}
+header{padding:12px 16px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--s1);}
+.logo{font-size:15px;font-weight:700;color:#fff;}.logo span{color:var(--acc);}
+#ds{font-size:11px;color:var(--t3);font-family:var(--mono);}
+nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0;}
+.tab{flex:1;padding:9px 4px 8px;text-align:center;font-size:10px;font-weight:700;color:var(--t3);border-bottom:2px solid transparent;cursor:pointer;transition:color .15s,border-color .15s;}
+.tab .ti{font-size:15px;display:block;margin-bottom:1px;}
+.tab.on{color:var(--acc);border-bottom-color:var(--acc);}
+.pages{flex:1;overflow:hidden;position:relative;min-height:0;}
+.page{position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 72px;display:none;}
+.page::-webkit-scrollbar{width:2px;}.page::-webkit-scrollbar-thumb{background:var(--border);}
+.cash-row{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px;}
+.cash-row label{font-size:11px;color:var(--t3);white-space:nowrap;}
+.cash-row input{flex:1;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:18px;font-weight:700;text-align:right;outline:none;min-width:0;}
+.cash-row span{font-size:12px;color:var(--t3);}
+.sum-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px;}
+.sb{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px;}
+.sl{font-size:9px;color:var(--t3);margin-bottom:3px;letter-spacing:.04em;}
+.sv{font-family:var(--mono);font-size:15px;font-weight:700;}
+.ss{font-size:9px;color:var(--t3);margin-top:2px;}
+.up{color:var(--green);}.dn{color:var(--red);}
+.hrow{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:7px;}
+.hrt{display:flex;justify-content:space-between;align-items:center;}
+.hnm{font-size:14px;font-weight:700;}.hcd{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:1px;}
+.hpnl{font-family:var(--mono);font-size:16px;font-weight:700;}.hpct{font-size:10px;text-align:right;margin-top:1px;}
+.hmeta{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
+.hbg{font-size:11px;background:var(--s2);padding:3px 8px;border-radius:5px;font-family:var(--mono);}
+.hlines{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:7px;}
+.hl{background:var(--s2);border-radius:7px;padding:6px;text-align:center;}
+.hll{font-size:9px;color:var(--t3);margin-bottom:2px;}.hlv{font-family:var(--mono);font-size:12px;font-weight:600;}
+.hl.s .hlv{color:var(--red);}.hl.c .hlv{color:var(--acc);}.hl.t .hlv{color:var(--green);}
+.abar{font-size:11px;font-weight:700;padding:4px 8px;border-radius:5px;margin-bottom:6px;text-align:center;}
+.as{background:rgba(239,68,68,.15);color:var(--red);}.ag{background:rgba(16,185,129,.15);color:var(--green);}.aw{background:rgba(245,158,11,.15);color:var(--yellow);}
+.cpin{background:transparent;border:none;color:var(--acc);font-family:var(--mono);font-size:11px;font-weight:700;width:56px;text-align:right;outline:none;border-bottom:1px dashed var(--border);}
+.delbtn{font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:4px 0;margin-top:4px;}
+.fl{font-size:11px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px;letter-spacing:.04em;}
+.fi{width:100%;background:var(--s1);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:15px;padding:9px 11px;outline:none;transition:border-color .15s;margin-bottom:10px;}
+.fi:focus{border-color:var(--acc);}.fi::placeholder{color:var(--t3);font-size:13px;}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.btn{width:100%;border:none;border-radius:9px;color:#fff;font-family:var(--font);font-size:15px;font-weight:700;padding:12px;cursor:pointer;transition:opacity .15s,transform .1s;}
+.btn:active{transform:scale(.98);}.btn:disabled{opacity:.4;cursor:not-allowed;}
+.btnb{background:linear-gradient(135deg,#1d4ed8,#0891b2);}
+.btns{background:linear-gradient(135deg,#dc2626,#7c3aed);}
+.btn-ss{background:linear-gradient(135deg,#4285f4,#0ea5e9);margin-bottom:8px;}
+.btn-apply{background:linear-gradient(135deg,#059669,#0284c7);}
+select.fi{appearance:none;-webkit-appearance:none;}
+.trow{display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--s1);border-radius:9px;margin-bottom:6px;}
+.tside{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;}
+.tb{background:rgba(16,185,129,.15);color:var(--green);}.ts{background:rgba(239,68,68,.15);color:var(--red);}
+.tinfo{flex:1;}.tnm{font-size:13px;font-weight:600;}.tmeta{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:1px;}
+.tpnl{font-family:var(--mono);font-size:13px;font-weight:700;}
+.rev-btn{width:100%;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:1px solid var(--border);border-radius:11px;color:#fff;font-family:var(--font);font-size:15px;font-weight:700;padding:14px;cursor:pointer;margin-bottom:12px;transition:opacity .15s;}
+.rev-btn:disabled{opacity:.5;}
+.rcard{background:var(--s1);border:1px solid var(--border);border-radius:11px;overflow:hidden;margin-bottom:10px;}
+.rhdr{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--border);}
+.rbody{padding:13px;font-size:13px;line-height:1.85;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;}
+.ai-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:.04em;}
+.pill-g{background:rgba(66,133,244,.15);color:var(--gem);}
+.pill-c{background:rgba(217,119,6,.15);color:var(--cld);}
+#page-chat{padding:0;display:flex;flex-direction:column;}
+.cscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 8px;min-height:0;}
+.cmsg{display:flex;gap:7px;margin-bottom:8px;align-items:flex-start;}
+.cmsg.u{flex-direction:row-reverse;}
+.cb{background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:9px 12px;font-size:13px;line-height:1.7;max-width:86%;white-space:pre-wrap;word-break:break-word;}
+.cmsg.u .cb{background:rgba(37,99,235,.18);border-color:rgba(59,130,246,.25);}
+.cav{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;background:var(--s2);}
+.dual-bubble{background:var(--s1);border:1px solid var(--border);border-radius:11px;overflow:hidden;max-width:90%;margin-bottom:8px;}
+.db-pane{padding:9px 12px;font-size:13px;line-height:1.75;white-space:pre-wrap;word-break:break-word;}
+.db-pane+.db-pane{border-top:1px solid var(--border);}
+.db-hdr{font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;display:inline-block;margin-bottom:5px;}
+.dhg{background:rgba(66,133,244,.15);color:var(--gem);}
+.dhc{background:rgba(217,119,6,.15);color:var(--cld);}
+.cbar{display:flex;gap:7px;padding:8px 12px;background:var(--s1);border-top:1px solid var(--border);}
+.cin{flex:1;background:var(--s2);border:1.5px solid var(--border);border-radius:9px;color:var(--text);font-family:var(--font);font-size:14px;padding:9px 11px;outline:none;resize:none;transition:border-color .15s;max-height:90px;}
+.cin:focus{border-color:var(--acc);}
+.csend{width:40px;height:40px;background:var(--acc);border:none;border-radius:9px;color:#fff;font-size:17px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.csend:disabled{opacity:.4;}
+.mode-row{display:flex;gap:6px;padding:6px 12px;background:var(--s1);border-bottom:1px solid var(--border);}
+.mode-btn{flex:1;padding:6px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--t3);font-size:11px;font-weight:700;cursor:pointer;transition:.15s;}
+.mode-btn.on{background:var(--s2);color:var(--text);border-color:var(--border);}
+@keyframes spin{to{transform:rotate(360deg);}}
+.spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
+.ldg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t3);padding:4px 0;}
+.toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:9px 18px;font-size:13px;font-weight:600;opacity:0;transition:all .25s;pointer-events:none;z-index:999;white-space:nowrap;}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+.empty{text-align:center;padding:36px 20px;color:var(--t3);font-size:13px;}
+.empty .ei{font-size:36px;margin-bottom:8px;}
+.sec-lbl{font-size:11px;color:var(--t3);font-weight:700;letter-spacing:.06em;margin-bottom:6px;}
+.cost-note{font-size:10px;color:var(--t3);text-align:right;margin-bottom:8px;}
+.cost-note span{background:var(--s2);padding:2px 7px;border-radius:5px;}
+.ss-zone{border:2px dashed var(--border);border-radius:12px;padding:18px 14px;text-align:center;margin-bottom:12px;cursor:pointer;transition:border-color .2s,background .2s;background:var(--s1);}
+.ss-zone.drag,.ss-zone:active{border-color:var(--acc);background:rgba(59,130,246,.05);}
+.ss-zone-icon{font-size:28px;margin-bottom:6px;}
+.ss-zone-txt{font-size:13px;font-weight:600;color:var(--t2);}
+.ss-zone-sub{font-size:11px;color:var(--t3);margin-top:3px;}
+.ss-type{padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--s1);color:var(--t3);font-size:11px;font-weight:700;text-align:center;cursor:pointer;transition:.15s;}
+.ss-type.on{border-color:var(--acc);color:var(--acc);background:rgba(59,130,246,.08);}
+.ss-result{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;font-size:12px;line-height:1.8;color:var(--t2);display:none;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
+.ss-result.show{display:block;}
+.wrow{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;}
+.winfo{flex:1;}.wnm{font-size:13px;font-weight:700;}
+.wmeta{font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:2px;}
+.wtag{font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(59,130,246,.12);color:var(--acc);margin-left:4px;}
+.wdel{background:none;border:none;color:var(--t3);font-size:14px;cursor:pointer;padding:4px;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s;}
+.modal-overlay.on{opacity:1;pointer-events:all;}
+.modal{background:var(--s1);border:1px solid var(--border);border-radius:16px 16px 0 0;width:100%;padding:16px;max-height:80vh;overflow-y:auto;transform:translateY(100%);transition:transform .25s;}
+.modal-overlay.on .modal{transform:translateY(0);}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:12px;}
+.modal-item{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:11px 12px;margin-bottom:8px;}
+.modal-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.modal-item-name{font-size:14px;font-weight:700;}
+.modal-item-meta{font-size:11px;color:var(--t3);font-family:var(--mono);}
+.modal-chk{width:20px;height:20px;accent-color:var(--acc);}
+.modal-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+.btn-sm{border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:700;padding:11px;cursor:pointer;}
+.btn-cancel{background:var(--s2);color:var(--t2);border:1px solid var(--border);}
+.btn-import{background:linear-gradient(135deg,#059669,#0284c7);}
+.key-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;}
+.key-modal{background:var(--s1);border:1px solid var(--border);border-radius:16px;width:100%;max-width:420px;padding:20px;}
+.key-modal-title{font-size:16px;font-weight:700;margin-bottom:4px;}
+.key-modal-sub{font-size:12px;color:var(--t3);margin-bottom:16px;line-height:1.6;}
+.key-row{margin-bottom:12px;}
+.key-label{font-size:11px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px;}
+.key-input{width:100%;background:var(--s2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:10px 12px;outline:none;transition:border-color .15s;}
+.key-input:focus{border-color:var(--acc);}
+.key-input::placeholder{color:var(--t3);}
+.key-save-btn{width:100%;background:linear-gradient(135deg,#1d4ed8,#0891b2);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;padding:13px;cursor:pointer;margin-top:4px;}
+.key-skip{display:block;text-align:center;font-size:12px;color:var(--t3);margin-top:10px;cursor:pointer;text-decoration:underline;}
+.hdr-key-btn{background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--t2);font-size:11px;font-weight:700;padding:5px 10px;cursor:pointer;white-space:nowrap;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📒 Trade<span>Journal</span></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div id="ds"></div>
+    <button class="hdr-key-btn" onclick="openKeyModal()">🔑 API設定</button>
+  </div>
+</header>
+<nav>
+  <div class="tab on" onclick="go('dash')"><span class="ti">📊</span>概況</div>
+  <div class="tab" onclick="go('trade')"><span class="ti">💱</span>売買</div>
+  <div class="tab" onclick="go('hold')"><span class="ti">💼</span>保有</div>
+  <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
+  <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
+  <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
+</nav>
+<div class="pages">
+
+<div class="page on" id="page-dash">
+  <div class="cash-row"><label>残金</label><input id="cashIn" type="number" placeholder="0" oninput="saveCash()"><span>円</span></div>
+  <div class="sum-row">
+    <div class="sb"><div class="sl">評価額</div><div class="sv" id="sv">¥0</div><div class="ss" id="sct">0銘柄</div></div>
+    <div class="sb"><div class="sl">含み損益</div><div class="sv" id="sp">¥0</div><div class="ss" id="spp">0.0%</div></div>
+    <div class="sb"><div class="sl">実現損益</div><div class="sv" id="sr">¥0</div><div class="ss" id="stc">0件</div></div>
+  </div>
+  <div id="dh"></div><div id="dt" style="margin-top:8px"></div>
+</div>
+
+<div class="page" id="page-trade">
+  <div style="margin-bottom:14px">
+    <div class="sec-lbl">📷 スクリーンショットから自動読み込み</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
+      <div class="ss-type on" id="sst-hold" onclick="setSsType('hold')">💼 保有銘柄</div>
+      <div class="ss-type" id="sst-hist" onclick="setSsType('hist')">📋 約定履歴</div>
+      <div class="ss-type" id="sst-pnl" onclick="setSsType('pnl')">💰 損益履歴</div>
+      <div class="ss-type" id="sst-watch" onclick="setSsType('watch')">👁 ウォッチ</div>
+      <div class="ss-type" id="sst-cash" onclick="setSsType('cash')">💴 余力・残金</div>
+      <div class="ss-type" id="sst-summary" onclick="setSsType('summary')">📊 評価損益</div>
+    </div>
+    <input type="file" accept="image/*" id="ssFileInput" style="display:none" multiple onchange="onFileSelect(event)">
+    <div class="ss-zone" id="ssZone" onclick="document.getElementById('ssFileInput').click()"
+      ondragover="event.preventDefault();this.classList.add('drag')"
+      ondragleave="this.classList.remove('drag')"
+      ondrop="onDrop(event)">
+      <div class="ss-zone-icon">📸</div>
+      <div class="ss-zone-txt">タップして画像を選ぶ（最大20枚）</div>
+      <div class="ss-zone-sub">複数枚まとめて選択OK・一括で読み取ります</div>
+    </div>
+    <div id="ssPreviewList" style="display:none;margin-bottom:10px">
+      <div id="ssPreviewGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px"></div>
+      <div id="ssFileCount" style="font-size:12px;color:var(--t2);text-align:center"></div>
+    </div>
+    <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshots()" style="display:none">🤖 Geminiで一括読み取る</button>
+    <div class="ss-result" id="ssResult"></div>
+    <button class="btn btn-apply" id="ssApplyBtn" onclick="showImportModal()" style="display:none">✅ 上記の内容を取り込む</button>
+  </div>
+  <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:10px">
+    <div class="sec-lbl">✏️ 手動で記録</div>
+    <select class="fi" id="ta" onchange="onAct()">
+      <option value="buy">🟢 買い（新規）</option>
+      <option value="sell">🔴 売り（決済）</option>
+    </select>
+    <div class="frow">
+      <div><label class="fl">証券コード</label><input class="fi" id="tc" type="text" inputmode="numeric" placeholder="3778" maxlength="5" style="margin-bottom:0"></div>
+      <div><label class="fl">銘柄名</label><input class="fi" id="tn" type="text" placeholder="さくらインターネット" style="margin-bottom:0"></div>
+    </div>
+    <div class="frow" style="margin-top:8px">
+      <div><label class="fl">株数</label><input class="fi" id="tsh" type="number" inputmode="numeric" placeholder="100" style="margin-bottom:0"></div>
+      <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0"></div>
+    </div>
+    <div id="buyEx" style="margin-top:8px">
+      <div class="frow">
+        <div><label class="fl">損切りライン</label><input class="fi" id="tsl" type="number" inputmode="decimal" placeholder="2420" style="margin-bottom:0"></div>
+        <div><label class="fl">利確目標</label><input class="fi" id="ttgt" type="number" inputmode="decimal" placeholder="4130" style="margin-bottom:0"></div>
+      </div>
+      <div class="frow" style="margin-top:8px">
+      <div><label class="fl">買付日</label><input class="fi" id="tdt" type="date" style="margin-bottom:0"></div>
+      <div><label class="fl">取引区分</label>
+        <select class="fi" id="ttype" style="margin-bottom:0">
+          <option value="spot">現物</option>
+          <option value="margin">信用買</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:8px"><label class="fl">メモ（任意）</label><input class="fi" id="tmemo" placeholder="エントリー理由など" style="margin-bottom:0"></div>
+    </div>
+    <button class="btn btnb" id="tBtn" style="margin-top:10px" onclick="doTrade()">💱 買いを記録する</button>
+  </div>
+  <div class="sec-lbl" style="margin-top:14px">売買履歴</div>
+  <div id="tHist"></div>
+</div>
+
+<div class="page" id="page-hold"><div id="hList"></div></div>
+
+<div class="page" id="page-watch">
+  <div class="sec-lbl">👁 注目銘柄ウォッチリスト</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <input class="fi" id="wCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:80px;flex:none;margin-bottom:0">
+    <input class="fi" id="wName" type="text" placeholder="銘柄名" style="flex:1;margin-bottom:0">
+    <input class="fi" id="wTag" type="text" placeholder="メモ" style="flex:1;margin-bottom:0">
+    <button class="btn btnb" style="width:52px;padding:0;font-size:20px;margin-top:0" onclick="addWatch()">＋</button>
+  </div>
+  <div id="watchList"></div>
+</div>
+
+<div class="page" id="page-rev">
+  <div class="cost-note"><span>🤖 Gemini: 情報収集　🧠 Claude: 戦略分析</span></div>
+  <button class="rev-btn" id="revBtn" onclick="doRev()">
+    🔍 今日の振り返りを開始する<br>
+    <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>
+  </button>
+  <div id="revOut"></div>
+</div>
+
+<div class="page" id="page-chat">
+  <div class="mode-row">
+    <button class="mode-btn on" id="modeGC" onclick="setMode('gc')">🤝 合議</button>
+    <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini</button>
+    <button class="mode-btn" id="modeC" onclick="setMode('c')">🧠 Claude</button>
+  </div>
+  <div class="cscroll" id="cMsgs"></div>
+  <div class="cbar">
+    <textarea class="cin" id="cinp" placeholder="質問を入力…" rows="1"
+      oninput="autoH(this)"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();doChat();}"></textarea>
+    <button class="csend" id="csend" onclick="doChat()">↑</button>
+  </div>
+</div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="modal-overlay" id="importModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-title">📥 取り込む内容を確認</div>
+    <div id="modalItems"></div>
+    <div class="modal-btns">
+      <button class="btn-sm btn-cancel" onclick="closeModal()">キャンセル</button>
+      <button class="btn-sm btn-import" onclick="doImport()">✅ 取り込む</button>
+    </div>
+  </div>
+</div>
+
+<div class="key-modal-overlay" id="keyModal" style="display:none">
+  <div class="key-modal">
+    <div class="key-modal-title">🔑 APIキーを設定</div>
+    <div class="key-modal-sub">
+      キーはこのスマホのみに保存されます。GitHubには保存されません。<br><br>
+      <b>Gemini:</b> aistudio.google.com → Get API key<br>
+      <b>Anthropic:</b> console.anthropic.com → API Keys
+    </div>
+    <div class="key-row">
+      <label class="key-label">🤖 Gemini API Key</label>
+      <input class="key-input" id="keyGemini" type="password" placeholder="AIzaSy...">
+    </div>
+    <div class="key-row">
+      <label class="key-label">🧠 Anthropic API Key</label>
+      <input class="key-input" id="keyAnthropic" type="password" placeholder="sk-ant-...">
+    </div>
+    <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
+    <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
+  </div>
+</div>
+
+<script>
+// APIキー（localStorageから）
+let GK = localStorage.getItem('tj_gk') || '';
+let CK = localStorage.getItem('tj_ck') || '';
+
+// ストレージ
+const KH='tj_h5', KT='tj_t5', KC='tj_c5', KW='tj_w2';
+const ld = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const sv = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+let H = ld(KH, []), T = ld(KT, []), cash = ld(KC, 0), W = ld(KW, []);
+
+const D = new Date(), TODAY = D.toISOString().slice(0, 10);
+const dow = ['日','月','火','水','木','金','土'][D.getDay()];
+document.getElementById('ds').textContent =
+  D.getFullYear() + '/' + String(D.getMonth()+1).padStart(2,'0') + '/' + String(D.getDate()).padStart(2,'0') + '(' + dow + ')';
+document.getElementById('cashIn').value = cash || '';
+
+// タブ
+function go(id) {
+  const ids = ['dash','trade','hold','watch','rev','chat'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
+  document.querySelectorAll('.page').forEach(p => {
+    const active = p.id === 'page-' + id;
+    if (active && p.id === 'page-chat') {
+      p.style.display = 'flex';
+      p.style.flexDirection = 'column';
+    } else {
+      p.style.display = active ? 'block' : 'none';
+    }
+    p.style.pointerEvents = active ? 'auto' : 'none';
+    p.style.zIndex = active ? '1' : '0';
+    p.classList.toggle('on', active);
+  });
+  if (id==='dash')  rDash();
+  if (id==='hold')  rHold();
+  if (id==='trade') rTH();
+  if (id==='watch') rWatch();
+}
+
+function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
+
+function calcS() {
+  let cost = 0, val = 0;
+  for (const h of H) { cost += h.bp * h.sh; val += (h.cp || h.bp) * h.sh; }
+  const pnl = val - cost, pct = cost > 0 ? pnl / cost * 100 : 0;
+  const rel = T.filter(t => t.a === 'sell').reduce((s, t) => s + (t.pnl || 0), 0);
+  const f = v => (v >= 0 ? '¥' : '-¥') + Math.abs(Math.round(v)).toLocaleString();
+  const c = v => v >= 0 ? 'up' : 'dn';
+  set('sv', f(val), c(val)); set('sct', H.length + '銘柄', '');
+  set('sp', f(pnl), c(pnl)); set('spp', (pnl>=0?'+':'') + pct.toFixed(2) + '%', c(pnl));
+  set('sr', f(rel), c(rel)); document.getElementById('stc').textContent = T.length + '件';
+}
+function set(id, v, cls) { const e = document.getElementById(id); e.textContent = v; e.className = 'sv' + (cls ? ' ' + cls : ''); }
+
+function rDash() {
+  calcS();
+  const he = document.getElementById('dh');
+  he.innerHTML = H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map(h => hHTML(h, true)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>';
+  const te = document.getElementById('dt');
+  const rec = [...T].reverse().slice(0, 3);
+  te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
+}
+
+function hHTML(h, compact) {
+  const cp = h.cp || h.bp, pnl = (cp - h.bp) * h.sh, pct = (cp - h.bp) / h.bp * 100;
+  const cls = pnl >= 0 ? 'up' : 'dn';
+  const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
+  let al = '';
+  if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
+  else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
+  else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
+  let html = '<div class="hrow">' + al +
+    '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
+    '<div><div class="hpnl ' + cls + '">' + (pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString() + '</div>' +
+    '<div class="hpct ' + cls + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</div></div></div>' +
+    '<div class="hmeta">' +
+    '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
+    '<span class="hbg">' + h.sh + '株</span><span class="hbg">買 ' + h.bp.toLocaleString() + '円</span>' +
+    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',this.value)">円</span>' +
+    (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
+    '</div>';
+  if (!compact) {
+    html += '<div class="hlines">' +
+      '<div class="hl s"><div class="hll">損切り</div><div class="hlv">' + (h.sl ? h.sl.toLocaleString()+'円' : '－') + '</div></div>' +
+      '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
+      '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
+      (h.memo ? '<div style="font-size:11px;color:var(--t3);margin-top:5px">📝' + h.memo + '</div>' : '') +
+      '<div style="display:flex;gap:6px;margin-top:8px">'+
+      '<button class="delbtn" onclick="delH(\'' + h.cd + '\')" style="flex:none">🗑 削除</button>'+
+      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 損切り・利確・売買判断を分析</button>'+
+      '</div>'+
+      '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>';
+  }
+  return html + '</div>';
+}
+
+function tHTML(t) {
+  const ib = t.a === 'buy';
+  const ps = t.pnl != null ? (t.pnl>=0?'+¥':'-¥') + Math.abs(Math.round(t.pnl)).toLocaleString() : '';
+  return '<div class="trow"><div class="tside ' + (ib?'tb':'ts') + '">' + (ib?'買':'売') + '</div>' +
+    '<div class="tinfo"><div class="tnm">' + t.nm + ' <span style="color:var(--t3)">' + t.cd + '</span></div>' +
+    '<div class="tmeta">' + t.p.toLocaleString() + '円×' + t.sh + '株　' + t.dt + '</div></div>' +
+    '<div class="tpnl ' + (t.pnl==null?'':(t.pnl>=0?'up':'dn')) + '">' + ps + '</div></div>';
+}
+
+// 個別銘柄AI分析（Gemini+Claude合議）
+async function analyzeHolding(cd) {
+  const h = H.find(h => h.cd===cd);
+  if (!h) return;
+  const panel = document.getElementById('ai-'+cd);
+  if (!panel) return;
+
+  if (panel.style.display === 'block' && panel.textContent) {
+    panel.style.display = 'none'; return;
+  }
+  panel.style.display = 'block';
+  panel.textContent = '🤝 GeminiとClaudeが合議中...';
+
+  const cp = h.cp || h.bp;
+  const pnl = (cp - h.bp) * h.sh;
+  const pct = ((cp - h.bp) / h.bp * 100).toFixed(2);
+  const typeStr = h.type === 'margin' ? '信用買建' : '現物';
+  const cost = h.bp * h.sh;
+
+  const prompt =
+    'あなたは運用資産5000億円規模・運用歴25年の日本株専門シニアファンドマネージャーです。\n'+
+    'Google検索で今日の最新情報（株価・ニュース・需給・材料）を必ず調べてから回答してください。\n'+
+    '曖昧な表現は禁止。プロとして断言し、具体的な数字で答えてください。\n\n'+
+    '【保有銘柄】\n'+
+    '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
+    '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株）\n'+
+    '現在値: '+cp.toLocaleString()+'円\n'+
+    '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
+    (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円\n':'')+
+    (h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'')+
+    (h.memo?'メモ: '+h.memo+'\n':'')+
+    '\n【依頼内容】私の大切な資産です。以下を超一流FMとして率直に答えてください：\n\n'+
+    '## 【売買判断】\n'+
+    '「今すぐ売る」「継続保有」「買い増し」のどれか1つを断言し、その理由を3行で。\n\n'+
+    '## 【損切りライン】\n'+
+    '具体的な価格（円）を1つ示し、その根拠（テクニカル・リスク管理の観点）を説明。\n'+
+    '現在値からの下落率も示すこと。\n\n'+
+    '## 【利確目標】\n'+
+    '具体的な価格（円）を1つ示し、その根拠を説明。\n'+
+    '段階的利確が望ましい場合は第1目標・最終目標を示すこと。\n\n'+
+    '## 【最新材料・リスク】\n'+
+    'Google検索で調べた直近のニュース・決算・需給の状況。\n'+
+    'この銘柄の最大のリスク要因も1つ挙げること。\n\n'+
+    '## 【シニアFMの本音】\n'+
+    '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。';
+
+  try {
+    const [gRes, cRes] = await Promise.all([
+      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: '+e.message),
+      callClaude(prompt, null, null).catch(e => '⚠️ Claude: '+e.message),
+    ]);
+
+    panel.textContent =
+      '🤖 Gemini（市場情報・速報）:\n' + gRes +
+      '\n\n━━━━━━━━━━━━━━━\n\n'+
+      '🧠 Claude（戦略・判断）:\n' + cRes;
+  } catch(e) {
+    panel.textContent = '⚠️ ' + e.message;
+  }
+}
+
+function uCP(cd, v) { const h = H.find(h => h.cd===cd); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
+function delH(cd) { if(!confirm('削除しますか？')) return; H=H.filter(h=>h.cd!==cd); sv(KH,H); rHold(); toast('削除しました'); }
+function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map(h=>hHTML(h,false)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
+
+// ウォッチリスト
+function addWatch() {
+  const cd = document.getElementById('wCode').value.trim();
+  const nm = document.getElementById('wName').value.trim();
+  const tag = document.getElementById('wTag').value.trim();
+  if (!cd || !nm) { toast('⚠️ コードと銘柄名は必須'); return; }
+  if (W.find(w => w.cd===cd)) { toast('すでに追加済みです'); return; }
+  W.push({cd, nm, tag, dt: TODAY}); sv(KW, W);
+  ['wCode','wName','wTag'].forEach(id => document.getElementById(id).value='');
+  rWatch(); toast('👁 ' + nm + ' を追加');
+}
+function delWatch(cd) { W=W.filter(w=>w.cd!==cd); sv(KW,W); rWatch(); }
+function rWatch() {
+  const el = document.getElementById('watchList');
+  if (!W.length) { el.innerHTML='<div class="empty"><div class="ei">👁</div>ウォッチリストなし</div>'; return; }
+  el.innerHTML = W.map(w =>
+    '<div class="wrow"><div class="winfo"><div class="wnm">' + w.nm + '<span class="wtag">' + w.cd + '</span></div>' +
+    '<div class="wmeta">' + (w.tag||'メモなし') + ' / 登録' + w.dt + '</div></div>' +
+    '<button class="wdel" onclick="delWatch(\'' + w.cd + '\')">🗑</button></div>'
+  ).join('');
+}
+
+// 売買記録
+function onAct() {
+  const b = document.getElementById('ta').value === 'buy';
+  document.getElementById('buyEx').style.display = b ? '' : 'none';
+  document.getElementById('tBtn').textContent = b ? '💱 買いを記録する' : '💰 売りを記録する';
+  document.getElementById('tBtn').className = 'btn ' + (b ? 'btnb' : 'btns');
+}
+function doTrade() {
+  const a = document.getElementById('ta').value;
+  const cd = document.getElementById('tc').value.trim();
+  const nm = document.getElementById('tn').value.trim();
+  const sh = parseFloat(document.getElementById('tsh').value);
+  const p = parseFloat(document.getElementById('tp').value);
+  if (!cd||!nm||!sh||!p) { toast('⚠️ コード・銘柄名・株数・価格は必須'); return; }
+  if (a === 'buy') {
+    const sl = parseFloat(document.getElementById('tsl').value) || null;
+    const tgt = parseFloat(document.getElementById('ttgt').value) || null;
+    const memo = document.getElementById('tmemo').value.trim();
+    const tdt = document.getElementById('tdt').value || TODAY;
+    const ttype = document.getElementById('ttype').value || 'spot';
+    const idx = H.findIndex(h => h.cd===cd);
+    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10}; }
+    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p});
+    sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
+    document.getElementById('cashIn').value = cash || '';
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY}); sv(KT,T);
+    toast('✅ ' + nm + ' 買い記録');
+  } else {
+    const h = H.find(h => h.cd===cd); let pnl=null;
+    if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
+    cash+=p*sh; sv(KC,cash);
+    document.getElementById('cashIn').value = cash || '';
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl}); sv(KT,T);
+    const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
+    toast('✅ ' + nm + ' 売り記録' + ps);
+  }
+  ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
+  rTH();
+}
+function rTH() {
+  document.getElementById('tHist').innerHTML = T.length
+    ? [...T].reverse().slice(0,30).map(tHTML).join('')
+    : '<div class="empty"><div class="ei">📋</div>履歴なし</div>';
+}
+
+// ポートフォリオ文字列
+function pfS() {
+  const hs = H.length
+    ? H.map(h => {
+        const cp = h.cp||h.bp, pct = ((cp-h.bp)/h.bp*100).toFixed(1);
+        return h.cd + ' ' + h.nm + ': ' + h.sh + '株 買値' + h.bp + '円 現値' + cp + '円(' + (pct>=0?'+':'') + pct + '%) 損切' + (h.sl||'未') + '→目標' + (h.tgt||'未');
+      }).join('\n')
+    : '保有銘柄なし（現金のみ）';
+  const td = T.filter(t => t.dt===TODAY);
+  const ts = td.length ? '\n本日売買: ' + td.map(t => (t.a==='buy'?'買':'売') + ' ' + t.nm + ' ' + t.p + '円×' + t.sh + '株').join(', ') : '';
+  const ws = W.length ? '\nウォッチ中: ' + W.map(w => w.cd + ' ' + w.nm).join(', ') : '';
+  return hs + ts + ws + '\n残金: ' + Math.round(cash).toLocaleString() + '円';
+}
+
+// 振り返り
+const GEM_STEPS = [
+  {icon:'🌍', title:'世界情勢・マクロ経済', color:'var(--gem)',
+   p: pf => 'あなたは日本株専門のシニアFMです。Google検索で今日の最新情報を調べてから答えてください。\nポートフォリオ: ' + pf + '\n米国株・為替・原油・地政学リスクを調べ、明日の日本市場への影響を具体的に述べてください。'},
+  {icon:'📰', title:'日本株ニュース・個別材料', color:'var(--gem)',
+   p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてください。\n保有銘柄: ' + pf + '\n保有銘柄の個別ニュース・適時開示、日経平均・グロース動向、明日の注目指標を調べてください。'},
+  {icon:'📱', title:'SNS・YouTube・X話題', color:'var(--gem)',
+   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ' + pf + '\nXで話題の日本株、投資系YouTubeの注目テーマ、個人投資家の動向を調べて市場センチメントを判断してください。'},
+];
+const CLD_STEP = {
+  icon:'🎯', title:'振り返り・明日の戦略', color:'var(--cld)',
+  p: pf => 'あなたは運用歴25年のシニアFMです。\n【ポートフォリオ】\n' + pf + '\n以下を率直・具体的に:\n1.今日の振り返り\n2.保有銘柄ごとの判断（継続/利確/損切り）\n3.残金の活用法（新規買い候補・価格）\n4.明日の行動計画\n5.シニアFMとしての一言'
+};
+
+async function doRev() {
+  const btn = document.getElementById('revBtn');
+  btn.disabled = true; btn.textContent = '🔄 分析中...';
+  const out = document.getElementById('revOut'); out.innerHTML = '';
+  const pf = pfS();
+  const gemCards = GEM_STEPS.map(s => {
+    const card = document.createElement('div'); card.className = 'rcard';
+    card.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + s.icon + '</span>' +
+      '<span style="font-size:12px;font-weight:700;color:' + s.color + '">' + s.title + '</span>' +
+      '<span class="ai-pill pill-g" style="margin-left:auto">🤖 Gemini</span></div>' +
+      '<div class="rbody"><div class="ldg"><div class="spin"></div><span>調査中...</span></div></div>';
+    out.appendChild(card); return card;
+  });
+  const cldCard = document.createElement('div'); cldCard.className = 'rcard';
+  cldCard.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + CLD_STEP.icon + '</span>' +
+    '<span style="font-size:12px;font-weight:700;color:' + CLD_STEP.color + '">' + CLD_STEP.title + '</span>' +
+    '<span class="ai-pill pill-c" style="margin-left:auto">🧠 Claude</span></div>' +
+    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>精査中...</span></div></div>';
+  out.appendChild(cldCard);
+  const gemPs = GEM_STEPS.map((s, i) =>
+    callGemini(s.p(pf)).then(txt => { gemCards[i].querySelector('.rbody').textContent = txt; })
+      .catch(e => { gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; })
+  );
+  const cldP = callClaude(CLD_STEP.p(pf)).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
+    .catch(e => { cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; });
+  await Promise.all([...gemPs, cldP]);
+  btn.disabled = false; btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>';
+}
+
+// チャット
+let chatMode = 'gc', gemHist = [], cldHist = [];
+function setMode(m) {
+  chatMode = m;
+  ['modeGC','modeG','modeC'].forEach(id => document.getElementById(id).classList.remove('on'));
+  document.getElementById(m==='gc'?'modeGC':m==='g'?'modeG':'modeC').classList.add('on');
+}
+async function doChat() {
+  const inp = document.getElementById('cinp');
+  const txt = inp.value.trim(); if(!txt) return;
+  inp.value=''; autoH(inp);
+  document.getElementById('csend').disabled = true;
+  addMsg('u', txt);
+  const pf = pfS();
+  const gemSys = 'あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。\nポートフォリオ: ' + pf;
+  const cldSys = 'あなたは運用歴25年の日本株専門シニアFMです。\nポートフォリオ: ' + pf + '\n率直・具体的にアドバイスしてください。';
+  const ldEl = document.createElement('div'); ldEl.className='cmsg';
+  ldEl.innerHTML = '<div class="cav">' + (chatMode==='gc'?'🤝':chatMode==='g'?'🤖':'🧠') + '</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
+  document.getElementById('cMsgs').appendChild(ldEl); sC();
+  try {
+    if (chatMode==='g') {
+      gemHist.push({role:'user',parts:[{text:txt}]});
+      const r = await callGemini(txt, gemSys, gemHist.slice(-8));
+      ldEl.remove(); addAIMsg('g', r);
+      gemHist.push({role:'model',parts:[{text:r}]});
+    } else if (chatMode==='c') {
+      cldHist.push({role:'user',content:txt});
+      const r = await callClaude(txt, cldSys, cldHist.slice(-10));
+      ldEl.remove(); addAIMsg('c', r);
+      cldHist.push({role:'assistant',content:r});
+    } else {
+      gemHist.push({role:'user',parts:[{text:txt}]});
+      cldHist.push({role:'user',content:txt});
+      const [gr, cr] = await Promise.all([
+        callGemini(txt, gemSys, gemHist.slice(-8)).catch(e => '⚠️ ' + e.message),
+        callClaude(txt, cldSys, cldHist.slice(-10)).catch(e => '⚠️ ' + e.message),
+      ]);
+      ldEl.remove(); addDualMsg(gr, cr);
+      gemHist.push({role:'model',parts:[{text:gr}]});
+      cldHist.push({role:'assistant',content:cr});
+    }
+  } catch(e) { ldEl.remove(); addAIMsg('c', '⚠️ ' + e.message); }
+  document.getElementById('csend').disabled = false;
+}
+function addMsg(role, txt) {
+  const w=document.getElementById('cMsgs'), d=document.createElement('div');
+  d.className='cmsg'+(role==='u'?' u':'');
+  d.innerHTML = role==='u' ? '<div class="cb">'+esc(txt)+'</div><div class="cav">👤</div>' : '<div class="cav">🧠</div><div class="cb">'+esc(txt)+'</div>';
+  w.appendChild(d); sC();
+}
+function addAIMsg(who, txt) {
+  const w=document.getElementById('cMsgs'), d=document.createElement('div');
+  d.className='cmsg';
+  d.innerHTML='<div class="cav">'+(who==='g'?'🤖':'🧠')+'</div><div class="cb">'+esc(txt)+'</div>';
+  w.appendChild(d); sC();
+}
+function addDualMsg(gTxt, cTxt) {
+  const w=document.getElementById('cMsgs'), d=document.createElement('div');
+  d.style.marginBottom='8px';
+  d.innerHTML='<div class="dual-bubble"><div class="db-pane"><div class="db-hdr dhg">🤖 Gemini（市場情報）</div>'+esc(gTxt)+'</div><div class="db-pane"><div class="db-hdr dhc">🧠 Claude（戦略判断）</div>'+esc(cTxt)+'</div></div>';
+  w.appendChild(d); sC();
+}
+function sC() { const w=document.getElementById('cMsgs'); setTimeout(()=>w.scrollTop=w.scrollHeight,50); }
+function autoH(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,90)+'px'; }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+
+// Gemini API
+async function callGemini(prompt, sys, history) {
+  const contents = [];
+  if (history && history.length > 0) contents.push(...history.slice(0, -1));
+  contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
+  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens:1500}};
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
+  const d = await r.json();
+  return d.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('\n').trim() || '応答なし';
+}
+
+// Claude API
+async function callClaude(prompt, sys, history) {
+  const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
+  const body = {model:'claude-sonnet-4-20250514', max_tokens:1500, messages:msgs};
+  if (sys) body.system = sys;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':CK,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify(body)
+  });
+  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
+  const d = await r.json();
+  return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim() || '応答なし';
+}
+
+// トースト
+let tt;
+function toast(m) { const e=document.getElementById('toast'); e.textContent=m; e.classList.add('on'); clearTimeout(tt); tt=setTimeout(()=>e.classList.remove('on'),2600); }
+
+// APIキー設定
+function openKeyModal() {
+  document.getElementById('keyModal').style.display='flex';
+  document.getElementById('keyGemini').value=GK;
+  document.getElementById('keyAnthropic').value=CK;
+}
+function closeKeyModal() { document.getElementById('keyModal').style.display='none'; }
+function saveKeys() {
+  const gk=document.getElementById('keyGemini').value.trim();
+  const ck=document.getElementById('keyAnthropic').value.trim();
+  if (!gk||!ck) { toast('⚠️ 両方のキーを入力してください'); return; }
+  GK=gk; CK=ck;
+  localStorage.setItem('tj_gk',gk); localStorage.setItem('tj_ck',ck);
+  closeKeyModal(); toast('✅ APIキーを保存しました');
+}
+
+// スクリーンショット読み込み
+let ssType='hold', ssImageList=[], parsedItems=[];
+
+function setSsType(t) {
+  ssType=t;
+  ['hold','hist','pnl','watch','cash','summary'].forEach(x => { const el=document.getElementById('sst-'+x); if(el) el.classList.toggle('on',x===t); });
+}
+function onFileSelect(e) {
+  const files=Array.from(e.target.files).slice(0,20);
+  if(files.length) loadImages(files);
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('ssZone').classList.remove('drag');
+  const files=Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')).slice(0,20);
+  if(files.length) loadImages(files);
+}
+function loadImages(files) {
+  ssImageList=[];
+  document.getElementById('ssPreviewGrid').innerHTML='';
+  const reads=files.map(file=>new Promise(res=>{
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const b64=ev.target.result.split(',')[1];
+      ssImageList.push({b64, name:file.name});
+      const img=document.createElement('img');
+      img.src=ev.target.result;
+      img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border)';
+      document.getElementById('ssPreviewGrid').appendChild(img);
+      res();
+    };
+    reader.readAsDataURL(file);
+  }));
+  Promise.all(reads).then(()=>{
+    document.getElementById('ssPreviewList').style.display='block';
+    document.getElementById('ssFileCount').textContent=ssImageList.length+'枚選択済み';
+    document.getElementById('ssAnalyzeBtn').style.display='block';
+    document.getElementById('ssResult').classList.remove('show');
+    document.getElementById('ssApplyBtn').style.display='none';
+    parsedItems=[];
+  });
+}
+
+async function analyzeScreenshots() {
+  if(!ssImageList.length){toast('⚠️ 画像を選んでください');return;}
+  if(!GK){openKeyModal();return;}
+  const btn=document.getElementById('ssAnalyzeBtn');
+  btn.disabled=true;
+  const prompts={
+    hold:'この画像はSBI証券アプリの画面です。保有証券詳細・信用建玉詳細・保有証券一覧・信用建玉一覧のいずれかです。\n表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください。\n- 「取得単価」「建値」「平均建単価」→buy_price\n- 「保有株数」「建株数」→shares\n- 「現在値」→current_price\n- 「売買区分:買建」または「信用建玉」→type:"margin"、それ以外→type:"spot"\n[{"code":"証券コード","name":"銘柄名","shares":株数,"buy_price":取得単価,"current_price":現在値,"type":"spot"または"margin","buy_date":null}]\nJSONのみ返す。読み取れない項目はnull。',
+    hist:'この画像はSBI証券アプリの約定・取引履歴画面です。日付を必ず読み取ってください。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"または"margin"}]\nJSONのみ返す。',
+    pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
+    watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
+    cash:'この画像はSBI証券アプリの「余力」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"buying_power":買付余力の数値,"cash":委託保証金現金または現引可能額の数値,"margin_power":信用建余力の数値}\n数値のみ（円マーク・カンマなし）。読み取れない項目は0。',
+    summary:'この画像はSBI証券アプリの「評価損益」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"spot_value":現物時価評価額合計の数値,"spot_pnl":現物評価損益合計の数値,"margin_value":信用建玉評価総額の数値,"margin_pnl":建玉評価損益合計の数値}\n数値のみ（プラス・マイナス含む）。読み取れない項目は0。'
+  };
+  const resEl=document.getElementById('ssResult');
+  resEl.classList.add('show');
+  resEl.textContent='';
+  parsedItems=[];
+  let ok=0;
+  for(let i=0;i<ssImageList.length;i++){
+    const img=ssImageList[i];
+    btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
+    resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
+    try{
+      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.1}};
+      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok){
+      const e=await r.json().catch(()=>({}));
+      throw new Error(e.error?.message || 'HTTP '+r.status+' - APIキー等を確認してください');
+    }
+      const d=await r.json();
+      let raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json|```/g,'').trim();
+      // cash/summaryはオブジェクト、それ以外は配列
+      if(ssType==='cash'||ssType==='summary'){
+        const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
+        if(s<0||e<0)throw new Error('データを読み取れませんでした');
+        const obj=JSON.parse(raw.slice(s,e+1));
+        parsedItems=[obj]; // 単一オブジェクトを配列に包む
+        resEl.textContent+='  ✅ 読み取り成功\n';
+      } else {
+        const s=raw.indexOf('['),e=raw.lastIndexOf(']');
+        if(s<0||e<0)throw new Error('銘柄情報を読み取れませんでした');
+        const items=JSON.parse(raw.slice(s,e+1));
+        for(const item of items){
+          const exists=parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
+          if(!exists)parsedItems.push(item);
+        }
+        resEl.textContent+='  ✅ '+items.length+'件検出\n';
+      }
+      ok++;
+    }catch(e){
+      resEl.textContent+='  ⚠️ '+e.message+'\n';
+    }
+    await new Promise(r=>setTimeout(r,500));
+  }
+  resEl.textContent+='\n合計 '+parsedItems.length+'件（'+ok+'/'+ssImageList.length+'枚成功）\n\n';
+  if(ssType==='cash'&&parsedItems.length>0){
+    const o=parsedItems[0];
+    resEl.textContent+='💴 買付余力: '+(o.buying_power?.toLocaleString()||'?')+'円\n';
+    resEl.textContent+='   現金:     '+(o.cash?.toLocaleString()||'?')+'円\n';
+    resEl.textContent+='   信用余力: '+(o.margin_power?.toLocaleString()||'?')+'円';
+  } else if(ssType==='summary'&&parsedItems.length>0){
+    const o=parsedItems[0];
+    const sp=o.spot_pnl||0, mp=o.margin_pnl||0;
+    resEl.textContent+='💴 現物評価額: '+(o.spot_value?.toLocaleString()||'?')+'円 損益'+(sp>=0?'+':'')+sp.toLocaleString()+'円\n';
+    resEl.textContent+='📊 信用建玉額: '+(o.margin_value?.toLocaleString()||'?')+'円 損益'+(mp>=0?'+':'')+mp.toLocaleString()+'円';
+  } else if(ssType==='hold'){
+    resEl.textContent+=parsedItems.map(i=>(i.type==='margin'?'📊信用 ':'💴現物 ')+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株 買値'+(i.buy_price?.toLocaleString()||'?')+'円 現値'+(i.current_price?.toLocaleString()||'?')+'円').join('\n');
+  }else if(ssType==='hist'){
+    resEl.textContent+=parsedItems.map(i=>(i.action==='buy'?'🟢買':'🔴売')+' '+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株×'+(i.price?.toLocaleString()||'?')+'円 ('+(i.date||'日付不明')+')').join('\n');
+  }else if(ssType==='pnl'){
+    resEl.textContent+=parsedItems.map(i=>(i.code||'?')+' '+i.name+'  実現損益'+(i.realized_pnl!=null?(i.realized_pnl>=0?'+':'')+i.realized_pnl?.toLocaleString()+'円':'不明')+' ('+(i.date||'日付不明')+')').join('\n');
+  }else{
+    resEl.textContent+=parsedItems.map(i=>(i.code||'?')+' '+i.name+'  '+(i.tag||'')).join('\n');
+  }
+  if(parsedItems.length>0)document.getElementById('ssApplyBtn').style.display='block';
+  btn.disabled=false; btn.textContent='🤖 Geminiで一括読み取る';
+}
+
+// 取り込みモーダル
+function showImportModal() {
+  if(!parsedItems.length)return;
+  const el=document.getElementById('modalItems');
+  const fmtItem=(item,i,l0,l1)=>'<div class="modal-item"><div class="modal-item-top"><div><div class="modal-item-name">'+l0+'</div><div class="modal-item-meta">'+l1+'</div></div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div></div>';
+  if(ssType==='hold'){
+    el.innerHTML=parsedItems.map((it,i)=>'<div class="modal-item">'+
+      '<div class="modal-item-top"><div>'+
+      '<div class="modal-item-name">'+(it.type==='margin'?'📊信用 ':'💴現物 ')+(it.code||'?')+' '+it.name+'</div>'+
+      '<div class="modal-item-meta">'+
+        (it.shares||'?')+'株 / 取得単価 '+(it.buy_price?.toLocaleString()||'?')+'円 / 現値 '+(it.current_price?.toLocaleString()||'?')+'円<br>'+
+        '取得金額: 約'+((it.buy_price&&it.shares)?Math.round(it.buy_price*it.shares).toLocaleString():'?')+'円'+
+      '</div>'+
+      '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
+      '</div>'
+    ).join('');
+  }else if(ssType==='hist'){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.action==='buy'?'🟢買':'🔴売')+' '+(it.code||'?')+' '+it.name,(it.shares||'?')+'株 × '+(it.price?.toLocaleString()||'?')+'円 / '+(it.date||'日付不明'))).join('');
+  }else if(ssType==='pnl'){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,'実現損益 '+(it.realized_pnl!=null?(it.realized_pnl>=0?'+':'')+it.realized_pnl?.toLocaleString()+'円':'不明')+' / '+(it.date||'日付不明'))).join('');
+  }else if(ssType==='cash'&&parsedItems.length>0){
+    const o=parsedItems[0];
+    el.innerHTML='<div class="modal-item"><div style="font-size:13px;line-height:2;color:var(--text)">'+
+      '💴 買付余力: <b>'+(o.buying_power?.toLocaleString()||'?')+'円</b><br>'+
+      '   現金:     <b>'+(o.cash?.toLocaleString()||'?')+'円</b><br>'+
+      '   信用余力: <b>'+(o.margin_power?.toLocaleString()||'?')+'円</b><br><br>'+
+      '「取り込む」で残金を更新します</div></div>';
+  }else if(ssType==='summary'&&parsedItems.length>0){
+    const o=parsedItems[0];
+    const sp=o.spot_pnl||0, mp=o.margin_pnl||0;
+    el.innerHTML='<div class="modal-item"><div style="font-size:13px;line-height:2;color:var(--text)">'+
+      '💴 現物評価額: <b>'+(o.spot_value?.toLocaleString()||'?')+'円</b> 損益<b style="color:'+(sp>=0?'var(--green)':'var(--red)')+'">'+( sp>=0?'+':'')+sp.toLocaleString()+'円</b><br>'+
+      '📊 信用建玉額: <b>'+(o.margin_value?.toLocaleString()||'?')+'円</b> 損益<b style="color:'+(mp>=0?'var(--green)':'var(--red)')+'">'+( mp>=0?'+':'')+mp.toLocaleString()+'円</b></div></div>';
+  }else{
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,(it.current_price?it.current_price.toLocaleString()+'円 / ':'')+( it.tag||'メモなし'))).join('');
+  }
+  document.getElementById('importModal').classList.add('on');
+}
+function closeModal() { document.getElementById('importModal').classList.remove('on'); }
+
+function doImport() {
+  const checked=parsedItems.filter((_,i)=>document.getElementById('mchk'+i)?.checked);
+  let count=0;
+  if(ssType==='hold'){
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      const idx=H.findIndex(h=>h.cd===(cd||nm));
+      if(idx>=0){if(it.current_price)H[idx].cp=it.current_price;}
+      else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:it.type||'spot'});
+      count++;
+    }
+    sv(KH,H);
+  }else if(ssType==='hist'){
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      if(T.find(t=>t.cd===cd&&t.p===it.price&&t.dt===it.date&&t.a===it.action))continue;
+      let pnl=null;
+      if(it.action==='buy'){
+        const idx=H.findIndex(h=>h.cd===(cd||nm));
+        if(idx>=0){const ex=H[idx],tot=ex.sh+(it.shares||0);H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+(it.price||0)*(it.shares||0))/tot*10)/10};}
+        else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:'SS取込',dt:it.date||TODAY});
+        sv(KH,H);
+      }else{
+        const h=H.find(h=>h.cd===(cd||nm));
+        if(h){pnl=(it.price-h.bp)*(it.shares||0);if(h.sh<=(it.shares||0))H=H.filter(hh=>hh.cd!==h.cd);else h.sh-=(it.shares||0);sv(KH,H);}
+      }
+      T.push({id:Date.now()+Math.random(),a:it.action,cd:cd||nm,nm,sh:it.shares||0,p:it.price||0,dt:it.date||TODAY,pnl}); count++;
+    }
+    sv(KT,T);
+  }else if(ssType==='pnl'){
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      if(T.find(t=>t.cd===cd&&t.dt===it.date&&t.a==='sell'))continue;
+      T.push({id:Date.now()+Math.random(),a:'sell',cd:cd||nm,nm,sh:it.shares||0,p:it.sell_price||0,dt:it.date||TODAY,pnl:it.realized_pnl||0}); count++;
+    }
+    sv(KT,T);
+  }else if(ssType==='cash'){
+    // 余力画面→残金に反映
+    if(parsedItems.length>0){
+      const o=parsedItems[0];
+      const val=o.cash||o.buying_power||0;
+      if(val>0){
+        cash=val; sv(KC,cash);
+        document.getElementById('cashIn').value=cash||'';
+        count=1;
+      }
+    }
+  }else if(ssType==='summary'){
+    // 評価損益は参照情報のみ（保存不要）
+    count=1;
+  }else{
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      if(W.find(w=>w.cd===(cd||nm)))continue;
+      W.push({cd:cd||nm,nm,tag:it.tag||'',dt:TODAY}); count++;
+    }
+    sv(KW,W);
+  }
+  closeModal(); calcS(); rTH(); rHold(); rWatch();
+  if(ssType==='cash'&&count>0) toast('💴 残金を'+cash.toLocaleString()+'円に更新しました');
+  else if(ssType==='summary') toast('📊 評価損益を確認しました');
+  else toast('✅ '+count+'件を取り込みました');
+  parsedItems=[]; ssImageList=[];
+  document.getElementById('ssPreviewList').style.display='none';
+  document.getElementById('ssPreviewGrid').innerHTML='';
+  document.getElementById('ssAnalyzeBtn').style.display='none';
+  document.getElementById('ssApplyBtn').style.display='none';
+  document.getElementById('ssResult').classList.remove('show');
+}
+
+// 初期化
+calcS(); rTH(); rWatch();
+if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
+</script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('SW登録完了'))
+      .catch(e => console.log('SW登録失敗:', e));
+  });
+}
+</script>
+</body>
+</html>
