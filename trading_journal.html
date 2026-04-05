@@ -170,11 +170,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
   <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
   <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
-  <div style="padding: 0 14px 10px;">
-    <button class="btn btn-apply" onclick="syncWithAI()" style="font-size: 13px; padding: 8px;">
-        🔄 AI分析(v6)と同期する
-    </button>
-</div>
 </nav>
 <div class="pages">
 
@@ -582,7 +577,7 @@ const GEM_STEPS = [
   {icon:'📰', title:'日本株ニュース・個別材料', color:'var(--gem)',
    p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてください。\n保有銘柄: ' + pf + '\n保有銘柄の個別ニュース・適時開示、日経平均・グロース動向、明日の注目指標を調べてください。'},
   {icon:'📱', title:'SNS・YouTube・X話題', color:'var(--gem)',
-   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ' + pf + '\nXで話題の日本株、投資系YouTubeの注目テーマ、個人投資家の動向を調べて市場センチメントを判断してください。'},
+   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ' + pf + '\n以下を箇条書き3点以内で簡潔にまとめてください（1点1行・長文不要）：\n・X/SNSで今日話題の日本株テーマ（1行）\n・投資YouTubeで注目されているテーマ（1行）\n・市場センチメント判定: 強気/中立/弱気 + 理由1文\n余分な説明は不要。'},
 ];
 const CLD_STEP = {
   icon:'🎯', title:'振り返り・明日の戦略', color:'var(--cld)',
@@ -756,7 +751,8 @@ function loadImages(files) {
     const reader=new FileReader();
     reader.onload=ev=>{
       const b64=ev.target.result.split(',')[1];
-      ssImageList.push({b64, name:file.name});
+      const mime=file.type||'image/jpeg';
+      ssImageList.push({b64, name:file.name, mime});
       const img=document.createElement('img');
       img.src=ev.target.result;
       img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border)';
@@ -781,7 +777,7 @@ async function analyzeScreenshots() {
   const btn=document.getElementById('ssAnalyzeBtn');
   btn.disabled=true;
   const prompts={
-    hold:'この画像はSBI証券アプリの画面です。保有証券詳細・信用建玉詳細・保有証券一覧・信用建玉一覧のいずれかです。\n表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください。\n- 「取得単価」「建値」「平均建単価」→buy_price\n- 「保有株数」「建株数」→shares\n- 「現在値」→current_price\n- 「売買区分:買建」または「信用建玉」→type:"margin"、それ以外→type:"spot"\n[{"code":"証券コード","name":"銘柄名","shares":株数,"buy_price":取得単価,"current_price":現在値,"type":"spot"または"margin","buy_date":null}]\nJSONのみ返す。読み取れない項目はnull。',
+    hold:'この画像はスマホのスクリーンショットです。SBI証券アプリの画面を想定していますが、画面の一部が切れていても読み取れる情報はすべて抽出してください。保有証券詳細・信用建玉詳細・保有証券一覧・信用建玉一覧のいずれかです。\n表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください。\n- 「取得単価」「建値」「平均建単価」→buy_price\n- 「保有株数」「建株数」→shares\n- 「現在値」→current_price\n- 「売買区分:買建」または「信用建玉」→type:"margin"、それ以外→type:"spot"\n[{"code":"証券コード","name":"銘柄名","shares":株数,"buy_price":取得単価,"current_price":現在値,"type":"spot"または"margin","buy_date":null}]\nJSONのみ返す。読み取れない項目はnull。',
     hist:'この画像はSBI証券アプリの約定・取引履歴画面です。日付を必ず読み取ってください。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"または"margin"}]\nJSONのみ返す。',
     pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
     watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
@@ -798,7 +794,7 @@ async function analyzeScreenshots() {
     btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
     resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
     try{
-      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.1}};
+      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.0}};
       const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(!r.ok){
       const e=await r.json().catch(()=>({}));
@@ -970,52 +966,6 @@ function doImport() {
 // 初期化
 calcS(); rTH(); rWatch();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
-
-
-// GitHubのRawデータURL（あなた専用に書き換えてください）
-const GITHUB_USER = "hiroki300";
-const REPO_NAME = "stock-checker ";
-const WEEKLY_URL = `https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/main/weekly_results.json`;
-
-async function syncWithAI() {
-    toast("🤖 AI分析データを同期中...");
-    try {
-        const response = await fetch(WEEKLY_URL);
-        const data = await response.json();
-        
-        // 1. S/Aランク銘柄をウォッチリストに自動反映
-        const aiWatch = data.filter(d => d.rank === 'S' || d.rank === 'A').map(d => ({
-            cd: d.code,
-            nm: d.name,
-            tag: `AI:${d.total}点[${d.rank}]`,
-            dt: d.analyzed_at.slice(0, 10)
-        }));
-        
-        // 既存のウォッチリストとマージ（重複排除）
-        aiWatch.forEach(newW => {
-            if (!W.find(w => w.cd === newW.cd)) W.push(newW);
-        });
-        
-        sv(KW, W);
-        rWatch();
-        
-        // 2. 保有銘柄のATR損切りラインを自動提案（もし一致すれば）
-        H.forEach(h => {
-            const aiInfo = data.find(d => d.code === h.cd);
-            if (aiInfo) {
-                h.memo = `AI目標:${aiInfo.target}円 / ${aiInfo.rank}ランク`;
-            }
-        });
-        sv(KH, H);
-        
-        toast("✅ 同期完了！S/Aランク銘柄を追加しました");
-    } catch (e) {
-        toast("⚠️ 同期エラー。URLまたはリポジトリ設定を確認してください");
-    }
-}
-
-
-  
 </script>
 <script>
 if('serviceWorker' in navigator){
