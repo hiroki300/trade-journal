@@ -168,6 +168,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="tab" onclick="go('trade')"><span class="ti">💱</span>売買</div>
   <div class="tab" onclick="go('hold')"><span class="ti">💼</span>保有</div>
   <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
+  <div class="tab" onclick="go('morning')"><span class="ti">🌅</span>朝チェック</div>
   <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
   <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
 </nav>
@@ -260,6 +261,27 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div id="watchList"></div>
 </div>
 
+
+<div class="page" id="page-morning">
+  <div class="cost-note"><span>🤖 Gemini: 需給・板情報　🧠 Claude: エントリー判断</span></div>
+
+  <!-- 分析モード切替 -->
+  <div class="mode-row" style="margin-bottom:10px">
+    <button class="mode-btn on" id="mrnAll" onclick="setMrnMode('all')">📋 全銘柄</button>
+    <button class="mode-btn" id="mrnHold" onclick="setMrnMode('hold')">💼 保有のみ</button>
+    <button class="mode-btn" id="mrnWatch" onclick="setMrnMode('watch')">👁 注目のみ</button>
+  </div>
+
+  <!-- 実行ボタン -->
+  <button class="rev-btn" id="mrnBtn" onclick="doMorning()" style="background:linear-gradient(135deg,#1e3a5f,#0f3460)">
+    🌅 朝の板チェックを開始<br>
+    <span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>
+  </button>
+
+  <!-- 結果表示エリア -->
+  <div id="mrnOut"></div>
+</div>
+
 <div class="page" id="page-rev">
   <div class="cost-note"><span>🤖 Gemini: 情報収集　🧠 Claude: 戦略分析</span></div>
   <button class="rev-btn" id="revBtn" onclick="doRev()">
@@ -338,7 +360,7 @@ document.getElementById('cashIn').value = cash || '';
 
 // タブ
 function go(id) {
-  const ids = ['dash','trade','hold','watch','rev','chat'];
+  const ids = ['dash','trade','hold','watch','morning','rev','chat'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
   document.querySelectorAll('.page').forEach(p => {
     const active = p.id === 'page-' + id;
@@ -568,6 +590,173 @@ function pfS() {
   const ts = td.length ? '\n本日売買: ' + td.map(t => (t.a==='buy'?'買':'売') + ' ' + t.nm + ' ' + t.p + '円×' + t.sh + '株').join(', ') : '';
   const ws = W.length ? '\nウォッチ中: ' + W.map(w => w.cd + ' ' + w.nm).join(', ') : '';
   return hs + ts + ws + '\n残金: ' + Math.round(cash).toLocaleString() + '円';
+}
+
+// ═══════════════════════════════════════════
+// 🌅 朝の板チェック機能
+// ═══════════════════════════════════════════
+let mrnMode = 'all';
+function setMrnMode(m) {
+  mrnMode = m;
+  ['all','hold','watch'].forEach(x => {
+    const el = document.getElementById('mrn' + x.charAt(0).toUpperCase() + x.slice(1));
+    if(el) el.classList.toggle('on', x===m);
+  });
+}
+
+function getMrnTargets() {
+  // 分析対象の銘柄リストを取得
+  let targets = [];
+  if (mrnMode === 'hold' || mrnMode === 'all') {
+    H.forEach(h => targets.push({
+      cd: h.cd, nm: h.nm,
+      bp: h.bp, cp: h.cp || h.bp,
+      sh: h.sh, sl: h.sl, tgt: h.tgt,
+      type: h.type || 'spot',
+      role: '保有中'
+    }));
+  }
+  if (mrnMode === 'watch' || mrnMode === 'all') {
+    W.forEach(w => {
+      if (!targets.find(t => t.cd === w.cd)) {
+        targets.push({cd: w.cd, nm: w.nm, bp: null, cp: null, sh: 0, role: '注目'});
+      }
+    });
+  }
+  return targets;
+}
+
+async function doMorning() {
+  const btn = document.getElementById('mrnBtn');
+  btn.disabled = true;
+  btn.textContent = '🔄 分析中...';
+  const out = document.getElementById('mrnOut');
+  out.innerHTML = '';
+
+  const targets = getMrnTargets();
+  if (!targets.length) {
+    out.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px">保有銘柄・ウォッチリストが登録されていません</div>';
+    btn.disabled = false;
+    btn.innerHTML = '🌅 朝の板チェックを開始<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
+    return;
+  }
+
+  const today = new Date().toLocaleDateString('ja-JP', {month:'numeric',day:'numeric',weekday:'short'});
+  const pf = pfS();
+
+  // ① Gemini: 市場全体の地合い（1枚目カード）
+  const mktCard = mkMrnCard('🌅', '今日の地合い・相場環境', 'var(--gem)', '🤖 Gemini');
+  out.appendChild(mktCard);
+
+  // ② 銘柄別カード（Gemini需給 + Claude判断を並列）
+  const stockCards = targets.map(t => {
+    const card = mkMrnCard(
+      t.role === '保有中' ? '💼' : '👁',
+      t.cd + ' ' + t.nm + '　<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') + ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' + t.role + '</span>',
+      t.role==='保有中'?'var(--acc)':'var(--green)', ''
+    );
+    out.appendChild(card);
+    return {card, target: t};
+  });
+
+  // 地合いをGeminiで取得
+  const mktPrompt = `あなたは日本株専門のシニアFMです。Google検索で${today}の最新情報を調べてください。
+対象銘柄: ${targets.map(t=>t.cd+' '+t.nm).join(', ')}
+
+以下を簡潔に（各項目1〜2行）:
+①日経平均・グロース指数の寄り付き予想（前夜のNYダウ・ナスダック・為替を踏まえて）
+②今日の市場テーマ・注目セクター（1行）
+③対象銘柄に関連するニュース・材料（箇条書き）
+④今日の相場 強気/中立/弱気 + 一言`;
+
+  const gemMktP = callGemini(mktPrompt).then(txt => {
+    mktCard.querySelector('.mrn-body').textContent = txt;
+  }).catch(e => {
+    mktCard.querySelector('.mrn-body').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+  });
+
+  // 銘柄別分析（並列実行）
+  const stockPs = stockCards.map(({card, target: t}) => {
+    const bodyEl = card.querySelector('.mrn-body');
+
+    // Geminiブロック
+    const gBlock = document.createElement('div');
+    gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div><div class="ldg"><div class="spin"></div><span>調査中...</span></div>';
+    bodyEl.appendChild(gBlock);
+
+    // Claudeブロック
+    const cBlock = document.createElement('div');
+    cBlock.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)';
+    cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div><div class="ldg"><div class="spin"></div><span>判断中...</span></div>';
+    bodyEl.appendChild(cBlock);
+
+    const holdInfo = t.bp ?
+      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株 / 現値: ${(t.cp||t.bp).toLocaleString()}円 / 損益: ${((( t.cp||t.bp)-t.bp)*t.sh>=0?'+':'')}${Math.round(((t.cp||t.bp)-t.bp)*t.sh).toLocaleString()}円` : '';
+    const slInfo = t.sl ? `損切: ${t.sl.toLocaleString()}円 / 目標: ${(t.tgt||0).toLocaleString()}円` : '';
+
+    // Geminiプロンプト（需給・板・信用倍率重点）
+    const gPrompt = `あなたは日本株専門アナリストです。Google検索で${t.cd} ${t.nm}の今日の最新情報を調べてください。
+
+【銘柄】${t.cd} ${t.nm}（${t.role}）
+${holdInfo}
+${slInfo}
+
+以下を調べて簡潔に答えてください（各1〜2行）:
+①現在の株価・前日比・出来高（今朝の状況）
+②信用倍率（最新値）と需給の評価
+③空売り残高・機関の動向
+④直近の材料・ニュース（3日以内）
+⑤テクニカル: 5日線・25日線との位置関係
+⑥今日の値動き予想（強気/中立/弱気 + 理由1行）`;
+
+    // Claudeプロンプト（エントリー判断重点）
+    const cPrompt = `あなたは運用歴25年のシニアFMです。スイングトレード（1〜4週間）の観点で判断してください。
+ポートフォリオ全体: ${pf}
+
+【対象銘柄】${t.cd} ${t.nm}（${t.role}）
+${holdInfo}
+${slInfo}
+
+以下を率直・断言的に答えてください:
+${t.role === '保有中' ?
+  '①継続保有 / 利確 / 損切り のどれか断言して理由\n②今日注意すべき価格帯・ライン\n③ポジション管理の具体的アドバイス' :
+  '①今日エントリーすべきか（◎今すぐ/○条件付き/×見送り）断言して理由\n②エントリーするなら理想の価格帯\n③損切りライン・目標価格の提案'}`;
+
+    const gP = callGemini(gPrompt).then(txt => {
+      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' +
+        '<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + txt + '</div>';
+    }).catch(e => {
+      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
+    });
+
+    const cP = callClaude(cPrompt).then(txt => {
+      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div>' +
+        '<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + txt + '</div>';
+    }).catch(e => {
+      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
+    });
+
+    return Promise.all([gP, cP]);
+  });
+
+  await Promise.all([gemMktP, ...stockPs]);
+
+  btn.disabled = false;
+  btn.innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
+}
+
+function mkMrnCard(icon, titleHtml, color, pill) {
+  const card = document.createElement('div');
+  card.className = 'rcard';
+  card.style.marginBottom = '10px';
+  card.innerHTML =
+    '<div class="rhdr">' +
+    '<span style="font-size:15px">' + icon + '</span>' +
+    '<span style="font-size:12px;font-weight:700;color:' + color + '">' + titleHtml + '</span>' +
+    (pill ? '<span class="ai-pill" style="margin-left:auto;background:rgba(66,133,244,.15);color:var(--gem);font-size:9px;padding:2px 6px;border-radius:4px">' + pill + '</span>' : '') +
+    '</div>' +
+    '<div class="mrn-body" style="padding:10px 0 2px"></div>';
+  return card;
 }
 
 // 振り返り
