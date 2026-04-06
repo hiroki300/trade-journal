@@ -32,7 +32,9 @@ nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex
 .tab .ti{font-size:15px;display:block;margin-bottom:1px;}
 .tab.on{color:var(--acc);border-bottom-color:var(--acc);}
 .pages{flex:1;overflow:hidden;position:relative;min-height:0;z-index:1;}
-.page{position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 72px;display:none;}
+.page{position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 72px;display:none;pointer-events:none;visibility:hidden;}
+.page.on{display:block!important;pointer-events:auto!important;visibility:visible!important;}
+#page-chat.on{display:flex!important;flex-direction:column!important;}
 .page::-webkit-scrollbar{width:2px;}.page::-webkit-scrollbar-thumb{background:var(--border);}
 .cash-row{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px;}
 .cash-row label{font-size:11px;color:var(--t3);white-space:nowrap;}
@@ -82,7 +84,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .ai-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:.04em;}
 .pill-g{background:rgba(66,133,244,.15);color:var(--gem);}
 .pill-c{background:rgba(217,119,6,.15);color:var(--cld);}
-#page-chat{padding:0;display:flex;flex-direction:column;}
+#page-chat{padding:0;flex-direction:column;}
 .cscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 8px;min-height:0;}
 .cmsg{display:flex;gap:7px;margin-bottom:8px;align-items:flex-start;}
 .cmsg.u{flex-direction:row-reverse;}
@@ -410,19 +412,18 @@ document.getElementById('cashIn').value = cash || '';
 // タブ
 function go(id) {
   const ids = ['dash','trade','hold','watch','morning','rev','analyze','chat'];
+  // タブのon切替
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
+  // ページのon切替（inline styleを使わずクラスのみで制御）
   document.querySelectorAll('.page').forEach(p => {
     const active = p.id === 'page-' + id;
-    if (active && p.id === 'page-chat') {
-      p.style.display = 'flex';
-      p.style.flexDirection = 'column';
-    } else {
-      p.style.display = active ? 'block' : 'none';
-    }
-    p.style.pointerEvents = active ? 'auto' : 'none';
-    p.style.zIndex = active ? '10' : '0';
-    p.style.visibility = active ? 'visible' : 'hidden';
     p.classList.toggle('on', active);
+    // inline styleをリセット（過去の設定を消す）
+    p.style.display = '';
+    p.style.pointerEvents = '';
+    p.style.zIndex = '';
+    p.style.visibility = '';
+    p.style.flexDirection = '';
   });
   if (id==='dash')  rDash();
   if (id==='hold')  rHold();
@@ -1214,10 +1215,7 @@ function openKeyModal() {
   document.getElementById('keyAnthropic').value=CK;
 }
 function closeKeyModal() {
-  const m = document.getElementById('keyModal');
-  m.style.display = 'none';
-  m.style.pointerEvents = 'none';
-  m.style.zIndex = '-1';
+  document.getElementById('keyModal').style.display = 'none';
 }
 function saveKeys() {
   const gk=document.getElementById('keyGemini').value.trim();
@@ -1466,18 +1464,7 @@ function doImport() {
 
 // 初期化
 calcS(); rTH(); rWatch();
-if(!GK||!CK) {
-  const m = document.getElementById('keyModal');
-  m.style.display = 'flex';
-  m.style.pointerEvents = 'auto';
-  m.style.zIndex = '900';
-} else {
-  // キー設定済みの場合、確実にモーダルを非表示
-  const m = document.getElementById('keyModal');
-  m.style.display = 'none';
-  m.style.pointerEvents = 'none';
-  m.style.zIndex = '-1';
-}
+if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 </script>
 <script>
 if('serviceWorker' in navigator){
