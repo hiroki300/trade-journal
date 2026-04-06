@@ -153,6 +153,33 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .key-save-btn{width:100%;background:linear-gradient(135deg,#1d4ed8,#0891b2);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;padding:13px;cursor:pointer;margin-top:4px;}
 .key-skip{display:block;text-align:center;font-size:12px;color:var(--t3);margin-top:10px;cursor:pointer;text-decoration:underline;}
 .hdr-key-btn{background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--t2);font-size:11px;font-weight:700;padding:5px 10px;cursor:pointer;white-space:nowrap;}
+
+/* 銘柄スコアリング */
+.score-card{background:var(--s1);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px;}
+.score-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);}
+.score-title{font-size:14px;font-weight:700;}
+.score-badge{font-family:var(--mono);font-size:22px;font-weight:700;}
+.score-badge.s{color:#f59e0b;}.score-badge.a{color:#10b981;}.score-badge.b{color:#3b82f6;}.score-badge.c{color:var(--t3);}
+.score-bars{padding:10px 14px;border-bottom:1px solid var(--border);}
+.score-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.score-bar-lbl{font-size:10px;color:var(--t3);width:52px;flex-shrink:0;}
+.score-bar-track{flex:1;height:6px;background:var(--s2);border-radius:3px;overflow:hidden;}
+.score-bar-fill{height:100%;border-radius:3px;transition:width .4s;}
+.score-bar-val{font-size:11px;font-family:var(--mono);font-weight:700;width:28px;text-align:right;flex-shrink:0;}
+.score-ai{padding:10px 14px;}
+.score-ai-row{margin-bottom:8px;}
+.score-ai-hdr{font-size:10px;font-weight:700;margin-bottom:4px;}
+.score-ai-txt{font-size:12px;line-height:1.7;color:var(--t2);}
+/* 振り返りカード折りたたみ */
+.rcard-toggle{cursor:pointer;}
+.rcard-toggle .rhdr{user-select:none;}
+.rcard-body-wrap{overflow:hidden;transition:max-height .3s;}
+.rcard-body-wrap.collapsed{max-height:60px;}
+.rcard-body-wrap.expanded{max-height:2000px;}
+.rcard-fade{position:relative;}
+.rcard-fade::after{content:'';position:absolute;bottom:0;left:0;right:0;height:30px;background:linear-gradient(transparent,var(--s1));pointer-events:none;}
+.rcard-fade.expanded::after{display:none;}
+.expand-btn{display:block;text-align:center;font-size:11px;color:var(--acc);padding:4px 0 8px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -170,6 +197,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
   <div class="tab" onclick="go('morning')"><span class="ti">🌅</span>朝チェック</div>
   <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
+  <div class="tab" onclick="go('analyze')"><span class="ti">🔬</span>銘柄分析</div>
   <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
 </nav>
 <div class="pages">
@@ -283,12 +311,33 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </div>
 
 <div class="page" id="page-rev">
-  <div class="cost-note"><span>🤖 Gemini: 情報収集　🧠 Claude: 戦略分析</span></div>
-  <button class="rev-btn" id="revBtn" onclick="doRev()">
-    🔍 今日の振り返りを開始する<br>
-    <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>
+  <div class="cost-note"><span>🤖 Gemini: 相場分析　🧠 Claude: 明日の戦略</span></div>
+  <button class="rev-btn" id="revBtn" onclick="doRev()" style="background:linear-gradient(135deg,#1e3a5f,#3b1f5e)">
+    🌆 夕方の振り返りを開始<br>
+    <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>
   </button>
   <div id="revOut"></div>
+</div>
+
+
+<div class="page" id="page-analyze">
+  <div class="cost-note"><span>🤖 Gemini: テーマ・需給　🧠 Claude: テクニカル・判断</span></div>
+
+  <!-- 銘柄入力 -->
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <input class="fi" id="azCode" type="text" inputmode="numeric" placeholder="コード例: 3778" maxlength="5"
+      style="width:90px;flex:none;margin:0;font-family:var(--mono)">
+    <input class="fi" id="azName" type="text" placeholder="銘柄名（任意）"
+      style="flex:1;margin:0">
+    <button class="btn btnb" style="width:52px;padding:0;font-size:18px;margin:0"
+      onclick="doAnalyze()">🔬</button>
+  </div>
+
+  <!-- クイック選択（保有・ウォッチから） -->
+  <div id="azQuickList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+
+  <!-- 結果エリア -->
+  <div id="azOut"></div>
 </div>
 
 <div class="page" id="page-chat">
@@ -360,7 +409,7 @@ document.getElementById('cashIn').value = cash || '';
 
 // タブ
 function go(id) {
-  const ids = ['dash','trade','hold','watch','morning','rev','chat'];
+  const ids = ['dash','trade','hold','watch','morning','rev','analyze','chat'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
   document.querySelectorAll('.page').forEach(p => {
     const active = p.id === 'page-' + id;
@@ -378,6 +427,7 @@ function go(id) {
   if (id==='hold')  rHold();
   if (id==='trade') rTH();
   if (id==='watch') rWatch();
+  if (id==='analyze') rAnalyzeQuick();
 }
 
 function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
@@ -761,17 +811,42 @@ function mkMrnCard(icon, titleHtml, color, pill) {
 
 // 振り返り
 const GEM_STEPS = [
-  {icon:'🌍', title:'世界情勢・マクロ経済', color:'var(--gem)',
-   p: pf => 'あなたは日本株専門のシニアFMです。Google検索で今日の最新情報を調べてから答えてください。\nポートフォリオ: ' + pf + '\n米国株・為替・原油・地政学リスクを調べ、明日の日本市場への影響を具体的に述べてください。'},
-  {icon:'📰', title:'日本株ニュース・個別材料', color:'var(--gem)',
-   p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてください。\n保有銘柄: ' + pf + '\n保有銘柄の個別ニュース・適時開示、日経平均・グロース動向、明日の注目指標を調べてください。'},
-  {icon:'📱', title:'SNS・YouTube・X話題', color:'var(--gem)',
-   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ' + pf + '\n以下を箇条書き3点以内で簡潔にまとめてください（1点1行・長文不要）：\n・X/SNSで今日話題の日本株テーマ（1行）\n・投資YouTubeで注目されているテーマ（1行）\n・市場センチメント判定: 強気/中立/弱気 + 理由1文\n余分な説明は不要。'},
+  {icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)',
+   p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の終値・動きを調べてください。\n保有銘柄: ' + pf + '\n各銘柄について【終値・前日比】【出来高の特徴】【本日の動きの理由】を各2行以内で簡潔に。長文不要。'},
+  {icon:'🌍', title:'明日に影響する材料', color:'var(--gem)',
+   p: pf => 'あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n保有銘柄: ' + pf + '\n以下を各1〜2行で簡潔に（長文不要）:\n①明日の日本株に影響するNY・為替・指標\n②保有銘柄の明日の材料・注目点\n③明日の相場予想: 強気/中立/弱気 + 理由1行'},
+  {icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)',
+   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で今日のSNS情報を調べてください。\n保有銘柄: ' + pf + '\n箇条書き3点以内・各1行のみ:\n・今日のX/SNSで話題の日本株テーマ\n・保有銘柄への言及・評判\n・市場センチメント: 強気/中立/弱気'},
 ];
 const CLD_STEP = {
-  icon:'🎯', title:'振り返り・明日の戦略', color:'var(--cld)',
-  p: pf => 'あなたは運用歴25年のシニアFMです。\n【ポートフォリオ】\n' + pf + '\n以下を率直・具体的に:\n1.今日の振り返り\n2.保有銘柄ごとの判断（継続/利確/損切り）\n3.残金の活用法（新規買い候補・価格）\n4.明日の行動計画\n5.シニアFMとしての一言'
+  icon:'🎯', title:'明日の作戦・行動計画', color:'var(--cld)',
+  p: pf => 'あなたは運用歴25年のシニアFMです。\n【ポートフォリオ】\n' + pf + '\n以下を率直・具体的・簡潔に（各項目3行以内）:\n① 今日の総括（一言）\n② 保有銘柄ごと: 継続/利確/損切り + 判断価格\n③ 明日の具体的アクション（買い・売り・何もしない）\n④ 注意すべき価格帯・ライン\n⑤ 一言アドバイス'
 };
+
+function mkRevCard(icon, title, color, pill, pillClass) {
+  const card = document.createElement('div');
+  card.className = 'rcard rcard-toggle';
+  card.innerHTML =
+    '<div class="rhdr" onclick="toggleRevCard(this)">' +
+    '<span style="font-size:15px">' + icon + '</span>' +
+    '<span style="font-size:12px;font-weight:700;color:' + color + '">' + title + '</span>' +
+    '<span class="ai-pill ' + pillClass + '" style="margin-left:auto">' + pill + '</span>' +
+    '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+    '</div>' +
+    '<div class="rcard-body-wrap expanded rcard-fade">' +
+    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>分析中...</span></div></div>' +
+    '</div>';
+  return card;
+}
+function toggleRevCard(hdr) {
+  const wrap = hdr.nextElementSibling;
+  const chev = hdr.querySelector('.rev-chevron');
+  const expanded = wrap.classList.contains('expanded');
+  wrap.classList.toggle('expanded', !expanded);
+  wrap.classList.toggle('collapsed', expanded);
+  wrap.classList.toggle('rcard-fade', !expanded);
+  chev.textContent = expanded ? '▶' : '▼';
+}
 
 async function doRev() {
   const btn = document.getElementById('revBtn');
@@ -779,28 +854,256 @@ async function doRev() {
   const out = document.getElementById('revOut'); out.innerHTML = '';
   const pf = pfS();
   const gemCards = GEM_STEPS.map(s => {
-    const card = document.createElement('div'); card.className = 'rcard';
-    card.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + s.icon + '</span>' +
-      '<span style="font-size:12px;font-weight:700;color:' + s.color + '">' + s.title + '</span>' +
-      '<span class="ai-pill pill-g" style="margin-left:auto">🤖 Gemini</span></div>' +
-      '<div class="rbody"><div class="ldg"><div class="spin"></div><span>調査中...</span></div></div>';
+    const card = mkRevCard(s.icon, s.title, s.color, '🤖 Gemini', 'pill-g');
     out.appendChild(card); return card;
   });
-  const cldCard = document.createElement('div'); cldCard.className = 'rcard';
-  cldCard.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + CLD_STEP.icon + '</span>' +
-    '<span style="font-size:12px;font-weight:700;color:' + CLD_STEP.color + '">' + CLD_STEP.title + '</span>' +
-    '<span class="ai-pill pill-c" style="margin-left:auto">🧠 Claude</span></div>' +
-    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>精査中...</span></div></div>';
+  const cldCard = mkRevCard(CLD_STEP.icon, CLD_STEP.title, CLD_STEP.color, '🧠 Claude', 'pill-c');
   out.appendChild(cldCard);
+
   const gemPs = GEM_STEPS.map((s, i) =>
-    callGemini(s.p(pf)).then(txt => { gemCards[i].querySelector('.rbody').textContent = txt; })
-      .catch(e => { gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; })
+    callGemini(s.p(pf)).then(txt => {
+      const body = gemCards[i].querySelector('.rbody');
+      body.innerHTML = fmtRevText(txt);
+    }).catch(e => {
+      gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+    })
   );
-  const cldP = callClaude(CLD_STEP.p(pf)).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
-    .catch(e => { cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; });
+  const cldP = callClaude(CLD_STEP.p(pf)).then(txt => {
+    cldCard.querySelector('.rbody').innerHTML = fmtRevText(txt);
+  }).catch(e => {
+    cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+  });
   await Promise.all([...gemPs, cldP]);
-  btn.disabled = false; btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>';
+  btn.disabled = false;
+  btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>';
 }
+
+function fmtRevText(txt) {
+  // マークダウン風の整形（太字・箇条書き）
+  return '<div style="font-size:13px;line-height:1.85;color:#cbd5e1">' +
+    txt
+      .replace(/\*\*(.+?)\*\*/g, '<b style="color:#e2e8f0">$1</b>')
+      .replace(/^#{1,3}\s+(.+)$/gm, '<div style="font-size:12px;font-weight:700;color:var(--acc);margin:10px 0 4px">$1</div>')
+      .replace(/^[•\-・]\s+(.+)$/gm, '<div style="padding-left:12px;margin:2px 0">・$1</div>')
+      .replace(/^(\d+)[.．]\s+(.+)$/gm, '<div style="padding-left:12px;margin:3px 0"><span style="color:var(--acc);font-weight:700">$1.</span> $2</div>')
+      .replace(/
+{2,}/g, '<br>')
+      .replace(/
+/g, '<br>') +
+    '</div>';
+}
+
+
+// ═══════════════════════════════════════════
+// 🔬 銘柄スコアリング分析
+// ═══════════════════════════════════════════
+function rAnalyzeQuick() {
+  const el = document.getElementById('azQuickList');
+  if (!el) return;
+  el.innerHTML = '';
+  const all = [
+    ...H.map(h=>({cd:h.cd, nm:h.nm, role:'💼'})),
+    ...W.filter(w=>!H.find(h=>h.cd===w.cd)).map(w=>({cd:w.cd, nm:w.nm, role:'👁'}))
+  ];
+  all.forEach(t => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--text);cursor:pointer';
+    btn.textContent = t.role + ' ' + t.cd + ' ' + t.nm;
+    btn.onclick = () => {
+      document.getElementById('azCode').value = t.cd;
+      document.getElementById('azName').value = t.nm;
+      doAnalyze();
+    };
+    el.appendChild(btn);
+  });
+}
+
+async function doAnalyze() {
+  const code = document.getElementById('azCode').value.trim();
+  const nameIn = document.getElementById('azName').value.trim();
+  if (!code) { toast('⚠️ 証券コードを入力してください'); return; }
+
+  const out = document.getElementById('azOut');
+  out.innerHTML = '<div class="ldg" style="padding:20px"><div class="spin"></div><span>' + code + ' を分析中...</span></div>';
+
+  // 保有・ウォッチから情報を取得
+  const hold = H.find(h=>h.cd===code);
+  const watch = W.find(w=>w.cd===code);
+  const nm = nameIn || (hold?.nm) || (watch?.nm) || code;
+  const tag = watch?.tag || hold?.memo || '';
+  const holdInfo = hold ?
+    `取得単価: ${hold.bp.toLocaleString()}円 × ${hold.sh}株\n現在値: ${(hold.cp||hold.bp).toLocaleString()}円\n含み損益: ${((hold.cp||hold.bp)-hold.bp)*hold.sh>=0?'+':''}${Math.round(((hold.cp||hold.bp)-hold.bp)*hold.sh).toLocaleString()}円\n損切り: ${hold.sl?.toLocaleString()||'未設定'}円 / 目標: ${hold.tgt?.toLocaleString()||'未設定'}円` : '新規候補銘柄';
+  const today = new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'numeric',day:'numeric'});
+
+  // Geminiプロンプト（テーマ・需給・最新情報）
+  const gPrompt = `あなたはマクロ経済・テーマ投資に強いチーフストラテジストです。
+Google検索で${code} ${nm}の最新情報を調べてから答えてください（${today}時点）。
+
+【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
+【ポジション】${holdInfo}
+
+以下を調べて採点してください：
+
+【需給・市場情報】
+①信用倍率（最新値）と需給の評価
+②空売り残高・機関投資家の動向
+③外国人投資家の売買傾向
+④直近1週間のニュース・材料
+
+【採点基準（各0〜20点 × 5項目 = 100点）】
+1. テーマ合致度: 国策・世界トレンドとの一致
+2. 需給優位性: 信用倍率・外国人動向・空売り
+3. 材料の質: ニュース・決算・上方修正の有無
+4. 市場の期待感: アナリスト評価・成長期待
+5. スイング適性: 今の旬度・1〜4週間の見通し
+
+【絶対ルール】良い銘柄65〜85点、普通40〜60点、悪い銘柄20〜35点。
+
+需給・材料コメント（150字以内）:
+テーマ合致スコア: XX点/100点
+判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
+
+  // Claudeプロンプト（テクニカル・論理分析）
+  const cPrompt = `あなたはスイングトレード専門のクオンツアナリストです（運用歴20年）。
+Google検索で${code} ${nm}の株価・チャート情報を調べてください（${today}時点）。
+
+【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
+【ポジション】${holdInfo}
+
+以下を分析して採点してください：
+
+【テクニカル分析】
+①現在株価・5日線・25日線との位置関係
+②ATR（日次平均変動幅）と損切りライン
+③直近のシグナル: 押し目買い / ブレイクアウト / ゴールデンクロス
+④RR比（リスク・リワード）の評価
+⑤スイングトレードの最適エントリーゾーン
+
+【採点基準（各0〜20点 × 5項目 = 100点）】
+1. トレンド強度: MA配列・価格の方向性
+2. エントリータイミング: シグナルの強度と種類
+3. RR合理性: 損切り・目標の論理的妥当性
+4. 出来高・流動性: 板の厚さ・出来高トレンド
+5. チャートパターン: 形成中のパターンの信頼性
+
+【絶対ルール】良い銘柄65〜85点、普通40〜60点、悪い銘柄20〜35点。±20点乖離禁止。
+
+テクニカルコメント（150字以内）:
+論理的期待値スコア: XX点/100点
+判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
+
+  try {
+    const [gTxt, cTxt] = await Promise.all([
+      callGemini(gPrompt).catch(e => 'エラー: ' + e.message),
+      callClaude(cPrompt).catch(e => 'エラー: ' + e.message),
+    ]);
+
+    // スコア抽出
+    const gScore = extractAzScore(gTxt, ['テーマ合致スコア']);
+    const cScore = extractAzScore(cTxt, ['論理的期待値スコア']);
+    const total = gScore + cScore;
+    const rank = total >= 160 ? 'S' : total >= 140 ? 'A' : total >= 110 ? 'B' : 'C';
+    const rankLabel = {S:'即エントリー候補',A:'条件付き監視',B:'要観察',C:'見送り'}[rank];
+    const rankColor = {S:'#f59e0b',A:'#10b981',B:'#3b82f6',C:'#4b6088'}[rank];
+
+    // 判定抽出
+    const gJudge = extractAzJudge(gTxt);
+    const cJudge = extractAzJudge(cTxt);
+
+    // カードHTML生成
+    out.innerHTML = '';
+
+    // ── サマリーカード ──
+    const sumCard = document.createElement('div');
+    sumCard.className = 'score-card';
+    sumCard.innerHTML =
+      '<div class="score-hdr">' +
+      '<div><div class="score-title">' + code + ' ' + nm + '</div>' +
+      '<div style="font-size:11px;color:var(--t3);margin-top:2px">' + (tag||'') + ' / ' + (hold?'💼保有中':'👁監視候補') + '</div></div>' +
+      '<div style="text-align:right">' +
+      '<div class="score-badge ' + rank.toLowerCase() + '">' + rank + '</div>' +
+      '<div style="font-size:10px;color:' + rankColor + ';margin-top:2px">' + rankLabel + '</div>' +
+      '</div></div>' +
+      '<div class="score-bars">' +
+      mkScoreBar('🤖 テーマ', gScore, '#4285f4') +
+      mkScoreBar('🧠 ロジック', cScore, '#d97706') +
+      mkScoreBar('合計', Math.round(total/2), total>=160?'#f59e0b':total>=140?'#10b981':'#3b82f6') +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--border)">' +
+      '<div style="padding:10px 12px;border-right:1px solid var(--border)">' +
+      '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:3px">🤖 Gemini判定</div>' +
+      '<div style="font-size:13px;font-weight:700;color:var(--text)">' + gJudge + '</div>' +
+      '</div>' +
+      '<div style="padding:10px 12px">' +
+      '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:3px">🧠 Claude判定</div>' +
+      '<div style="font-size:13px;font-weight:700;color:var(--text)">' + cJudge + '</div>' +
+      '</div></div>';
+    out.appendChild(sumCard);
+
+    // ── Gemini詳細カード ──
+    const gCard = document.createElement('div');
+    gCard.className = 'rcard rcard-toggle';
+    gCard.innerHTML =
+      '<div class="rhdr" onclick="toggleRevCard(this)">' +
+      '<span style="font-size:14px">🤖</span>' +
+      '<span style="font-size:12px;font-weight:700;color:var(--gem)">需給・テーマ分析（Gemini）</span>' +
+      '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:#4285f4;margin-left:auto">' + gScore + 'pt</span>' +
+      '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+      '</div>' +
+      '<div class="rcard-body-wrap expanded rcard-fade">' +
+      '<div class="rbody">' + fmtRevText(gTxt) + '</div>' +
+      '</div>';
+    out.appendChild(gCard);
+
+    // ── Claude詳細カード ──
+    const cCard = document.createElement('div');
+    cCard.className = 'rcard rcard-toggle';
+    cCard.innerHTML =
+      '<div class="rhdr" onclick="toggleRevCard(this)">' +
+      '<span style="font-size:14px">🧠</span>' +
+      '<span style="font-size:12px;font-weight:700;color:var(--cld)">テクニカル・判断（Claude）</span>' +
+      '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:#d97706;margin-left:auto">' + cScore + 'pt</span>' +
+      '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+      '</div>' +
+      '<div class="rcard-body-wrap expanded rcard-fade">' +
+      '<div class="rbody">' + fmtRevText(cTxt) + '</div>' +
+      '</div>';
+    out.appendChild(cCard);
+
+  } catch(e) {
+    out.innerHTML = '<div style="color:var(--red);padding:16px">⚠️ ' + e.message + '</div>';
+  }
+}
+
+function mkScoreBar(lbl, score, color) {
+  const pct = Math.min(Math.max(score, 0), 100);
+  return '<div class="score-bar-row">' +
+    '<div class="score-bar-lbl">' + lbl + '</div>' +
+    '<div class="score-bar-track"><div class="score-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+    '<div class="score-bar-val" style="color:' + color + '">' + score + '</div>' +
+    '</div>';
+}
+
+function extractAzScore(txt, keys) {
+  for (const key of keys) {
+    const m = txt.match(new RegExp(key + '[：:s]*([0-9]+)'));
+    if (m) { const v=parseInt(m[1]); if(v>=0&&v<=100) return v; }
+  }
+  const m2 = txt.match(/([0-9]+)\s*点[\/\/]100/);
+  if (m2) { const v=parseInt(m2[1]); if(v>=0&&v<=100) return v; }
+  return 50;
+}
+
+function extractAzJudge(txt) {
+  const m = txt.match(/判定[：:]\s*([◎○△×][^\n]{0,20})/);
+  if (m) return m[1].trim().slice(0,20);
+  if (txt.includes('◎')) return '◎ 今すぐ買い';
+  if (txt.includes('○')) return '○ 条件付き';
+  if (txt.includes('△')) return '△ 様子見';
+  if (txt.includes('×')) return '× 見送り';
+  return '判定中';
+}
+
 
 // チャット
 let chatMode = 'gc', gemHist = [], cldHist = [];
