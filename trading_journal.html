@@ -4,13 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Trade Journal</title>
-<meta name="theme-color" content="#111827">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="TradeJournal">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap');
 :root{
@@ -21,29 +14,36 @@
   --font:'Noto Sans JP',sans-serif;--mono:'JetBrains Mono',monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-button,select,input,.tab,.ss-type,.ss-zone,.mode-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation;cursor:pointer;}
-html,body{height:100%;}
+html,body{height:100%;overflow:hidden;}
 body{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;flex-direction:column;}
+
 header{padding:12px 16px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--s1);}
 .logo{font-size:15px;font-weight:700;color:#fff;}.logo span{color:var(--acc);}
 #ds{font-size:11px;color:var(--t3);font-family:var(--mono);}
+
 nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0;}
 .tab{flex:1;padding:9px 4px 8px;text-align:center;font-size:10px;font-weight:700;color:var(--t3);border-bottom:2px solid transparent;cursor:pointer;transition:color .15s,border-color .15s;}
 .tab .ti{font-size:15px;display:block;margin-bottom:1px;}
 .tab.on{color:var(--acc);border-bottom-color:var(--acc);}
-.pages{flex:1;overflow:hidden;position:relative;min-height:0;}
-.page{position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 72px;display:none;}
-.page::-webkit-scrollbar{width:2px;}.page::-webkit-scrollbar-thumb{background:var(--border);}
+
+.pages{flex:1;overflow:hidden;position:relative;}
+.page{position:absolute;inset:0;overflow-y:auto;padding:12px 14px 72px;display:none;}
+.page.on{display:block;}
+.page::-webkit-scrollbar{width:2px;}
+.page::-webkit-scrollbar-thumb{background:var(--border);}
+
 .cash-row{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px;}
 .cash-row label{font-size:11px;color:var(--t3);white-space:nowrap;}
 .cash-row input{flex:1;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:18px;font-weight:700;text-align:right;outline:none;min-width:0;}
 .cash-row span{font-size:12px;color:var(--t3);}
+
 .sum-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px;}
 .sb{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px;}
 .sl{font-size:9px;color:var(--t3);margin-bottom:3px;letter-spacing:.04em;}
 .sv{font-family:var(--mono);font-size:15px;font-weight:700;}
 .ss{font-size:9px;color:var(--t3);margin-top:2px;}
 .up{color:var(--green);}.dn{color:var(--red);}
+
 .hrow{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:7px;}
 .hrt{display:flex;justify-content:space-between;align-items:center;}
 .hnm{font-size:14px;font-weight:700;}.hcd{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:1px;}
@@ -58,6 +58,7 @@ nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex
 .as{background:rgba(239,68,68,.15);color:var(--red);}.ag{background:rgba(16,185,129,.15);color:var(--green);}.aw{background:rgba(245,158,11,.15);color:var(--yellow);}
 .cpin{background:transparent;border:none;color:var(--acc);font-family:var(--mono);font-size:11px;font-weight:700;width:56px;text-align:right;outline:none;border-bottom:1px dashed var(--border);}
 .delbtn{font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:4px 0;margin-top:4px;}
+
 .fl{font-size:11px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px;letter-spacing:.04em;}
 .fi{width:100%;background:var(--s1);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:15px;padding:9px 11px;outline:none;transition:border-color .15s;margin-bottom:10px;}
 .fi:focus{border-color:var(--acc);}.fi::placeholder{color:var(--t3);font-size:13px;}
@@ -66,291 +67,168 @@ nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex
 .btn:active{transform:scale(.98);}.btn:disabled{opacity:.4;cursor:not-allowed;}
 .btnb{background:linear-gradient(135deg,#1d4ed8,#0891b2);}
 .btns{background:linear-gradient(135deg,#dc2626,#7c3aed);}
-.btn-ss{background:linear-gradient(135deg,#4285f4,#0ea5e9);margin-bottom:8px;}
-.btn-apply{background:linear-gradient(135deg,#059669,#0284c7);}
 select.fi{appearance:none;-webkit-appearance:none;}
+
 .trow{display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--s1);border-radius:9px;margin-bottom:6px;}
 .tside{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;}
 .tb{background:rgba(16,185,129,.15);color:var(--green);}.ts{background:rgba(239,68,68,.15);color:var(--red);}
 .tinfo{flex:1;}.tnm{font-size:13px;font-weight:600;}.tmeta{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:1px;}
 .tpnl{font-family:var(--mono);font-size:13px;font-weight:700;}
+
+/* 振り返り */
 .rev-btn{width:100%;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:1px solid var(--border);border-radius:11px;color:#fff;font-family:var(--font);font-size:15px;font-weight:700;padding:14px;cursor:pointer;margin-bottom:12px;transition:opacity .15s;}
 .rev-btn:disabled{opacity:.5;}
+
+/* AIカード */
 .rcard{background:var(--s1);border:1px solid var(--border);border-radius:11px;overflow:hidden;margin-bottom:10px;}
 .rhdr{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--border);}
-.rbody{padding:13px;font-size:13px;line-height:1.85;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;}
+.rbody{padding:13px;}
+
+/* AI2段表示（Gemini + Claude並列）*/
+.dual-body{display:flex;flex-direction:column;gap:0;}
+.ai-pane{padding:12px 13px;}
+.ai-pane+.ai-pane{border-top:1px solid var(--border);}
+.ai-pane-hdr{display:flex;align-items:center;gap:6px;margin-bottom:7px;}
 .ai-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:.04em;}
 .pill-g{background:rgba(66,133,244,.15);color:var(--gem);}
 .pill-c{background:rgba(217,119,6,.15);color:var(--cld);}
+.ai-text{font-size:13px;line-height:1.85;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;}
+
+/* チャット */
 #page-chat{padding:0;display:flex;flex-direction:column;}
-.cscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 8px;min-height:0;}
+.cscroll{flex:1;overflow-y:auto;padding:12px 14px 8px;}
 .cmsg{display:flex;gap:7px;margin-bottom:8px;align-items:flex-start;}
 .cmsg.u{flex-direction:row-reverse;}
 .cb{background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:9px 12px;font-size:13px;line-height:1.7;max-width:86%;white-space:pre-wrap;word-break:break-word;}
 .cmsg.u .cb{background:rgba(37,99,235,.18);border-color:rgba(59,130,246,.25);}
 .cav{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;background:var(--s2);}
+
+/* 合議吹き出し（Gemini + Claude 2段） */
 .dual-bubble{background:var(--s1);border:1px solid var(--border);border-radius:11px;overflow:hidden;max-width:90%;margin-bottom:8px;}
 .db-pane{padding:9px 12px;font-size:13px;line-height:1.75;white-space:pre-wrap;word-break:break-word;}
 .db-pane+.db-pane{border-top:1px solid var(--border);}
 .db-hdr{font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;display:inline-block;margin-bottom:5px;}
 .dhg{background:rgba(66,133,244,.15);color:var(--gem);}
 .dhc{background:rgba(217,119,6,.15);color:var(--cld);}
+
 .cbar{display:flex;gap:7px;padding:8px 12px;background:var(--s1);border-top:1px solid var(--border);}
 .cin{flex:1;background:var(--s2);border:1.5px solid var(--border);border-radius:9px;color:var(--text);font-family:var(--font);font-size:14px;padding:9px 11px;outline:none;resize:none;transition:border-color .15s;max-height:90px;}
 .cin:focus{border-color:var(--acc);}
 .csend{width:40px;height:40px;background:var(--acc);border:none;border-radius:9px;color:#fff;font-size:17px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
 .csend:disabled{opacity:.4;}
+
+/* チャットモード切替 */
 .mode-row{display:flex;gap:6px;padding:6px 12px;background:var(--s1);border-bottom:1px solid var(--border);}
 .mode-btn{flex:1;padding:6px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--t3);font-size:11px;font-weight:700;cursor:pointer;transition:.15s;}
-.mode-btn.on{background:var(--s2);color:var(--text);border-color:var(--border);}
+.mode-btn.on{background:var(--s2);color:var(--text);border-color:var(--b2);}
+
 @keyframes spin{to{transform:rotate(360deg);}}
 .spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
 .ldg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t3);padding:4px 0;}
+
 .toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:9px 18px;font-size:13px;font-weight:600;opacity:0;transition:all .25s;pointer-events:none;z-index:999;white-space:nowrap;}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
 .empty{text-align:center;padding:36px 20px;color:var(--t3);font-size:13px;}
 .empty .ei{font-size:36px;margin-bottom:8px;}
 .sec-lbl{font-size:11px;color:var(--t3);font-weight:700;letter-spacing:.06em;margin-bottom:6px;}
+
+/* コストバッジ */
 .cost-note{font-size:10px;color:var(--t3);text-align:right;margin-bottom:8px;}
 .cost-note span{background:var(--s2);padding:2px 7px;border-radius:5px;}
-.ss-zone{border:2px dashed var(--border);border-radius:12px;padding:18px 14px;text-align:center;margin-bottom:12px;cursor:pointer;transition:border-color .2s,background .2s;background:var(--s1);}
-.ss-zone.drag,.ss-zone:active{border-color:var(--acc);background:rgba(59,130,246,.05);}
-.ss-zone-icon{font-size:28px;margin-bottom:6px;}
-.ss-zone-txt{font-size:13px;font-weight:600;color:var(--t2);}
-.ss-zone-sub{font-size:11px;color:var(--t3);margin-top:3px;}
-.ss-type{padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--s1);color:var(--t3);font-size:11px;font-weight:700;text-align:center;cursor:pointer;transition:.15s;}
-.ss-type.on{border-color:var(--acc);color:var(--acc);background:rgba(59,130,246,.08);}
-.ss-result{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;font-size:12px;line-height:1.8;color:var(--t2);display:none;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
-.ss-result.show{display:block;}
-.wrow{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;}
-.winfo{flex:1;}.wnm{font-size:13px;font-weight:700;}
-.wmeta{font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:2px;}
-.wtag{font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(59,130,246,.12);color:var(--acc);margin-left:4px;}
-.wdel{background:none;border:none;color:var(--t3);font-size:14px;cursor:pointer;padding:4px;}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s;}
-.modal-overlay.on{opacity:1;pointer-events:all;}
-.modal{background:var(--s1);border:1px solid var(--border);border-radius:16px 16px 0 0;width:100%;padding:16px;max-height:80vh;overflow-y:auto;transform:translateY(100%);transition:transform .25s;}
-.modal-overlay.on .modal{transform:translateY(0);}
-.modal-title{font-size:15px;font-weight:700;margin-bottom:12px;}
-.modal-item{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:11px 12px;margin-bottom:8px;}
-.modal-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
-.modal-item-name{font-size:14px;font-weight:700;}
-.modal-item-meta{font-size:11px;color:var(--t3);font-family:var(--mono);}
-.modal-chk{width:20px;height:20px;accent-color:var(--acc);}
-.modal-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
-.btn-sm{border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:700;padding:11px;cursor:pointer;}
-.btn-cancel{background:var(--s2);color:var(--t2);border:1px solid var(--border);}
-.btn-import{background:linear-gradient(135deg,#059669,#0284c7);}
-.key-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;}
-.key-modal{background:var(--s1);border:1px solid var(--border);border-radius:16px;width:100%;max-width:420px;padding:20px;}
-.key-modal-title{font-size:16px;font-weight:700;margin-bottom:4px;}
-.key-modal-sub{font-size:12px;color:var(--t3);margin-bottom:16px;line-height:1.6;}
-.key-row{margin-bottom:12px;}
-.key-label{font-size:11px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px;}
-.key-input{width:100%;background:var(--s2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--mono);font-size:13px;padding:10px 12px;outline:none;transition:border-color .15s;}
-.key-input:focus{border-color:var(--acc);}
-.key-input::placeholder{color:var(--t3);}
-.key-save-btn{width:100%;background:linear-gradient(135deg,#1d4ed8,#0891b2);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;padding:13px;cursor:pointer;margin-top:4px;}
-.key-skip{display:block;text-align:center;font-size:12px;color:var(--t3);margin-top:10px;cursor:pointer;text-decoration:underline;}
-.hdr-key-btn{background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--t2);font-size:11px;font-weight:700;padding:5px 10px;cursor:pointer;white-space:nowrap;}
-
-/* 銘柄スコアリング */
-.score-card{background:var(--s1);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px;}
-.score-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);}
-.score-title{font-size:14px;font-weight:700;}
-.score-badge{font-family:var(--mono);font-size:22px;font-weight:700;}
-.score-badge.s{color:#f59e0b;}.score-badge.a{color:#10b981;}.score-badge.b{color:#3b82f6;}.score-badge.c{color:var(--t3);}
-.score-bars{padding:10px 14px;border-bottom:1px solid var(--border);}
-.score-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
-.score-bar-lbl{font-size:10px;color:var(--t3);width:52px;flex-shrink:0;}
-.score-bar-track{flex:1;height:6px;background:var(--s2);border-radius:3px;overflow:hidden;}
-.score-bar-fill{height:100%;border-radius:3px;transition:width .4s;}
-.score-bar-val{font-size:11px;font-family:var(--mono);font-weight:700;width:28px;text-align:right;flex-shrink:0;}
-.score-ai{padding:10px 14px;}
-.score-ai-row{margin-bottom:8px;}
-.score-ai-hdr{font-size:10px;font-weight:700;margin-bottom:4px;}
-.score-ai-txt{font-size:12px;line-height:1.7;color:var(--t2);}
-/* 振り返りカード折りたたみ */
-.rcard-toggle{cursor:pointer;}
-.rcard-toggle .rhdr{user-select:none;}
-.rcard-body-wrap{overflow:hidden;transition:max-height .3s;}
-.rcard-body-wrap.collapsed{max-height:60px;}
-.rcard-body-wrap.expanded{max-height:2000px;}
-.rcard-fade{position:relative;}
-.rcard-fade::after{content:'';position:absolute;bottom:0;left:0;right:0;height:30px;background:linear-gradient(transparent,var(--s1));pointer-events:none;}
-.rcard-fade.expanded::after{display:none;}
-.expand-btn{display:block;text-align:center;font-size:11px;color:var(--acc);padding:4px 0 8px;cursor:pointer;}
 </style>
 </head>
 <body>
+
 <header>
   <div class="logo">📒 Trade<span>Journal</span></div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <div id="ds"></div>
-    <button class="hdr-key-btn" onclick="openKeyModal()">🔑 API設定</button>
-  </div>
+  <div id="ds"></div>
 </header>
+
 <nav>
   <div class="tab on" onclick="go('dash')"><span class="ti">📊</span>概況</div>
   <div class="tab" onclick="go('trade')"><span class="ti">💱</span>売買</div>
   <div class="tab" onclick="go('hold')"><span class="ti">💼</span>保有</div>
-  <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
-  <div class="tab" onclick="go('morning')"><span class="ti">🌅</span>朝チェック</div>
   <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
-  <div class="tab" onclick="go('analyze')"><span class="ti">🔬</span>銘柄分析</div>
   <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
 </nav>
+
 <div class="pages">
 
+<!-- 概況 -->
 <div class="page on" id="page-dash">
-  <div class="cash-row"><label>残金</label><input id="cashIn" type="number" placeholder="0" oninput="saveCash()"><span>円</span></div>
+  <div class="cash-row">
+    <label>残金</label>
+    <input id="cashIn" type="number" placeholder="0" oninput="saveCash()">
+    <span>円</span>
+  </div>
   <div class="sum-row">
     <div class="sb"><div class="sl">評価額</div><div class="sv" id="sv">¥0</div><div class="ss" id="sct">0銘柄</div></div>
     <div class="sb"><div class="sl">含み損益</div><div class="sv" id="sp">¥0</div><div class="ss" id="spp">0.0%</div></div>
     <div class="sb"><div class="sl">実現損益</div><div class="sv" id="sr">¥0</div><div class="ss" id="stc">0件</div></div>
   </div>
-  <div id="dh"></div><div id="dt" style="margin-top:8px"></div>
+  <div id="dh"></div>
+  <div id="dt" style="margin-top:8px"></div>
 </div>
 
+<!-- 売買 -->
 <div class="page" id="page-trade">
-  <div style="margin-bottom:14px">
-    <div class="sec-lbl">📷 スクリーンショットから自動読み込み</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
-      <div class="ss-type on" id="sst-hold" onclick="setSsType('hold')">💼 保有銘柄</div>
-      <div class="ss-type" id="sst-hist" onclick="setSsType('hist')">📋 約定履歴</div>
-      <div class="ss-type" id="sst-pnl" onclick="setSsType('pnl')">💰 損益履歴</div>
-      <div class="ss-type" id="sst-watch" onclick="setSsType('watch')">👁 ウォッチ</div>
-      <div class="ss-type" id="sst-cash" onclick="setSsType('cash')">💴 余力・残金</div>
-      <div class="ss-type" id="sst-summary" onclick="setSsType('summary')">📊 評価損益</div>
-    </div>
-    <input type="file" accept="image/*" id="ssFileInput" style="display:none" multiple onchange="onFileSelect(event)">
-    <div class="ss-zone" id="ssZone" onclick="document.getElementById('ssFileInput').click()"
-      ondragover="event.preventDefault();this.classList.add('drag')"
-      ondragleave="this.classList.remove('drag')"
-      ondrop="onDrop(event)">
-      <div class="ss-zone-icon">📸</div>
-      <div class="ss-zone-txt">タップして画像を選ぶ（最大20枚）</div>
-      <div class="ss-zone-sub">複数枚まとめて選択OK・一括で読み取ります</div>
-    </div>
-    <div id="ssPreviewList" style="display:none;margin-bottom:10px">
-      <div id="ssPreviewGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px"></div>
-      <div id="ssFileCount" style="font-size:12px;color:var(--t2);text-align:center"></div>
-    </div>
-    <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshots()" style="display:none">🤖 Geminiで一括読み取る</button>
-    <div class="ss-result" id="ssResult"></div>
-    <button class="btn btn-apply" id="ssApplyBtn" onclick="showImportModal()" style="display:none">✅ 上記の内容を取り込む</button>
+  <select class="fi" id="ta" onchange="onAct()">
+    <option value="buy">🟢 買い（新規）</option>
+    <option value="sell">🔴 売り（決済）</option>
+  </select>
+  <div class="frow">
+    <div><label class="fl">証券コード</label><input class="fi" id="tc" type="text" inputmode="numeric" placeholder="3778" maxlength="5" style="margin-bottom:0"></div>
+    <div><label class="fl">銘柄名</label><input class="fi" id="tn" type="text" placeholder="さくらインターネット" style="margin-bottom:0"></div>
   </div>
-  <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:10px">
-    <div class="sec-lbl">✏️ 手動で記録</div>
-    <select class="fi" id="ta" onchange="onAct()">
-      <option value="buy">🟢 買い（新規）</option>
-      <option value="sell">🔴 売り（決済）</option>
-    </select>
+  <div class="frow" style="margin-top:8px">
+    <div><label class="fl">株数</label><input class="fi" id="tsh" type="number" inputmode="numeric" placeholder="100" style="margin-bottom:0"></div>
+    <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0"></div>
+  </div>
+  <div id="buyEx" style="margin-top:8px">
     <div class="frow">
-      <div><label class="fl">証券コード</label><input class="fi" id="tc" type="text" inputmode="numeric" placeholder="3778" maxlength="5" style="margin-bottom:0"></div>
-      <div><label class="fl">銘柄名</label><input class="fi" id="tn" type="text" placeholder="さくらインターネット" style="margin-bottom:0"></div>
-    </div>
-    <div class="frow" style="margin-top:8px">
-      <div><label class="fl">株数</label><input class="fi" id="tsh" type="number" inputmode="numeric" placeholder="100" style="margin-bottom:0"></div>
-      <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0"></div>
-    </div>
-    <div id="buyEx" style="margin-top:8px">
-      <div class="frow">
-        <div><label class="fl">損切りライン</label><input class="fi" id="tsl" type="number" inputmode="decimal" placeholder="2420" style="margin-bottom:0"></div>
-        <div><label class="fl">利確目標</label><input class="fi" id="ttgt" type="number" inputmode="decimal" placeholder="4130" style="margin-bottom:0"></div>
-      </div>
-      <div class="frow" style="margin-top:8px">
-      <div><label class="fl">買付日</label><input class="fi" id="tdt" type="date" style="margin-bottom:0"></div>
-      <div><label class="fl">取引区分</label>
-        <select class="fi" id="ttype" style="margin-bottom:0">
-          <option value="spot">現物</option>
-          <option value="margin">信用買</option>
-        </select>
-      </div>
+      <div><label class="fl">損切りライン</label><input class="fi" id="tsl" type="number" inputmode="decimal" placeholder="2420" style="margin-bottom:0"></div>
+      <div><label class="fl">利確目標</label><input class="fi" id="ttgt" type="number" inputmode="decimal" placeholder="4130" style="margin-bottom:0"></div>
     </div>
     <div style="margin-top:8px"><label class="fl">メモ（任意）</label><input class="fi" id="tmemo" placeholder="エントリー理由など" style="margin-bottom:0"></div>
-    </div>
-    <button class="btn btnb" id="tBtn" style="margin-top:10px" onclick="doTrade()">💱 買いを記録する</button>
   </div>
+  <button class="btn btnb" id="tBtn" style="margin-top:10px" onclick="doTrade()">💱 買いを記録する</button>
   <div class="sec-lbl" style="margin-top:14px">売買履歴</div>
   <div id="tHist"></div>
 </div>
 
-<div class="page" id="page-hold"><div id="hList"></div></div>
-
-<div class="page" id="page-watch">
-  <div class="sec-lbl">👁 注目銘柄ウォッチリスト</div>
-  <div style="display:flex;gap:6px;margin-bottom:10px">
-    <input class="fi" id="wCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:80px;flex:none;margin-bottom:0">
-    <input class="fi" id="wName" type="text" placeholder="銘柄名" style="flex:1;margin-bottom:0">
-    <input class="fi" id="wTag" type="text" placeholder="メモ" style="flex:1;margin-bottom:0">
-    <button class="btn btnb" style="width:52px;padding:0;font-size:20px;margin-top:0" onclick="addWatch()">＋</button>
-  </div>
-  <div id="watchList"></div>
+<!-- 保有 -->
+<div class="page" id="page-hold">
+  <div id="hList"></div>
 </div>
 
-
-<div class="page" id="page-morning">
-  <div class="cost-note"><span>🤖 Gemini: 需給・板情報　🧠 Claude: エントリー判断</span></div>
-
-  <!-- 分析モード切替 -->
-  <div class="mode-row" style="margin-bottom:10px">
-    <button class="mode-btn on" id="mrnAll" onclick="setMrnMode('all')">📋 全銘柄</button>
-    <button class="mode-btn" id="mrnHold" onclick="setMrnMode('hold')">💼 保有のみ</button>
-    <button class="mode-btn" id="mrnWatch" onclick="setMrnMode('watch')">👁 注目のみ</button>
-  </div>
-
-  <!-- 実行ボタン -->
-  <button class="rev-btn" id="mrnBtn" onclick="doMorning()" style="background:linear-gradient(135deg,#1e3a5f,#0f3460)">
-    🌅 朝の板チェックを開始<br>
-    <span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>
-  </button>
-
-  <!-- 結果表示エリア -->
-  <div id="mrnOut"></div>
-</div>
-
+<!-- 振り返り -->
 <div class="page" id="page-rev">
-  <div class="cost-note"><span>🤖 Gemini: 相場分析　🧠 Claude: 明日の戦略</span></div>
-  <button class="rev-btn" id="revBtn" onclick="doRev()" style="background:linear-gradient(135deg,#1e3a5f,#3b1f5e)">
-    🌆 夕方の振り返りを開始<br>
-    <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>
+  <div class="cost-note">
+    <span>🤖 Gemini: 情報収集（安価）　🧠 Claude: 戦略分析</span>
+  </div>
+  <button class="rev-btn" id="revBtn" onclick="doRev()">
+    🔍 今日の振り返りを開始する<br>
+    <span style="font-size:11px;opacity:.75">🤖Gemini×3セクション + 🧠Claude×戦略アドバイス</span>
   </button>
   <div id="revOut"></div>
 </div>
 
-
-<div class="page" id="page-analyze">
-  <div class="cost-note"><span>🤖 Gemini: テーマ・需給　🧠 Claude: テクニカル・判断</span></div>
-
-  <!-- 銘柄入力 -->
-  <div style="display:flex;gap:8px;margin-bottom:10px">
-    <input class="fi" id="azCode" type="text" inputmode="numeric" placeholder="コード例: 3778" maxlength="5"
-      style="width:90px;flex:none;margin:0;font-family:var(--mono)">
-    <input class="fi" id="azName" type="text" placeholder="銘柄名（任意）"
-      style="flex:1;margin:0">
-    <button class="btn btnb" style="width:52px;padding:0;font-size:18px;margin:0"
-      onclick="doAnalyze()">🔬</button>
-  </div>
-
-  <!-- クイック選択（保有・ウォッチから） -->
-  <div id="azQuickList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
-
-  <!-- 結果エリア -->
-  <div id="azOut"></div>
-</div>
-
+<!-- 相談チャット -->
 <div class="page" id="page-chat">
   <div class="mode-row">
-    <button class="mode-btn on" id="modeGC" onclick="setMode('gc')">🤝 合議</button>
-    <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini</button>
-    <button class="mode-btn" id="modeC" onclick="setMode('c')">🧠 Claude</button>
+    <button class="mode-btn on" id="modeGC" onclick="setMode('gc')">🤝 合議（Gemini+Claude）</button>
+    <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini速報</button>
+    <button class="mode-btn" id="modeC" onclick="setMode('c')">🧠 Claude戦略</button>
   </div>
-  <div class="cscroll" id="cMsgs"></div>
+  <div class="cscroll" id="cMsgs">
+    <div class="cmsg">
+      <div class="cav">🤝</div>
+      <div class="cb">こんにちは！合議モードでお答えします。<br>🤖<b>Gemini</b>が最新市場情報を、🧠<b>Claude</b>が戦略・判断をお伝えします。<br>右上でモードを切替えられます。</div>
+    </div>
+  </div>
   <div class="cbar">
     <textarea class="cin" id="cinp" placeholder="質問を入力…" rows="1"
-      oninput="autoH(this)"
-      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();doChat();}"></textarea>
+      oninput="autoH(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();doChat();}"></textarea>
     <button class="csend" id="csend" onclick="doChat()">↑</button>
   </div>
 </div>
@@ -358,1115 +236,372 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </div>
 <div class="toast" id="toast"></div>
 
-<div class="modal-overlay" id="importModal" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <div class="modal-title">📥 取り込む内容を確認</div>
-    <div id="modalItems"></div>
-    <div class="modal-btns">
-      <button class="btn-sm btn-cancel" onclick="closeModal()">キャンセル</button>
-      <button class="btn-sm btn-import" onclick="doImport()">✅ 取り込む</button>
-    </div>
-  </div>
-</div>
-
-<div class="key-modal-overlay" id="keyModal" style="display:none">
-  <div class="key-modal">
-    <div class="key-modal-title">🔑 APIキーを設定</div>
-    <div class="key-modal-sub">
-      キーはこのスマホのみに保存されます。GitHubには保存されません。<br><br>
-      <b>Gemini:</b> aistudio.google.com → Get API key<br>
-      <b>Anthropic:</b> console.anthropic.com → API Keys
-    </div>
-    <div class="key-row">
-      <label class="key-label">🤖 Gemini API Key</label>
-      <input class="key-input" id="keyGemini" type="password" placeholder="AIzaSy...">
-    </div>
-    <div class="key-row">
-      <label class="key-label">🧠 Anthropic API Key</label>
-      <input class="key-input" id="keyAnthropic" type="password" placeholder="sk-ant-...">
-    </div>
-    <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
-    <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
-  </div>
-</div>
-
 <script>
-// APIキー（localStorageから）
-let GK = localStorage.getItem('tj_gk') || '';
-let CK = localStorage.getItem('tj_ck') || '';
+// ★ APIキー（ここを書き換えてください）
+const GEMINI_KEY    = "あなたのGeminiAPIキー";
+const ANTHROPIC_KEY = "あなたのAnthropicAPIキー";
 
 // ストレージ
-const KH='tj_h5', KT='tj_t5', KC='tj_c5', KW='tj_w2';
-const ld = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
-const sv = (k, v) => localStorage.setItem(k, JSON.stringify(v));
-let H = ld(KH, []), T = ld(KT, []), cash = ld(KC, 0), W = ld(KW, []);
+const KH="tj_h4",KT="tj_t4",KC="tj_c4";
+const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d;}catch{return d;}};
+const sv=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+let H=ld(KH,[]),T=ld(KT,[]),cash=ld(KC,0);
 
-const D = new Date(), TODAY = D.toISOString().slice(0, 10);
-const dow = ['日','月','火','水','木','金','土'][D.getDay()];
-document.getElementById('ds').textContent =
-  D.getFullYear() + '/' + String(D.getMonth()+1).padStart(2,'0') + '/' + String(D.getDate()).padStart(2,'0') + '(' + dow + ')';
-document.getElementById('cashIn').value = cash || '';
+const D=new Date(),TODAY=D.toISOString().slice(0,10);
+document.getElementById("ds").textContent=
+  `${D.getFullYear()}/${String(D.getMonth()+1).padStart(2,"0")}/${String(D.getDate()).padStart(2,"0")}(${["日","月","火","水","木","金","土"][D.getDay()]})`;
+document.getElementById("cashIn").value=cash||"";
 
 // タブ
-function go(id) {
-  const ids = ['dash','trade','hold','watch','morning','rev','analyze','chat'];
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
-  document.querySelectorAll('.page').forEach(p => {
-    const active = p.id === 'page-' + id;
-    if (active && p.id === 'page-chat') {
-      p.style.display = 'flex';
-      p.style.flexDirection = 'column';
-    } else {
-      p.style.display = active ? 'block' : 'none';
-    }
-    p.style.pointerEvents = active ? 'auto' : 'none';
-    p.style.zIndex = active ? '1' : '0';
-    p.classList.toggle('on', active);
-  });
-  if (id==='dash')  rDash();
-  if (id==='hold')  rHold();
-  if (id==='trade') rTH();
-  if (id==='watch') rWatch();
-  if (id==='analyze') rAnalyzeQuick();
+function go(id){
+  const ids=["dash","trade","hold","rev","chat"];
+  document.querySelectorAll(".tab").forEach((t,i)=>t.classList.toggle("on",ids[i]===id));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("on",p.id==="page-"+id));
+  if(id==="dash")rDash();
+  if(id==="hold")rHold();
+  if(id==="trade")rTH();
 }
 
-function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
+function saveCash(){cash=parseFloat(document.getElementById("cashIn").value)||0;sv(KC,cash);calcS();}
 
-function calcS() {
-  let cost = 0, val = 0;
-  for (const h of H) { cost += h.bp * h.sh; val += (h.cp || h.bp) * h.sh; }
-  const pnl = val - cost, pct = cost > 0 ? pnl / cost * 100 : 0;
-  const rel = T.filter(t => t.a === 'sell').reduce((s, t) => s + (t.pnl || 0), 0);
-  const f = v => (v >= 0 ? '¥' : '-¥') + Math.abs(Math.round(v)).toLocaleString();
-  const c = v => v >= 0 ? 'up' : 'dn';
-  set('sv', f(val), c(val)); set('sct', H.length + '銘柄', '');
-  set('sp', f(pnl), c(pnl)); set('spp', (pnl>=0?'+':'') + pct.toFixed(2) + '%', c(pnl));
-  set('sr', f(rel), c(rel)); document.getElementById('stc').textContent = T.length + '件';
+function calcS(){
+  let cost=0,val=0;
+  for(const h of H){cost+=h.bp*h.sh;val+=(h.cp||h.bp)*h.sh;}
+  const pnl=val-cost,pct=cost>0?pnl/cost*100:0;
+  const rel=T.filter(t=>t.a==="sell").reduce((s,t)=>s+(t.pnl||0),0);
+  const f=v=>(v>=0?"¥":"-¥")+Math.abs(Math.round(v)).toLocaleString();
+  const c=v=>v>=0?"up":"dn";
+  set("sv",f(val),c(val));set("sct",H.length+"銘柄","");
+  set("sp",f(pnl),c(pnl));set("spp",(pnl>=0?"+":"")+pct.toFixed(2)+"%",c(pnl));
+  set("sr",f(rel),c(rel));document.getElementById("stc").textContent=T.length+"件";
 }
-function set(id, v, cls) { const e = document.getElementById(id); e.textContent = v; e.className = 'sv' + (cls ? ' ' + cls : ''); }
+function set(id,v,cls){const e=document.getElementById(id);e.textContent=v;e.className="sv"+(cls?" "+cls:"");}
 
-function rDash() {
+function rDash(){
   calcS();
-  const he = document.getElementById('dh');
-  he.innerHTML = H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map(h => hHTML(h, true)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>';
-  const te = document.getElementById('dt');
-  const rec = [...T].reverse().slice(0, 3);
-  te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
+  const he=document.getElementById("dh");
+  he.innerHTML=H.length?`<div class="sec-lbl">保有銘柄</div>`+H.map(h=>hHTML(h,true)).join(""):`<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>`;
+  const te=document.getElementById("dt");
+  const rec=[...T].reverse().slice(0,3);
+  te.innerHTML=rec.length?`<div class="sec-lbl">直近の売買</div>`+rec.map(tHTML).join(""):"";
 }
 
-function hHTML(h, compact) {
-  const cp = h.cp || h.bp, pnl = (cp - h.bp) * h.sh, pct = (cp - h.bp) / h.bp * 100;
-  const cls = pnl >= 0 ? 'up' : 'dn';
-  const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
-  let al = '';
-  if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
-  else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
-  else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
-  let html = '<div class="hrow">' + al +
-    '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
-    '<div><div class="hpnl ' + cls + '">' + (pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString() + '</div>' +
-    '<div class="hpct ' + cls + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</div></div></div>' +
-    '<div class="hmeta">' +
-    '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
-    '<span class="hbg">' + h.sh + '株</span><span class="hbg">買 ' + h.bp.toLocaleString() + '円</span>' +
-    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',this.value)">円</span>' +
-    (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
-    '</div>';
-  if (!compact) {
-    html += '<div class="hlines">' +
-      '<div class="hl s"><div class="hll">損切り</div><div class="hlv">' + (h.sl ? h.sl.toLocaleString()+'円' : '－') + '</div></div>' +
-      '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
-      '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
-      (h.memo ? '<div style="font-size:11px;color:var(--t3);margin-top:5px">📝' + h.memo + '</div>' : '') +
-      '<div style="display:flex;gap:6px;margin-top:8px">'+
-      '<button class="delbtn" onclick="delH(\'' + h.cd + '\')" style="flex:none">🗑 削除</button>'+
-      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 損切り・利確・売買判断を分析</button>'+
-      '</div>'+
-      '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>';
+function hHTML(h,compact){
+  const cp=h.cp||h.bp,pnl=(cp-h.bp)*h.sh,pct=(cp-h.bp)/h.bp*100;
+  const cls=pnl>=0?"up":"dn";
+  const toS=h.sl?((cp-h.sl)/cp*100).toFixed(1):null;
+  let al="";
+  if(h.sl&&cp<=h.sl)al=`<div class="abar as">🚨 損切りライン到達</div>`;
+  else if(h.tgt&&cp>=h.tgt)al=`<div class="abar ag">🎯 利確目標到達</div>`;
+  else if(toS&&parseFloat(toS)<=3)al=`<div class="abar aw">⚠️ 損切りまで残り${toS}%</div>`;
+  return `<div class="hrow">${al}
+    <div class="hrt">
+      <div><div class="hnm">${h.nm}</div><div class="hcd">${h.cd}｜${h.dt}</div></div>
+      <div><div class="hpnl ${cls}">${pnl>=0?"¥+":"-¥"}${Math.abs(Math.round(pnl)).toLocaleString()}</div>
+           <div class="hpct ${cls}">${pct>=0?"+":""}${pct.toFixed(2)}%</div></div>
+    </div>
+    <div class="hmeta">
+      <span class="hbg">${h.sh}株</span>
+      <span class="hbg">買 ${h.bp.toLocaleString()}円</span>
+      <span class="hbg">現 <input class="cpin" type="number" value="${cp}" onchange="uCP('${h.cd}',this.value)">円</span>
+    </div>
+    ${!compact?`<div class="hlines">
+      <div class="hl s"><div class="hll">損切り</div><div class="hlv">${h.sl?h.sl.toLocaleString()+"円":"－"}</div></div>
+      <div class="hl c"><div class="hll">現在値</div><div class="hlv">${cp.toLocaleString()}円</div></div>
+      <div class="hl t"><div class="hll">目標</div><div class="hlv">${h.tgt?h.tgt.toLocaleString()+"円":"－"}</div></div>
+    </div>${h.memo?`<div style="font-size:11px;color:var(--t3);margin-top:5px">📝${h.memo}</div>`:""}
+    <button class="delbtn" onclick="delH('${h.cd}')">🗑 削除</button>`:""}
+  </div>`;
+}
+
+function tHTML(t){
+  const ib=t.a==="buy";
+  const ps=t.pnl!=null?(t.pnl>=0?"+¥":"-¥")+Math.abs(Math.round(t.pnl)).toLocaleString():"";
+  return `<div class="trow">
+    <div class="tside ${ib?"tb":"ts"}">${ib?"買":"売"}</div>
+    <div class="tinfo"><div class="tnm">${t.nm} <span style="color:var(--t3)">${t.cd}</span></div>
+    <div class="tmeta">${t.p.toLocaleString()}円×${t.sh}株　${t.dt}</div></div>
+    <div class="tpnl ${t.pnl==null?"":(t.pnl>=0?"up":"dn")}">${ps}</div>
+  </div>`;
+}
+
+function uCP(cd,v){const h=H.find(h=>h.cd===cd);if(h){h.cp=parseFloat(v)||h.bp;sv(KH,H);calcS();}}
+function delH(cd){if(!confirm("削除しますか？"))return;H=H.filter(h=>h.cd!==cd);sv(KH,H);rHold();toast("削除しました");}
+function rHold(){document.getElementById("hList").innerHTML=H.length?H.map(h=>hHTML(h,false)).join(""):`<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>`;}
+
+function onAct(){
+  const b=document.getElementById("ta").value==="buy";
+  document.getElementById("buyEx").style.display=b?"":"none";
+  document.getElementById("tBtn").textContent=b?"💱 買いを記録する":"💰 売りを記録する";
+  document.getElementById("tBtn").className="btn "+(b?"btnb":"btns");
+}
+function doTrade(){
+  const a=document.getElementById("ta").value;
+  const cd=document.getElementById("tc").value.trim();
+  const nm=document.getElementById("tn").value.trim();
+  const sh=parseFloat(document.getElementById("tsh").value);
+  const p=parseFloat(document.getElementById("tp").value);
+  if(!cd||!nm||!sh||!p){toast("⚠️ コード・銘柄名・株数・価格は必須");return;}
+  if(a==="buy"){
+    const sl=parseFloat(document.getElementById("tsl").value)||null;
+    const tgt=parseFloat(document.getElementById("ttgt").value)||null;
+    const memo=document.getElementById("tmemo").value.trim();
+    const idx=H.findIndex(h=>h.cd===cd);
+    if(idx>=0){const ex=H[idx],tot=ex.sh+sh;H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10};}
+    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:TODAY,cp:p});
+    sv(KH,H);cash=Math.max(0,cash-p*sh);sv(KC,cash);
+    document.getElementById("cashIn").value=cash||"";
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY});sv(KT,T);
+    toast(`✅ ${nm} 買い記録`);
+  }else{
+    const h=H.find(h=>h.cd===cd);let pnl=null;
+    if(h){pnl=(p-h.bp)*sh;if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd);else h.sh-=sh;sv(KH,H);}
+    cash+=p*sh;sv(KC,cash);
+    document.getElementById("cashIn").value=cash||"";
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl});sv(KT,T);
+    const ps=pnl!=null?` 損益${pnl>=0?"+":"-"}¥${Math.abs(Math.round(pnl)).toLocaleString()}`:"";
+    toast(`✅ ${nm} 売り記録${ps}`);
   }
-  return html + '</div>';
-}
-
-function tHTML(t) {
-  const ib = t.a === 'buy';
-  const ps = t.pnl != null ? (t.pnl>=0?'+¥':'-¥') + Math.abs(Math.round(t.pnl)).toLocaleString() : '';
-  return '<div class="trow"><div class="tside ' + (ib?'tb':'ts') + '">' + (ib?'買':'売') + '</div>' +
-    '<div class="tinfo"><div class="tnm">' + t.nm + ' <span style="color:var(--t3)">' + t.cd + '</span></div>' +
-    '<div class="tmeta">' + t.p.toLocaleString() + '円×' + t.sh + '株　' + t.dt + '</div></div>' +
-    '<div class="tpnl ' + (t.pnl==null?'':(t.pnl>=0?'up':'dn')) + '">' + ps + '</div></div>';
-}
-
-// 個別銘柄AI分析（Gemini+Claude合議）
-async function analyzeHolding(cd) {
-  const h = H.find(h => h.cd===cd);
-  if (!h) return;
-  const panel = document.getElementById('ai-'+cd);
-  if (!panel) return;
-
-  if (panel.style.display === 'block' && panel.textContent) {
-    panel.style.display = 'none'; return;
-  }
-  panel.style.display = 'block';
-  panel.textContent = '🤝 GeminiとClaudeが合議中...';
-
-  const cp = h.cp || h.bp;
-  const pnl = (cp - h.bp) * h.sh;
-  const pct = ((cp - h.bp) / h.bp * 100).toFixed(2);
-  const typeStr = h.type === 'margin' ? '信用買建' : '現物';
-  const cost = h.bp * h.sh;
-
-  const prompt =
-    'あなたは運用資産5000億円規模・運用歴25年の日本株専門シニアファンドマネージャーです。\n'+
-    'Google検索で今日の最新情報（株価・ニュース・需給・材料）を必ず調べてから回答してください。\n'+
-    '曖昧な表現は禁止。プロとして断言し、具体的な数字で答えてください。\n\n'+
-    '【保有銘柄】\n'+
-    '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
-    '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株）\n'+
-    '現在値: '+cp.toLocaleString()+'円\n'+
-    '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
-    (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円\n':'')+
-    (h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'')+
-    (h.memo?'メモ: '+h.memo+'\n':'')+
-    '\n【依頼内容】私の大切な資産です。以下を超一流FMとして率直に答えてください：\n\n'+
-    '## 【売買判断】\n'+
-    '「今すぐ売る」「継続保有」「買い増し」のどれか1つを断言し、その理由を3行で。\n\n'+
-    '## 【損切りライン】\n'+
-    '具体的な価格（円）を1つ示し、その根拠（テクニカル・リスク管理の観点）を説明。\n'+
-    '現在値からの下落率も示すこと。\n\n'+
-    '## 【利確目標】\n'+
-    '具体的な価格（円）を1つ示し、その根拠を説明。\n'+
-    '段階的利確が望ましい場合は第1目標・最終目標を示すこと。\n\n'+
-    '## 【最新材料・リスク】\n'+
-    'Google検索で調べた直近のニュース・決算・需給の状況。\n'+
-    'この銘柄の最大のリスク要因も1つ挙げること。\n\n'+
-    '## 【シニアFMの本音】\n'+
-    '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。';
-
-  try {
-    const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: '+e.message),
-      callClaude(prompt, null, null).catch(e => '⚠️ Claude: '+e.message),
-    ]);
-
-    panel.textContent =
-      '🤖 Gemini（市場情報・速報）:\n' + gRes +
-      '\n\n━━━━━━━━━━━━━━━\n\n'+
-      '🧠 Claude（戦略・判断）:\n' + cRes;
-  } catch(e) {
-    panel.textContent = '⚠️ ' + e.message;
-  }
-}
-
-function uCP(cd, v) { const h = H.find(h => h.cd===cd); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
-function delH(cd) { if(!confirm('削除しますか？')) return; H=H.filter(h=>h.cd!==cd); sv(KH,H); rHold(); toast('削除しました'); }
-function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map(h=>hHTML(h,false)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
-
-// ウォッチリスト
-function addWatch() {
-  const cd = document.getElementById('wCode').value.trim();
-  const nm = document.getElementById('wName').value.trim();
-  const tag = document.getElementById('wTag').value.trim();
-  if (!cd || !nm) { toast('⚠️ コードと銘柄名は必須'); return; }
-  if (W.find(w => w.cd===cd)) { toast('すでに追加済みです'); return; }
-  W.push({cd, nm, tag, dt: TODAY}); sv(KW, W);
-  ['wCode','wName','wTag'].forEach(id => document.getElementById(id).value='');
-  rWatch(); toast('👁 ' + nm + ' を追加');
-}
-function delWatch(cd) { W=W.filter(w=>w.cd!==cd); sv(KW,W); rWatch(); }
-function rWatch() {
-  const el = document.getElementById('watchList');
-  if (!W.length) { el.innerHTML='<div class="empty"><div class="ei">👁</div>ウォッチリストなし</div>'; return; }
-  el.innerHTML = W.map(w =>
-    '<div class="wrow"><div class="winfo"><div class="wnm">' + w.nm + '<span class="wtag">' + w.cd + '</span></div>' +
-    '<div class="wmeta">' + (w.tag||'メモなし') + ' / 登録' + w.dt + '</div></div>' +
-    '<button class="wdel" onclick="delWatch(\'' + w.cd + '\')">🗑</button></div>'
-  ).join('');
-}
-
-// 売買記録
-function onAct() {
-  const b = document.getElementById('ta').value === 'buy';
-  document.getElementById('buyEx').style.display = b ? '' : 'none';
-  document.getElementById('tBtn').textContent = b ? '💱 買いを記録する' : '💰 売りを記録する';
-  document.getElementById('tBtn').className = 'btn ' + (b ? 'btnb' : 'btns');
-}
-function doTrade() {
-  const a = document.getElementById('ta').value;
-  const cd = document.getElementById('tc').value.trim();
-  const nm = document.getElementById('tn').value.trim();
-  const sh = parseFloat(document.getElementById('tsh').value);
-  const p = parseFloat(document.getElementById('tp').value);
-  if (!cd||!nm||!sh||!p) { toast('⚠️ コード・銘柄名・株数・価格は必須'); return; }
-  if (a === 'buy') {
-    const sl = parseFloat(document.getElementById('tsl').value) || null;
-    const tgt = parseFloat(document.getElementById('ttgt').value) || null;
-    const memo = document.getElementById('tmemo').value.trim();
-    const tdt = document.getElementById('tdt').value || TODAY;
-    const ttype = document.getElementById('ttype').value || 'spot';
-    const idx = H.findIndex(h => h.cd===cd);
-    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10}; }
-    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p});
-    sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
-    document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY}); sv(KT,T);
-    toast('✅ ' + nm + ' 買い記録');
-  } else {
-    const h = H.find(h => h.cd===cd); let pnl=null;
-    if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
-    cash+=p*sh; sv(KC,cash);
-    document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl}); sv(KT,T);
-    const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
-    toast('✅ ' + nm + ' 売り記録' + ps);
-  }
-  ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
+  ["tc","tn","tsh","tp","tsl","ttgt","tmemo"].forEach(id=>document.getElementById(id).value="");
   rTH();
 }
-function rTH() {
-  document.getElementById('tHist').innerHTML = T.length
-    ? [...T].reverse().slice(0,30).map(tHTML).join('')
-    : '<div class="empty"><div class="ei">📋</div>履歴なし</div>';
-}
+function rTH(){document.getElementById("tHist").innerHTML=T.length?[...T].reverse().slice(0,30).map(tHTML).join(""):`<div class="empty"><div class="ei">📋</div>履歴なし</div>`;}
 
 // ポートフォリオ文字列
-function pfS() {
-  const hs = H.length
-    ? H.map(h => {
-        const cp = h.cp||h.bp, pct = ((cp-h.bp)/h.bp*100).toFixed(1);
-        return h.cd + ' ' + h.nm + ': ' + h.sh + '株 買値' + h.bp + '円 現値' + cp + '円(' + (pct>=0?'+':'') + pct + '%) 損切' + (h.sl||'未') + '→目標' + (h.tgt||'未');
-      }).join('\n')
-    : '保有銘柄なし（現金のみ）';
-  const td = T.filter(t => t.dt===TODAY);
-  const ts = td.length ? '\n本日売買: ' + td.map(t => (t.a==='buy'?'買':'売') + ' ' + t.nm + ' ' + t.p + '円×' + t.sh + '株').join(', ') : '';
-  const ws = W.length ? '\nウォッチ中: ' + W.map(w => w.cd + ' ' + w.nm).join(', ') : '';
-  return hs + ts + ws + '\n残金: ' + Math.round(cash).toLocaleString() + '円';
+function pfS(){
+  if(!H.length)return"保有銘柄なし（現金のみ）";
+  const hs=H.map(h=>{const cp=h.cp||h.bp,pct=((cp-h.bp)/h.bp*100).toFixed(1);
+    return `${h.cd} ${h.nm}: ${h.sh}株 買値${h.bp}円 現値${cp}円(${pct>=0?"+":""}${pct}%) 損切${h.sl||"未"}→目標${h.tgt||"未"}`;
+  }).join("\n");
+  const td=T.filter(t=>t.dt===TODAY);
+  const ts=td.length?"\n本日売買: "+td.map(t=>`${t.a==="buy"?"買":"売"} ${t.nm} ${t.p}円×${t.sh}株`).join(", "):"";
+  return hs+ts+`\n残金: ${Math.round(cash).toLocaleString()}円`;
 }
 
-// ═══════════════════════════════════════════
-// 🌅 朝の板チェック機能
-// ═══════════════════════════════════════════
-let mrnMode = 'all';
-function setMrnMode(m) {
-  mrnMode = m;
-  ['all','hold','watch'].forEach(x => {
-    const el = document.getElementById('mrn' + x.charAt(0).toUpperCase() + x.slice(1));
-    if(el) el.classList.toggle('on', x===m);
-  });
-}
-
-function getMrnTargets() {
-  // 分析対象の銘柄リストを取得
-  let targets = [];
-  if (mrnMode === 'hold' || mrnMode === 'all') {
-    H.forEach(h => targets.push({
-      cd: h.cd, nm: h.nm,
-      bp: h.bp, cp: h.cp || h.bp,
-      sh: h.sh, sl: h.sl, tgt: h.tgt,
-      type: h.type || 'spot',
-      role: '保有中'
-    }));
-  }
-  if (mrnMode === 'watch' || mrnMode === 'all') {
-    W.forEach(w => {
-      if (!targets.find(t => t.cd === w.cd)) {
-        targets.push({cd: w.cd, nm: w.nm, bp: null, cp: null, sh: 0, role: '注目'});
-      }
-    });
-  }
-  return targets;
-}
-
-async function doMorning() {
-  const btn = document.getElementById('mrnBtn');
-  btn.disabled = true;
-  btn.textContent = '🔄 分析中...';
-  const out = document.getElementById('mrnOut');
-  out.innerHTML = '';
-
-  const targets = getMrnTargets();
-  if (!targets.length) {
-    out.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px">保有銘柄・ウォッチリストが登録されていません</div>';
-    btn.disabled = false;
-    btn.innerHTML = '🌅 朝の板チェックを開始<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
-    return;
-  }
-
-  const today = new Date().toLocaleDateString('ja-JP', {month:'numeric',day:'numeric',weekday:'short'});
-  const pf = pfS();
-
-  // ① Gemini: 市場全体の地合い（1枚目カード）
-  const mktCard = mkMrnCard('🌅', '今日の地合い・相場環境', 'var(--gem)', '🤖 Gemini');
-  out.appendChild(mktCard);
-
-  // ② 銘柄別カード（Gemini需給 + Claude判断を並列）
-  const stockCards = targets.map(t => {
-    const card = mkMrnCard(
-      t.role === '保有中' ? '💼' : '👁',
-      t.cd + ' ' + t.nm + '　<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') + ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' + t.role + '</span>',
-      t.role==='保有中'?'var(--acc)':'var(--green)', ''
-    );
-    out.appendChild(card);
-    return {card, target: t};
-  });
-
-  // 地合いをGeminiで取得
-  const mktPrompt = `あなたは日本株専門のシニアFMです。Google検索で${today}の最新情報を調べてください。
-対象銘柄: ${targets.map(t=>t.cd+' '+t.nm).join(', ')}
-
-以下を簡潔に（各項目1〜2行）:
-①日経平均・グロース指数の寄り付き予想（前夜のNYダウ・ナスダック・為替を踏まえて）
-②今日の市場テーマ・注目セクター（1行）
-③対象銘柄に関連するニュース・材料（箇条書き）
-④今日の相場 強気/中立/弱気 + 一言`;
-
-  const gemMktP = callGemini(mktPrompt).then(txt => {
-    mktCard.querySelector('.mrn-body').textContent = txt;
-  }).catch(e => {
-    mktCard.querySelector('.mrn-body').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
-  });
-
-  // 銘柄別分析（並列実行）
-  const stockPs = stockCards.map(({card, target: t}) => {
-    const bodyEl = card.querySelector('.mrn-body');
-
-    // Geminiブロック
-    const gBlock = document.createElement('div');
-    gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div><div class="ldg"><div class="spin"></div><span>調査中...</span></div>';
-    bodyEl.appendChild(gBlock);
-
-    // Claudeブロック
-    const cBlock = document.createElement('div');
-    cBlock.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)';
-    cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div><div class="ldg"><div class="spin"></div><span>判断中...</span></div>';
-    bodyEl.appendChild(cBlock);
-
-    const holdInfo = t.bp ?
-      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株 / 現値: ${(t.cp||t.bp).toLocaleString()}円 / 損益: ${((( t.cp||t.bp)-t.bp)*t.sh>=0?'+':'')}${Math.round(((t.cp||t.bp)-t.bp)*t.sh).toLocaleString()}円` : '';
-    const slInfo = t.sl ? `損切: ${t.sl.toLocaleString()}円 / 目標: ${(t.tgt||0).toLocaleString()}円` : '';
-
-    // Geminiプロンプト（需給・板・信用倍率重点）
-    const gPrompt = `あなたは日本株専門アナリストです。Google検索で${t.cd} ${t.nm}の今日の最新情報を調べてください。
-
-【銘柄】${t.cd} ${t.nm}（${t.role}）
-${holdInfo}
-${slInfo}
-
-以下を調べて簡潔に答えてください（各1〜2行）:
-①現在の株価・前日比・出来高（今朝の状況）
-②信用倍率（最新値）と需給の評価
-③空売り残高・機関の動向
-④直近の材料・ニュース（3日以内）
-⑤テクニカル: 5日線・25日線との位置関係
-⑥今日の値動き予想（強気/中立/弱気 + 理由1行）`;
-
-    // Claudeプロンプト（エントリー判断重点）
-    const cPrompt = `あなたは運用歴25年のシニアFMです。スイングトレード（1〜4週間）の観点で判断してください。
-ポートフォリオ全体: ${pf}
-
-【対象銘柄】${t.cd} ${t.nm}（${t.role}）
-${holdInfo}
-${slInfo}
-
-以下を率直・断言的に答えてください:
-${t.role === '保有中' ?
-  '①継続保有 / 利確 / 損切り のどれか断言して理由\n②今日注意すべき価格帯・ライン\n③ポジション管理の具体的アドバイス' :
-  '①今日エントリーすべきか（◎今すぐ/○条件付き/×見送り）断言して理由\n②エントリーするなら理想の価格帯\n③損切りライン・目標価格の提案'}`;
-
-    const gP = callGemini(gPrompt).then(txt => {
-      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' +
-        '<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + txt + '</div>';
-    }).catch(e => {
-      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
-    });
-
-    const cP = callClaude(cPrompt).then(txt => {
-      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div>' +
-        '<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + txt + '</div>';
-    }).catch(e => {
-      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
-    });
-
-    return Promise.all([gP, cP]);
-  });
-
-  await Promise.all([gemMktP, ...stockPs]);
-
-  btn.disabled = false;
-  btn.innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
-}
-
-function mkMrnCard(icon, titleHtml, color, pill) {
-  const card = document.createElement('div');
-  card.className = 'rcard';
-  card.style.marginBottom = '10px';
-  card.innerHTML =
-    '<div class="rhdr">' +
-    '<span style="font-size:15px">' + icon + '</span>' +
-    '<span style="font-size:12px;font-weight:700;color:' + color + '">' + titleHtml + '</span>' +
-    (pill ? '<span class="ai-pill" style="margin-left:auto;background:rgba(66,133,244,.15);color:var(--gem);font-size:9px;padding:2px 6px;border-radius:4px">' + pill + '</span>' : '') +
-    '</div>' +
-    '<div class="mrn-body" style="padding:10px 0 2px"></div>';
-  return card;
-}
-
-// 振り返り
-const GEM_STEPS = [
-  {icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)',
-   p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の終値・動きを調べてください。\n保有銘柄: ' + pf + '\n各銘柄について【終値・前日比】【出来高の特徴】【本日の動きの理由】を各2行以内で簡潔に。長文不要。'},
-  {icon:'🌍', title:'明日に影響する材料', color:'var(--gem)',
-   p: pf => 'あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n保有銘柄: ' + pf + '\n以下を各1〜2行で簡潔に（長文不要）:\n①明日の日本株に影響するNY・為替・指標\n②保有銘柄の明日の材料・注目点\n③明日の相場予想: 強気/中立/弱気 + 理由1行'},
-  {icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)',
-   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で今日のSNS情報を調べてください。\n保有銘柄: ' + pf + '\n箇条書き3点以内・各1行のみ:\n・今日のX/SNSで話題の日本株テーマ\n・保有銘柄への言及・評判\n・市場センチメント: 強気/中立/弱気'},
+// ══ 振り返り設定 ══
+// Gemini担当3セクション（Google Search grounding使用・安価）
+const GEM_STEPS=[
+  {icon:"🌍",title:"世界情勢・マクロ経済",color:"var(--gem)",
+   p:pf=>`あなたは日本株専門のシニアFMです。Google検索で今日の最新情報を調べてから答えてください。
+ポートフォリオ: ${pf}
+以下を調べ、日本株スイングトレードへの影響を具体的に述べてください：
+・今日の米国株（S&P500・ナスダック）の動向と主な理由
+・ドル円・ユーロ円の動き
+・原油・金の動き
+・重要な地政学リスク・マクロイベント
+明日の日本市場への影響と注意点を率直に述べてください。`},
+  {icon:"📰",title:"日本株ニュース・個別材料",color:"var(--gem)",
+   p:pf=>`あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてください。
+保有銘柄: ${pf}
+以下を調べてください：
+・保有銘柄の個別ニュース・適時開示・材料
+・今日の日経平均・東証グロース市場の動向
+・明日の注目経済指標・決算予定
+・AI・半導体・防衛・エネルギーなど主要テーマの最新動向
+保有銘柄への影響を個別に述べてください。`},
+  {icon:"📱",title:"SNS・YouTube・X話題",color:"var(--gem)",
+   p:pf=>`あなたは市場センチメント分析の専門家です。Google検索で今日のSNS・メディア情報を調べてください。
+保有銘柄: ${pf}
+以下を調べてください：
+・X（旧Twitter）で今日話題の日本株・銘柄
+・投資系YouTubeで注目されているテーマ・銘柄
+・個人投資家間で話題のセクター
+・ニッチなプレスリリース・注目適時開示
+市場センチメント（強気/弱気）の判断も伝えてください。`},
 ];
-const CLD_STEP = {
-  icon:'🎯', title:'明日の作戦・行動計画', color:'var(--cld)',
-  p: pf => 'あなたは運用歴25年のシニアFMです。\n【ポートフォリオ】\n' + pf + '\n以下を率直・具体的・簡潔に（各項目3行以内）:\n① 今日の総括（一言）\n② 保有銘柄ごと: 継続/利確/損切り + 判断価格\n③ 明日の具体的アクション（買い・売り・何もしない）\n④ 注意すべき価格帯・ライン\n⑤ 一言アドバイス'
+
+// Claude担当1セクション（深い戦略分析）
+const CLD_STEP={
+  icon:"🎯",title:"振り返り・明日の戦略",color:"var(--cld)",
+  p:pf=>`あなたは運用歴25年・資産5000億円運用のシニアFMです。
+【ポートフォリオ】
+${pf}
+以下を率直に・具体的な数字で述べてください（曖昧禁止）：
+1. 今日の立ち回りの振り返り（良かった点・反省点）
+2. 保有銘柄ごとの判断（継続保有/利確/損切りの判断と根拠・目標価格）
+3. 残金の活用方法（新規買い候補・具体的なエントリー価格・タイミング）
+4. 明日・今週の具体的な行動計画（何円で何をするか）
+5. シニアFMとしての率直な一言`
 };
 
-function mkRevCard(icon, title, color, pill, pillClass) {
-  const card = document.createElement('div');
-  card.className = 'rcard rcard-toggle';
-  card.innerHTML =
-    '<div class="rhdr" onclick="toggleRevCard(this)">' +
-    '<span style="font-size:15px">' + icon + '</span>' +
-    '<span style="font-size:12px;font-weight:700;color:' + color + '">' + title + '</span>' +
-    '<span class="ai-pill ' + pillClass + '" style="margin-left:auto">' + pill + '</span>' +
-    '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
-    '</div>' +
-    '<div class="rcard-body-wrap expanded rcard-fade">' +
-    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>分析中...</span></div></div>' +
-    '</div>';
-  return card;
-}
-function toggleRevCard(hdr) {
-  const wrap = hdr.nextElementSibling;
-  const chev = hdr.querySelector('.rev-chevron');
-  const expanded = wrap.classList.contains('expanded');
-  wrap.classList.toggle('expanded', !expanded);
-  wrap.classList.toggle('collapsed', expanded);
-  wrap.classList.toggle('rcard-fade', !expanded);
-  chev.textContent = expanded ? '▶' : '▼';
-}
+async function doRev(){
+  const btn=document.getElementById("revBtn");
+  btn.disabled=true;btn.textContent="🔄 分析中...";
+  const out=document.getElementById("revOut");out.innerHTML="";
+  const pf=pfS();
 
-async function doRev() {
-  const btn = document.getElementById('revBtn');
-  btn.disabled = true; btn.textContent = '🔄 分析中...';
-  const out = document.getElementById('revOut'); out.innerHTML = '';
-  const pf = pfS();
-  const gemCards = GEM_STEPS.map(s => {
-    const card = mkRevCard(s.icon, s.title, s.color, '🤖 Gemini', 'pill-g');
-    out.appendChild(card); return card;
+  // Gemini 3セクション（並列実行で高速化）
+  const gemCards=GEM_STEPS.map(s=>{
+    const card=document.createElement("div");card.className="rcard";
+    card.innerHTML=`<div class="rhdr">
+      <span style="font-size:15px">${s.icon}</span>
+      <span style="font-size:12px;font-weight:700;color:${s.color}">${s.title}</span>
+      <span class="ai-pill pill-g" style="margin-left:auto">🤖 Gemini</span>
+    </div>
+    <div class="rbody"><div class="ldg"><div class="spin"></div><span>Google検索で調査中...</span></div></div>`;
+    out.appendChild(card);return card;
   });
-  const cldCard = mkRevCard(CLD_STEP.icon, CLD_STEP.title, CLD_STEP.color, '🧠 Claude', 'pill-c');
+
+  // Claude戦略カード（先に枠を作る）
+  const cldCard=document.createElement("div");cldCard.className="rcard";
+  cldCard.innerHTML=`<div class="rhdr">
+    <span style="font-size:15px">${CLD_STEP.icon}</span>
+    <span style="font-size:12px;font-weight:700;color:${CLD_STEP.color}">${CLD_STEP.title}</span>
+    <span class="ai-pill pill-c" style="margin-left:auto">🧠 Claude</span>
+  </div>
+  <div class="rbody"><div class="ldg"><div class="spin"></div><span>精査中...</span></div></div>`;
   out.appendChild(cldCard);
 
-  const gemPs = GEM_STEPS.map((s, i) =>
-    callGemini(s.p(pf)).then(txt => {
-      const body = gemCards[i].querySelector('.rbody');
-      body.innerHTML = fmtRevText(txt);
-    }).catch(e => {
-      gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+  // Gemini並列実行
+  const gemPromises=GEM_STEPS.map((s,i)=>
+    callGemini(s.p(pf)).then(txt=>{
+      gemCards[i].querySelector(".rbody").textContent=txt;
+    }).catch(e=>{
+      gemCards[i].querySelector(".rbody").innerHTML=`<span style="color:var(--red)">⚠️ ${e.message}</span>`;
     })
   );
-  const cldP = callClaude(CLD_STEP.p(pf)).then(txt => {
-    cldCard.querySelector('.rbody').innerHTML = fmtRevText(txt);
-  }).catch(e => {
-    cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+
+  // Claude実行（Geminiと並列）
+  const cldPromise=callClaude(CLD_STEP.p(pf)).then(txt=>{
+    cldCard.querySelector(".rbody").textContent=txt;
+  }).catch(e=>{
+    cldCard.querySelector(".rbody").innerHTML=`<span style="color:var(--red)">⚠️ ${e.message}</span>`;
   });
-  await Promise.all([...gemPs, cldP]);
-  btn.disabled = false;
-  btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>';
+
+  await Promise.all([...gemPromises,cldPromise]);
+  btn.disabled=false;btn.innerHTML="🔄 再分析する<br><span style='font-size:11px;opacity:.75'>🤖Gemini×3 + 🧠Claude×戦略</span>";
 }
 
-function fmtRevText(txt) {
-  // マークダウン風の整形（太字・箇条書き）
-  return '<div style="font-size:13px;line-height:1.85;color:#cbd5e1">' +
-    txt
-      .replace(/\*\*(.+?)\*\*/g, '<b style="color:#e2e8f0">$1</b>')
-      .replace(/^#{1,3}\s+(.+)$/gm, '<div style="font-size:12px;font-weight:700;color:var(--acc);margin:10px 0 4px">$1</div>')
-      .replace(/^[•\-・]\s+(.+)$/gm, '<div style="padding-left:12px;margin:2px 0">・$1</div>')
-      .replace(/^(\d+)[.．]\s+(.+)$/gm, '<div style="padding-left:12px;margin:3px 0"><span style="color:var(--acc);font-weight:700">$1.</span> $2</div>')
-      .replace(/
-{2,}/g, '<br>')
-      .replace(/
-/g, '<br>') +
-    '</div>';
+// ══ チャット ══
+let chatMode="gc"; // gc=合議, g=Gemini, c=Claude
+let gemHist=[], cldHist=[];
+
+function setMode(m){
+  chatMode=m;
+  ["modeGC","modeG","modeC"].forEach(id=>document.getElementById(id).classList.remove("on"));
+  document.getElementById(m==="gc"?"modeGC":m==="g"?"modeG":"modeC").classList.add("on");
 }
 
+async function doChat(){
+  const inp=document.getElementById("cinp");
+  const txt=inp.value.trim();if(!txt)return;
+  inp.value="";autoH(inp);
+  document.getElementById("csend").disabled=true;
+  addMsg("u",txt);
 
-// ═══════════════════════════════════════════
-// 🔬 銘柄スコアリング分析
-// ═══════════════════════════════════════════
-function rAnalyzeQuick() {
-  const el = document.getElementById('azQuickList');
-  if (!el) return;
-  el.innerHTML = '';
-  const all = [
-    ...H.map(h=>({cd:h.cd, nm:h.nm, role:'💼'})),
-    ...W.filter(w=>!H.find(h=>h.cd===w.cd)).map(w=>({cd:w.cd, nm:w.nm, role:'👁'}))
-  ];
-  all.forEach(t => {
-    const btn = document.createElement('button');
-    btn.style.cssText = 'background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--text);cursor:pointer';
-    btn.textContent = t.role + ' ' + t.cd + ' ' + t.nm;
-    btn.onclick = () => {
-      document.getElementById('azCode').value = t.cd;
-      document.getElementById('azName').value = t.nm;
-      doAnalyze();
-    };
-    el.appendChild(btn);
-  });
-}
+  const pf=pfS();
+  const gemSys=`あなたは日本株専門のアナリストです。Google検索で最新情報を確認しながら回答してください。
+ユーザーのポートフォリオ: ${pf}
+最新の市場情報・ニュースを踏まえて、簡潔・具体的に答えてください。`;
+  const cldSys=`あなたは運用歴25年の日本株専門シニアFMです。
+ユーザーのポートフォリオ: ${pf}
+この情報を踏まえ、戦略・判断・リスク管理の観点から率直・具体的にアドバイスしてください。`;
 
-async function doAnalyze() {
-  const code = document.getElementById('azCode').value.trim();
-  const nameIn = document.getElementById('azName').value.trim();
-  if (!code) { toast('⚠️ 証券コードを入力してください'); return; }
+  // ローディング表示
+  const ldEl=document.createElement("div");ldEl.className="cmsg";
+  const modeIcon=chatMode==="gc"?"🤝":chatMode==="g"?"🤖":"🧠";
+  ldEl.innerHTML=`<div class="cav">${modeIcon}</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>`;
+  document.getElementById("cMsgs").appendChild(ldEl);sC();
 
-  const out = document.getElementById('azOut');
-  out.innerHTML = '<div class="ldg" style="padding:20px"><div class="spin"></div><span>' + code + ' を分析中...</span></div>';
-
-  // 保有・ウォッチから情報を取得
-  const hold = H.find(h=>h.cd===code);
-  const watch = W.find(w=>w.cd===code);
-  const nm = nameIn || (hold?.nm) || (watch?.nm) || code;
-  const tag = watch?.tag || hold?.memo || '';
-  const holdInfo = hold ?
-    `取得単価: ${hold.bp.toLocaleString()}円 × ${hold.sh}株\n現在値: ${(hold.cp||hold.bp).toLocaleString()}円\n含み損益: ${((hold.cp||hold.bp)-hold.bp)*hold.sh>=0?'+':''}${Math.round(((hold.cp||hold.bp)-hold.bp)*hold.sh).toLocaleString()}円\n損切り: ${hold.sl?.toLocaleString()||'未設定'}円 / 目標: ${hold.tgt?.toLocaleString()||'未設定'}円` : '新規候補銘柄';
-  const today = new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'numeric',day:'numeric'});
-
-  // Geminiプロンプト（テーマ・需給・最新情報）
-  const gPrompt = `あなたはマクロ経済・テーマ投資に強いチーフストラテジストです。
-Google検索で${code} ${nm}の最新情報を調べてから答えてください（${today}時点）。
-
-【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
-【ポジション】${holdInfo}
-
-以下を調べて採点してください：
-
-【需給・市場情報】
-①信用倍率（最新値）と需給の評価
-②空売り残高・機関投資家の動向
-③外国人投資家の売買傾向
-④直近1週間のニュース・材料
-
-【採点基準（各0〜20点 × 5項目 = 100点）】
-1. テーマ合致度: 国策・世界トレンドとの一致
-2. 需給優位性: 信用倍率・外国人動向・空売り
-3. 材料の質: ニュース・決算・上方修正の有無
-4. 市場の期待感: アナリスト評価・成長期待
-5. スイング適性: 今の旬度・1〜4週間の見通し
-
-【絶対ルール】良い銘柄65〜85点、普通40〜60点、悪い銘柄20〜35点。
-
-需給・材料コメント（150字以内）:
-テーマ合致スコア: XX点/100点
-判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
-
-  // Claudeプロンプト（テクニカル・論理分析）
-  const cPrompt = `あなたはスイングトレード専門のクオンツアナリストです（運用歴20年）。
-Google検索で${code} ${nm}の株価・チャート情報を調べてください（${today}時点）。
-
-【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
-【ポジション】${holdInfo}
-
-以下を分析して採点してください：
-
-【テクニカル分析】
-①現在株価・5日線・25日線との位置関係
-②ATR（日次平均変動幅）と損切りライン
-③直近のシグナル: 押し目買い / ブレイクアウト / ゴールデンクロス
-④RR比（リスク・リワード）の評価
-⑤スイングトレードの最適エントリーゾーン
-
-【採点基準（各0〜20点 × 5項目 = 100点）】
-1. トレンド強度: MA配列・価格の方向性
-2. エントリータイミング: シグナルの強度と種類
-3. RR合理性: 損切り・目標の論理的妥当性
-4. 出来高・流動性: 板の厚さ・出来高トレンド
-5. チャートパターン: 形成中のパターンの信頼性
-
-【絶対ルール】良い銘柄65〜85点、普通40〜60点、悪い銘柄20〜35点。±20点乖離禁止。
-
-テクニカルコメント（150字以内）:
-論理的期待値スコア: XX点/100点
-判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
-
-  try {
-    const [gTxt, cTxt] = await Promise.all([
-      callGemini(gPrompt).catch(e => 'エラー: ' + e.message),
-      callClaude(cPrompt).catch(e => 'エラー: ' + e.message),
-    ]);
-
-    // スコア抽出
-    const gScore = extractAzScore(gTxt, ['テーマ合致スコア']);
-    const cScore = extractAzScore(cTxt, ['論理的期待値スコア']);
-    const total = gScore + cScore;
-    const rank = total >= 160 ? 'S' : total >= 140 ? 'A' : total >= 110 ? 'B' : 'C';
-    const rankLabel = {S:'即エントリー候補',A:'条件付き監視',B:'要観察',C:'見送り'}[rank];
-    const rankColor = {S:'#f59e0b',A:'#10b981',B:'#3b82f6',C:'#4b6088'}[rank];
-
-    // 判定抽出
-    const gJudge = extractAzJudge(gTxt);
-    const cJudge = extractAzJudge(cTxt);
-
-    // カードHTML生成
-    out.innerHTML = '';
-
-    // ── サマリーカード ──
-    const sumCard = document.createElement('div');
-    sumCard.className = 'score-card';
-    sumCard.innerHTML =
-      '<div class="score-hdr">' +
-      '<div><div class="score-title">' + code + ' ' + nm + '</div>' +
-      '<div style="font-size:11px;color:var(--t3);margin-top:2px">' + (tag||'') + ' / ' + (hold?'💼保有中':'👁監視候補') + '</div></div>' +
-      '<div style="text-align:right">' +
-      '<div class="score-badge ' + rank.toLowerCase() + '">' + rank + '</div>' +
-      '<div style="font-size:10px;color:' + rankColor + ';margin-top:2px">' + rankLabel + '</div>' +
-      '</div></div>' +
-      '<div class="score-bars">' +
-      mkScoreBar('🤖 テーマ', gScore, '#4285f4') +
-      mkScoreBar('🧠 ロジック', cScore, '#d97706') +
-      mkScoreBar('合計', Math.round(total/2), total>=160?'#f59e0b':total>=140?'#10b981':'#3b82f6') +
-      '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--border)">' +
-      '<div style="padding:10px 12px;border-right:1px solid var(--border)">' +
-      '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:3px">🤖 Gemini判定</div>' +
-      '<div style="font-size:13px;font-weight:700;color:var(--text)">' + gJudge + '</div>' +
-      '</div>' +
-      '<div style="padding:10px 12px">' +
-      '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:3px">🧠 Claude判定</div>' +
-      '<div style="font-size:13px;font-weight:700;color:var(--text)">' + cJudge + '</div>' +
-      '</div></div>';
-    out.appendChild(sumCard);
-
-    // ── Gemini詳細カード ──
-    const gCard = document.createElement('div');
-    gCard.className = 'rcard rcard-toggle';
-    gCard.innerHTML =
-      '<div class="rhdr" onclick="toggleRevCard(this)">' +
-      '<span style="font-size:14px">🤖</span>' +
-      '<span style="font-size:12px;font-weight:700;color:var(--gem)">需給・テーマ分析（Gemini）</span>' +
-      '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:#4285f4;margin-left:auto">' + gScore + 'pt</span>' +
-      '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
-      '</div>' +
-      '<div class="rcard-body-wrap expanded rcard-fade">' +
-      '<div class="rbody">' + fmtRevText(gTxt) + '</div>' +
-      '</div>';
-    out.appendChild(gCard);
-
-    // ── Claude詳細カード ──
-    const cCard = document.createElement('div');
-    cCard.className = 'rcard rcard-toggle';
-    cCard.innerHTML =
-      '<div class="rhdr" onclick="toggleRevCard(this)">' +
-      '<span style="font-size:14px">🧠</span>' +
-      '<span style="font-size:12px;font-weight:700;color:var(--cld)">テクニカル・判断（Claude）</span>' +
-      '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:#d97706;margin-left:auto">' + cScore + 'pt</span>' +
-      '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
-      '</div>' +
-      '<div class="rcard-body-wrap expanded rcard-fade">' +
-      '<div class="rbody">' + fmtRevText(cTxt) + '</div>' +
-      '</div>';
-    out.appendChild(cCard);
-
-  } catch(e) {
-    out.innerHTML = '<div style="color:var(--red);padding:16px">⚠️ ' + e.message + '</div>';
-  }
-}
-
-function mkScoreBar(lbl, score, color) {
-  const pct = Math.min(Math.max(score, 0), 100);
-  return '<div class="score-bar-row">' +
-    '<div class="score-bar-lbl">' + lbl + '</div>' +
-    '<div class="score-bar-track"><div class="score-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
-    '<div class="score-bar-val" style="color:' + color + '">' + score + '</div>' +
-    '</div>';
-}
-
-function extractAzScore(txt, keys) {
-  for (const key of keys) {
-    const m = txt.match(new RegExp(key + '[：:s]*([0-9]+)'));
-    if (m) { const v=parseInt(m[1]); if(v>=0&&v<=100) return v; }
-  }
-  const m2 = txt.match(/([0-9]+)\s*点[\/\/]100/);
-  if (m2) { const v=parseInt(m2[1]); if(v>=0&&v<=100) return v; }
-  return 50;
-}
-
-function extractAzJudge(txt) {
-  const m = txt.match(/判定[：:]\s*([◎○△×][^\n]{0,20})/);
-  if (m) return m[1].trim().slice(0,20);
-  if (txt.includes('◎')) return '◎ 今すぐ買い';
-  if (txt.includes('○')) return '○ 条件付き';
-  if (txt.includes('△')) return '△ 様子見';
-  if (txt.includes('×')) return '× 見送り';
-  return '判定中';
-}
-
-
-// チャット
-let chatMode = 'gc', gemHist = [], cldHist = [];
-function setMode(m) {
-  chatMode = m;
-  ['modeGC','modeG','modeC'].forEach(id => document.getElementById(id).classList.remove('on'));
-  document.getElementById(m==='gc'?'modeGC':m==='g'?'modeG':'modeC').classList.add('on');
-}
-async function doChat() {
-  const inp = document.getElementById('cinp');
-  const txt = inp.value.trim(); if(!txt) return;
-  inp.value=''; autoH(inp);
-  document.getElementById('csend').disabled = true;
-  addMsg('u', txt);
-  const pf = pfS();
-  const gemSys = 'あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。\nポートフォリオ: ' + pf;
-  const cldSys = 'あなたは運用歴25年の日本株専門シニアFMです。\nポートフォリオ: ' + pf + '\n率直・具体的にアドバイスしてください。';
-  const ldEl = document.createElement('div'); ldEl.className='cmsg';
-  ldEl.innerHTML = '<div class="cav">' + (chatMode==='gc'?'🤝':chatMode==='g'?'🤖':'🧠') + '</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
-  document.getElementById('cMsgs').appendChild(ldEl); sC();
-  try {
-    if (chatMode==='g') {
-      gemHist.push({role:'user',parts:[{text:txt}]});
-      const r = await callGemini(txt, gemSys, gemHist.slice(-8));
-      ldEl.remove(); addAIMsg('g', r);
-      gemHist.push({role:'model',parts:[{text:r}]});
-    } else if (chatMode==='c') {
-      cldHist.push({role:'user',content:txt});
-      const r = await callClaude(txt, cldSys, cldHist.slice(-10));
-      ldEl.remove(); addAIMsg('c', r);
-      cldHist.push({role:'assistant',content:r});
-    } else {
-      gemHist.push({role:'user',parts:[{text:txt}]});
-      cldHist.push({role:'user',content:txt});
-      const [gr, cr] = await Promise.all([
-        callGemini(txt, gemSys, gemHist.slice(-8)).catch(e => '⚠️ ' + e.message),
-        callClaude(txt, cldSys, cldHist.slice(-10)).catch(e => '⚠️ ' + e.message),
+  try{
+    if(chatMode==="g"){
+      gemHist.push({role:"user",parts:[{text:txt}]});
+      const r=await callGemini(txt,gemSys,gemHist.slice(-8));
+      ldEl.remove();addAIMsg("g",r);
+      gemHist.push({role:"model",parts:[{text:r}]});
+    }else if(chatMode==="c"){
+      cldHist.push({role:"user",content:txt});
+      const r=await callClaude(txt,cldSys,cldHist.slice(-10));
+      ldEl.remove();addAIMsg("c",r);
+      cldHist.push({role:"assistant",content:r});
+    }else{
+      // 合議：Gemini + Claude 並列
+      gemHist.push({role:"user",parts:[{text:txt}]});
+      cldHist.push({role:"user",content:txt});
+      const [gr,cr]=await Promise.all([
+        callGemini(txt,gemSys,gemHist.slice(-8)).catch(e=>`⚠️ ${e.message}`),
+        callClaude(txt,cldSys,cldHist.slice(-10)).catch(e=>`⚠️ ${e.message}`),
       ]);
-      ldEl.remove(); addDualMsg(gr, cr);
-      gemHist.push({role:'model',parts:[{text:gr}]});
-      cldHist.push({role:'assistant',content:cr});
+      ldEl.remove();addDualMsg(gr,cr);
+      gemHist.push({role:"model",parts:[{text:gr}]});
+      cldHist.push({role:"assistant",content:cr});
     }
-  } catch(e) { ldEl.remove(); addAIMsg('c', '⚠️ ' + e.message); }
-  document.getElementById('csend').disabled = false;
-}
-function addMsg(role, txt) {
-  const w=document.getElementById('cMsgs'), d=document.createElement('div');
-  d.className='cmsg'+(role==='u'?' u':'');
-  d.innerHTML = role==='u' ? '<div class="cb">'+esc(txt)+'</div><div class="cav">👤</div>' : '<div class="cav">🧠</div><div class="cb">'+esc(txt)+'</div>';
-  w.appendChild(d); sC();
-}
-function addAIMsg(who, txt) {
-  const w=document.getElementById('cMsgs'), d=document.createElement('div');
-  d.className='cmsg';
-  d.innerHTML='<div class="cav">'+(who==='g'?'🤖':'🧠')+'</div><div class="cb">'+esc(txt)+'</div>';
-  w.appendChild(d); sC();
-}
-function addDualMsg(gTxt, cTxt) {
-  const w=document.getElementById('cMsgs'), d=document.createElement('div');
-  d.style.marginBottom='8px';
-  d.innerHTML='<div class="dual-bubble"><div class="db-pane"><div class="db-hdr dhg">🤖 Gemini（市場情報）</div>'+esc(gTxt)+'</div><div class="db-pane"><div class="db-hdr dhc">🧠 Claude（戦略判断）</div>'+esc(cTxt)+'</div></div>';
-  w.appendChild(d); sC();
-}
-function sC() { const w=document.getElementById('cMsgs'); setTimeout(()=>w.scrollTop=w.scrollHeight,50); }
-function autoH(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,90)+'px'; }
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
-
-// Gemini API
-async function callGemini(prompt, sys, history) {
-  const contents = [];
-  if (history && history.length > 0) contents.push(...history.slice(0, -1));
-  contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
-  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens:1500}};
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
-    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
-  const d = await r.json();
-  return d.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('\n').trim() || '応答なし';
+  }catch(e){ldEl.remove();addAIMsg("c","⚠️ "+e.message);}
+  document.getElementById("csend").disabled=false;
 }
 
-// Claude API
-async function callClaude(prompt, sys, history) {
-  const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
-  const body = {model:'claude-sonnet-4-20250514', max_tokens:1500, messages:msgs};
-  if (sys) body.system = sys;
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-api-key':CK,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify(body)
+function addMsg(role,txt){
+  const w=document.getElementById("cMsgs");
+  const d=document.createElement("div");d.className="cmsg"+(role==="u"?" u":"");
+  d.innerHTML=role==="u"?`<div class="cb">${esc(txt)}</div><div class="cav">👤</div>`:`<div class="cav">🧠</div><div class="cb">${esc(txt)}</div>`;
+  w.appendChild(d);sC();
+}
+
+function addAIMsg(who,txt){
+  const w=document.getElementById("cMsgs");
+  const d=document.createElement("div");d.className="cmsg";
+  const icon=who==="g"?"🤖":"🧠";
+  d.innerHTML=`<div class="cav">${icon}</div><div class="cb">${esc(txt)}</div>`;
+  w.appendChild(d);sC();
+}
+
+function addDualMsg(gTxt,cTxt){
+  const w=document.getElementById("cMsgs");
+  const d=document.createElement("div");d.style.marginBottom="8px";
+  d.innerHTML=`<div class="dual-bubble">
+    <div class="db-pane"><div class="db-hdr dhg">🤖 Gemini（市場情報）</div>${esc(gTxt)}</div>
+    <div class="db-pane"><div class="db-hdr dhc">🧠 Claude（戦略判断）</div>${esc(cTxt)}</div>
+  </div>`;
+  w.appendChild(d);sC();
+}
+
+function sC(){const w=document.getElementById("cMsgs");setTimeout(()=>w.scrollTop=w.scrollHeight,50);}
+function autoH(el){el.style.height="auto";el.style.height=Math.min(el.scrollHeight,90)+"px";}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>");}
+
+// ══ Gemini API（Google Search grounding）══
+async function callGemini(prompt, sys, history){
+  const contents=[];
+  if(history&&history.length>0){
+    // 履歴の最後のユーザーメッセージがpromptと同じ場合は除外して追加
+    contents.push(...history.slice(0,-1));
+  }
+  contents.push({role:"user",parts:[{text:sys?`${sys}\n\n${prompt}`:prompt}]});
+  const body={
+    contents,
+    tools:[{googleSearch:{}}],
+    generationConfig:{maxOutputTokens:1500},
+  };
+  const r=await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+    {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}
+  );
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
+  const d=await r.json();
+  return d.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("\n").trim()||"応答なし";
+}
+
+// ══ Claude API（Anthropic）══
+async function callClaude(prompt,sys,history){
+  const msgs=history?[...history.slice(0,-1),{role:"user",content:prompt}]:[{role:"user",content:prompt}];
+  const body={model:"claude-sonnet-4-20250514",max_tokens:1500,messages:msgs};
+  if(sys)body.system=sys;
+  const r=await fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01"},
+    body:JSON.stringify(body),
   });
-  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
-  const d = await r.json();
-  return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim() || '応答なし';
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
+  const d=await r.json();
+  return(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n").trim()||"応答なし";
 }
 
 // トースト
 let tt;
-function toast(m) { const e=document.getElementById('toast'); e.textContent=m; e.classList.add('on'); clearTimeout(tt); tt=setTimeout(()=>e.classList.remove('on'),2600); }
-
-// APIキー設定
-function openKeyModal() {
-  document.getElementById('keyModal').style.display='flex';
-  document.getElementById('keyGemini').value=GK;
-  document.getElementById('keyAnthropic').value=CK;
-}
-function closeKeyModal() { document.getElementById('keyModal').style.display='none'; }
-function saveKeys() {
-  const gk=document.getElementById('keyGemini').value.trim();
-  const ck=document.getElementById('keyAnthropic').value.trim();
-  if (!gk||!ck) { toast('⚠️ 両方のキーを入力してください'); return; }
-  GK=gk; CK=ck;
-  localStorage.setItem('tj_gk',gk); localStorage.setItem('tj_ck',ck);
-  closeKeyModal(); toast('✅ APIキーを保存しました');
-}
-
-// スクリーンショット読み込み
-let ssType='hold', ssImageList=[], parsedItems=[];
-
-function setSsType(t) {
-  ssType=t;
-  ['hold','hist','pnl','watch','cash','summary'].forEach(x => { const el=document.getElementById('sst-'+x); if(el) el.classList.toggle('on',x===t); });
-}
-function onFileSelect(e) {
-  const files=Array.from(e.target.files).slice(0,20);
-  if(files.length) loadImages(files);
-}
-function onDrop(e) {
-  e.preventDefault();
-  document.getElementById('ssZone').classList.remove('drag');
-  const files=Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')).slice(0,20);
-  if(files.length) loadImages(files);
-}
-function loadImages(files) {
-  ssImageList=[];
-  document.getElementById('ssPreviewGrid').innerHTML='';
-  const reads=files.map(file=>new Promise(res=>{
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const b64=ev.target.result.split(',')[1];
-      const mime=file.type||'image/jpeg';
-      ssImageList.push({b64, name:file.name, mime});
-      const img=document.createElement('img');
-      img.src=ev.target.result;
-      img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border)';
-      document.getElementById('ssPreviewGrid').appendChild(img);
-      res();
-    };
-    reader.readAsDataURL(file);
-  }));
-  Promise.all(reads).then(()=>{
-    document.getElementById('ssPreviewList').style.display='block';
-    document.getElementById('ssFileCount').textContent=ssImageList.length+'枚選択済み';
-    document.getElementById('ssAnalyzeBtn').style.display='block';
-    document.getElementById('ssResult').classList.remove('show');
-    document.getElementById('ssApplyBtn').style.display='none';
-    parsedItems=[];
-  });
-}
-
-async function analyzeScreenshots() {
-  if(!ssImageList.length){toast('⚠️ 画像を選んでください');return;}
-  if(!GK){openKeyModal();return;}
-  const btn=document.getElementById('ssAnalyzeBtn');
-  btn.disabled=true;
-  const prompts={
-    hold:'この画像はスマホのスクリーンショットです。SBI証券アプリの画面を想定していますが、画面の一部が切れていても読み取れる情報はすべて抽出してください。保有証券詳細・信用建玉詳細・保有証券一覧・信用建玉一覧のいずれかです。\n表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください。\n- 「取得単価」「建値」「平均建単価」→buy_price\n- 「保有株数」「建株数」→shares\n- 「現在値」→current_price\n- 「売買区分:買建」または「信用建玉」→type:"margin"、それ以外→type:"spot"\n[{"code":"証券コード","name":"銘柄名","shares":株数,"buy_price":取得単価,"current_price":現在値,"type":"spot"または"margin","buy_date":null}]\nJSONのみ返す。読み取れない項目はnull。',
-    hist:'この画像はSBI証券アプリの約定・取引履歴画面です。日付を必ず読み取ってください。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"または"margin"}]\nJSONのみ返す。',
-    pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
-    watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
-    cash:'この画像はSBI証券アプリの「余力」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"buying_power":買付余力の数値,"cash":委託保証金現金または現引可能額の数値,"margin_power":信用建余力の数値}\n数値のみ（円マーク・カンマなし）。読み取れない項目は0。',
-    summary:'この画像はSBI証券アプリの「評価損益」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"spot_value":現物時価評価額合計の数値,"spot_pnl":現物評価損益合計の数値,"margin_value":信用建玉評価総額の数値,"margin_pnl":建玉評価損益合計の数値}\n数値のみ（プラス・マイナス含む）。読み取れない項目は0。'
-  };
-  const resEl=document.getElementById('ssResult');
-  resEl.classList.add('show');
-  resEl.textContent='';
-  parsedItems=[];
-  let ok=0;
-  for(let i=0;i<ssImageList.length;i++){
-    const img=ssImageList[i];
-    btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
-    resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
-    try{
-      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.0}};
-      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(!r.ok){
-      const e=await r.json().catch(()=>({}));
-      throw new Error(e.error?.message || 'HTTP '+r.status+' - APIキー等を確認してください');
-    }
-      const d=await r.json();
-      let raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json|```/g,'').trim();
-      // cash/summaryはオブジェクト、それ以外は配列
-      if(ssType==='cash'||ssType==='summary'){
-        const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
-        if(s<0||e<0)throw new Error('データを読み取れませんでした');
-        const obj=JSON.parse(raw.slice(s,e+1));
-        parsedItems=[obj]; // 単一オブジェクトを配列に包む
-        resEl.textContent+='  ✅ 読み取り成功\n';
-      } else {
-        const s=raw.indexOf('['),e=raw.lastIndexOf(']');
-        if(s<0||e<0)throw new Error('銘柄情報を読み取れませんでした');
-        const items=JSON.parse(raw.slice(s,e+1));
-        for(const item of items){
-          const exists=parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
-          if(!exists)parsedItems.push(item);
-        }
-        resEl.textContent+='  ✅ '+items.length+'件検出\n';
-      }
-      ok++;
-    }catch(e){
-      resEl.textContent+='  ⚠️ '+e.message+'\n';
-    }
-    await new Promise(r=>setTimeout(r,500));
-  }
-  resEl.textContent+='\n合計 '+parsedItems.length+'件（'+ok+'/'+ssImageList.length+'枚成功）\n\n';
-  if(ssType==='cash'&&parsedItems.length>0){
-    const o=parsedItems[0];
-    resEl.textContent+='💴 買付余力: '+(o.buying_power?.toLocaleString()||'?')+'円\n';
-    resEl.textContent+='   現金:     '+(o.cash?.toLocaleString()||'?')+'円\n';
-    resEl.textContent+='   信用余力: '+(o.margin_power?.toLocaleString()||'?')+'円';
-  } else if(ssType==='summary'&&parsedItems.length>0){
-    const o=parsedItems[0];
-    const sp=o.spot_pnl||0, mp=o.margin_pnl||0;
-    resEl.textContent+='💴 現物評価額: '+(o.spot_value?.toLocaleString()||'?')+'円 損益'+(sp>=0?'+':'')+sp.toLocaleString()+'円\n';
-    resEl.textContent+='📊 信用建玉額: '+(o.margin_value?.toLocaleString()||'?')+'円 損益'+(mp>=0?'+':'')+mp.toLocaleString()+'円';
-  } else if(ssType==='hold'){
-    resEl.textContent+=parsedItems.map(i=>(i.type==='margin'?'📊信用 ':'💴現物 ')+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株 買値'+(i.buy_price?.toLocaleString()||'?')+'円 現値'+(i.current_price?.toLocaleString()||'?')+'円').join('\n');
-  }else if(ssType==='hist'){
-    resEl.textContent+=parsedItems.map(i=>(i.action==='buy'?'🟢買':'🔴売')+' '+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株×'+(i.price?.toLocaleString()||'?')+'円 ('+(i.date||'日付不明')+')').join('\n');
-  }else if(ssType==='pnl'){
-    resEl.textContent+=parsedItems.map(i=>(i.code||'?')+' '+i.name+'  実現損益'+(i.realized_pnl!=null?(i.realized_pnl>=0?'+':'')+i.realized_pnl?.toLocaleString()+'円':'不明')+' ('+(i.date||'日付不明')+')').join('\n');
-  }else{
-    resEl.textContent+=parsedItems.map(i=>(i.code||'?')+' '+i.name+'  '+(i.tag||'')).join('\n');
-  }
-  if(parsedItems.length>0)document.getElementById('ssApplyBtn').style.display='block';
-  btn.disabled=false; btn.textContent='🤖 Geminiで一括読み取る';
-}
-
-// 取り込みモーダル
-function showImportModal() {
-  if(!parsedItems.length)return;
-  const el=document.getElementById('modalItems');
-  const fmtItem=(item,i,l0,l1)=>'<div class="modal-item"><div class="modal-item-top"><div><div class="modal-item-name">'+l0+'</div><div class="modal-item-meta">'+l1+'</div></div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div></div>';
-  if(ssType==='hold'){
-    el.innerHTML=parsedItems.map((it,i)=>'<div class="modal-item">'+
-      '<div class="modal-item-top"><div>'+
-      '<div class="modal-item-name">'+(it.type==='margin'?'📊信用 ':'💴現物 ')+(it.code||'?')+' '+it.name+'</div>'+
-      '<div class="modal-item-meta">'+
-        (it.shares||'?')+'株 / 取得単価 '+(it.buy_price?.toLocaleString()||'?')+'円 / 現値 '+(it.current_price?.toLocaleString()||'?')+'円<br>'+
-        '取得金額: 約'+((it.buy_price&&it.shares)?Math.round(it.buy_price*it.shares).toLocaleString():'?')+'円'+
-      '</div>'+
-      '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
-      '</div>'
-    ).join('');
-  }else if(ssType==='hist'){
-    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.action==='buy'?'🟢買':'🔴売')+' '+(it.code||'?')+' '+it.name,(it.shares||'?')+'株 × '+(it.price?.toLocaleString()||'?')+'円 / '+(it.date||'日付不明'))).join('');
-  }else if(ssType==='pnl'){
-    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,'実現損益 '+(it.realized_pnl!=null?(it.realized_pnl>=0?'+':'')+it.realized_pnl?.toLocaleString()+'円':'不明')+' / '+(it.date||'日付不明'))).join('');
-  }else if(ssType==='cash'&&parsedItems.length>0){
-    const o=parsedItems[0];
-    el.innerHTML='<div class="modal-item"><div style="font-size:13px;line-height:2;color:var(--text)">'+
-      '💴 買付余力: <b>'+(o.buying_power?.toLocaleString()||'?')+'円</b><br>'+
-      '   現金:     <b>'+(o.cash?.toLocaleString()||'?')+'円</b><br>'+
-      '   信用余力: <b>'+(o.margin_power?.toLocaleString()||'?')+'円</b><br><br>'+
-      '「取り込む」で残金を更新します</div></div>';
-  }else if(ssType==='summary'&&parsedItems.length>0){
-    const o=parsedItems[0];
-    const sp=o.spot_pnl||0, mp=o.margin_pnl||0;
-    el.innerHTML='<div class="modal-item"><div style="font-size:13px;line-height:2;color:var(--text)">'+
-      '💴 現物評価額: <b>'+(o.spot_value?.toLocaleString()||'?')+'円</b> 損益<b style="color:'+(sp>=0?'var(--green)':'var(--red)')+'">'+( sp>=0?'+':'')+sp.toLocaleString()+'円</b><br>'+
-      '📊 信用建玉額: <b>'+(o.margin_value?.toLocaleString()||'?')+'円</b> 損益<b style="color:'+(mp>=0?'var(--green)':'var(--red)')+'">'+( mp>=0?'+':'')+mp.toLocaleString()+'円</b></div></div>';
-  }else{
-    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,(it.current_price?it.current_price.toLocaleString()+'円 / ':'')+( it.tag||'メモなし'))).join('');
-  }
-  document.getElementById('importModal').classList.add('on');
-}
-function closeModal() { document.getElementById('importModal').classList.remove('on'); }
-
-function doImport() {
-  const checked=parsedItems.filter((_,i)=>document.getElementById('mchk'+i)?.checked);
-  let count=0;
-  if(ssType==='hold'){
-    for(const it of checked){
-      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
-      if(!nm)continue;
-      const idx=H.findIndex(h=>h.cd===(cd||nm));
-      if(idx>=0){if(it.current_price)H[idx].cp=it.current_price;}
-      else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:it.type||'spot'});
-      count++;
-    }
-    sv(KH,H);
-  }else if(ssType==='hist'){
-    for(const it of checked){
-      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
-      if(!nm)continue;
-      if(T.find(t=>t.cd===cd&&t.p===it.price&&t.dt===it.date&&t.a===it.action))continue;
-      let pnl=null;
-      if(it.action==='buy'){
-        const idx=H.findIndex(h=>h.cd===(cd||nm));
-        if(idx>=0){const ex=H[idx],tot=ex.sh+(it.shares||0);H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+(it.price||0)*(it.shares||0))/tot*10)/10};}
-        else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:'SS取込',dt:it.date||TODAY});
-        sv(KH,H);
-      }else{
-        const h=H.find(h=>h.cd===(cd||nm));
-        if(h){pnl=(it.price-h.bp)*(it.shares||0);if(h.sh<=(it.shares||0))H=H.filter(hh=>hh.cd!==h.cd);else h.sh-=(it.shares||0);sv(KH,H);}
-      }
-      T.push({id:Date.now()+Math.random(),a:it.action,cd:cd||nm,nm,sh:it.shares||0,p:it.price||0,dt:it.date||TODAY,pnl}); count++;
-    }
-    sv(KT,T);
-  }else if(ssType==='pnl'){
-    for(const it of checked){
-      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
-      if(!nm)continue;
-      if(T.find(t=>t.cd===cd&&t.dt===it.date&&t.a==='sell'))continue;
-      T.push({id:Date.now()+Math.random(),a:'sell',cd:cd||nm,nm,sh:it.shares||0,p:it.sell_price||0,dt:it.date||TODAY,pnl:it.realized_pnl||0}); count++;
-    }
-    sv(KT,T);
-  }else if(ssType==='cash'){
-    // 余力画面→残金に反映
-    if(parsedItems.length>0){
-      const o=parsedItems[0];
-      const val=o.cash||o.buying_power||0;
-      if(val>0){
-        cash=val; sv(KC,cash);
-        document.getElementById('cashIn').value=cash||'';
-        count=1;
-      }
-    }
-  }else if(ssType==='summary'){
-    // 評価損益は参照情報のみ（保存不要）
-    count=1;
-  }else{
-    for(const it of checked){
-      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
-      if(!nm)continue;
-      if(W.find(w=>w.cd===(cd||nm)))continue;
-      W.push({cd:cd||nm,nm,tag:it.tag||'',dt:TODAY}); count++;
-    }
-    sv(KW,W);
-  }
-  closeModal(); calcS(); rTH(); rHold(); rWatch();
-  if(ssType==='cash'&&count>0) toast('💴 残金を'+cash.toLocaleString()+'円に更新しました');
-  else if(ssType==='summary') toast('📊 評価損益を確認しました');
-  else toast('✅ '+count+'件を取り込みました');
-  parsedItems=[]; ssImageList=[];
-  document.getElementById('ssPreviewList').style.display='none';
-  document.getElementById('ssPreviewGrid').innerHTML='';
-  document.getElementById('ssAnalyzeBtn').style.display='none';
-  document.getElementById('ssApplyBtn').style.display='none';
-  document.getElementById('ssResult').classList.remove('show');
-}
+function toast(m){const e=document.getElementById("toast");e.textContent=m;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2600);}
 
 // 初期化
-calcS(); rTH(); rWatch();
-if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
-</script>
-<script>
-if('serviceWorker' in navigator){
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(() => console.log('SW登録完了'))
-      .catch(e => console.log('SW登録失敗:', e));
-  });
-}
+calcS();rTH();
 </script>
 </body>
 </html>
