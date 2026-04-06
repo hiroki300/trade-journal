@@ -12,13 +12,13 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap');
+/* fonts removed */
 :root{
   --bg:#0b0f18;--s1:#111827;--s2:#1a2236;--border:#1e2d45;
   --acc:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;
   --gem:#4285f4;--cld:#d97706;
   --text:#e2e8f0;--t2:#94a3b8;--t3:#4b6088;
-  --font:'Noto Sans JP',sans-serif;--mono:'JetBrains Mono',monospace;
+  --font:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN',sans-serif;--mono:monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 button,select,input,.tab,.ss-type,.ss-zone,.mode-btn,.rcard-toggle .rhdr,.expand-btn,.wdel,.delbtn,.hdr-key-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation;cursor:pointer;user-select:none;}
@@ -205,6 +205,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 <div class="pages">
 
 <div class="page on" id="page-dash">
+  <button onclick="toast('✅ ボタン動作確認OK')" style="width:100%;background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:700;margin-bottom:8px;cursor:pointer;touch-action:manipulation">🔧 タップテスト（これが動けばOK）</button>
   <div class="cash-row"><label>残金</label><input id="cashIn" type="number" placeholder="0" oninput="saveCash()"><span>円</span></div>
   <div class="sum-row">
     <div class="sb"><div class="sl">評価額</div><div class="sv" id="sv">¥0</div><div class="ss" id="sct">0銘柄</div></div>
@@ -1466,14 +1467,6 @@ function doImport() {
 calcS(); rTH(); rWatch();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 </script>
-<script>
-if('serviceWorker' in navigator){
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(() => console.log('SW登録完了'))
-      .catch(e => console.log('SW登録失敗:', e));
-  });
-}
-</script>
+<!-- SW removed -->
 </body>
 </html>
