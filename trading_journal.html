@@ -1188,7 +1188,7 @@ async function callGemini(prompt, sys, history) {
 // Claude API
 async function callClaude(prompt, sys, history) {
   const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
-  const body = {model:'claude-sonnet-4-20250514', max_tokens:1500, messages:msgs};
+  const body = {model:'claude-haiku-4-5-20251001', max_tokens:1000, messages:msgs};
   if (sys) body.system = sys;
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
