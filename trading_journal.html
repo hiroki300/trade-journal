@@ -499,8 +499,8 @@ function hHTML(h, compact) {
     '<div class="hmeta">' +
     '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
     '<span class="hbg">' + h.sh + '株</span>' +
-    '<span class="hbg" onclick="editBuyPrice(\'' + h.cd + '\')" style="cursor:pointer;border:1px dashed var(--acc);color:var(--acc)">✏️ 買 ' + h.bp.toLocaleString() + '円</span>' +
-    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',this.value)">円</span>' +
+    '<span class="hbg" onclick="editBuyPrice(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="cursor:pointer;border:1px dashed var(--acc);color:var(--acc)">✏️ 買 ' + h.bp.toLocaleString() + '円</span>' +
+    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',\'' + (h.type||'spot') + '\',this.value)">円</span>' +
     (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
     '</div>';
   if (!compact) {
@@ -510,10 +510,10 @@ function hHTML(h, compact) {
       '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
       (h.memo ? '<div style="font-size:11px;color:var(--t3);margin-top:5px">📝' + h.memo + '</div>' : '') +
       '<div style="display:flex;gap:6px;margin-top:8px">'+
-      '<button class="delbtn" onclick="delH(\'' + h.cd + '\')" style="flex:none">🗑 削除</button>'+
-      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 損切り・利確・売買判断を分析</button>'+
+      '<button class="delbtn" onclick="delH(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="flex:none">🗑 削除</button>'+
+      '<button onclick="analyzeHolding(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 ' + (h.type==='margin'?'📊 信用建玉を分析':'💴 現物を分析') + '</button>'+
       '</div>'+
-      '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>';
+      '<div id="ai-'+h.cd+'-'+(h.type||'spot')+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>';
   }
   return html + '</div>';
 }
@@ -528,10 +528,10 @@ function tHTML(t) {
 }
 
 // 個別銘柄AI分析（Gemini+Claude合議）
-async function analyzeHolding(cd) {
-  const h = H.find(h => h.cd===cd);
+async function analyzeHolding(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
   if (!h) return;
-  const panel = document.getElementById('ai-'+cd);
+  const panel = document.getElementById('ai-'+cd+'-'+(tp||'spot'));
   if (!panel) return;
 
   if (panel.style.display === 'block' && panel.textContent) {
@@ -631,10 +631,10 @@ async function analyzeHolding(cd) {
   }
 }
 
-function uCP(cd, v) { const h = H.find(h => h.cd===cd); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
+function uCP(cd, tp, v) { const h = H.find(h => h.cd===cd && (!tp||h.type===tp)); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
 
-function editBuyPrice(cd) {
-  const h = H.find(h => h.cd===cd);
+function editBuyPrice(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
   if (!h) return;
   // インライン編集フォームを表示
   const row = document.querySelector('[data-edit="'+cd+'"]');
@@ -676,12 +676,12 @@ function editBuyPrice(cd) {
 
   hrow.insertAdjacentElement('afterend', div);
   // ボタンイベントをaddEventListenerで設定（onclickのクォート問題を回避）
-  document.getElementById('save-edit-'+cd).addEventListener('click', () => saveEditPrice(cd));
+  document.getElementById('save-edit-'+cd).addEventListener('click', () => saveEditPrice(cd, h.type));
   document.getElementById('cancel-edit-'+cd).addEventListener('click', () => div.remove());
 }
 
-function saveEditPrice(cd) {
-  const h = H.find(h => h.cd===cd);
+function saveEditPrice(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp||h.type===tp));
   if (!h) return;
   const bp  = parseFloat(document.getElementById('edit-bp-'+cd)?.value);
   const sl  = parseFloat(document.getElementById('edit-sl-'+cd)?.value);
@@ -694,7 +694,7 @@ function saveEditPrice(cd) {
   rHold(); calcS();
   toast('✅ ' + h.nm + ' の価格を更新しました');
 }
-function delH(cd) { if(!confirm('削除しますか？')) return; H=H.filter(h=>h.cd!==cd); sv(KH,H); rHold(); toast('削除しました'); }
+function delH(cd, tp) { if(!confirm('削除しますか？')) return; H=H.filter(h=>!(h.cd===cd && (tp?h.type===tp:true))); sv(KH,H); rHold(); toast('削除しました'); }
 function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map(h=>hHTML(h,false)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
 
 // ウォッチリスト
@@ -739,21 +739,35 @@ function doTrade() {
     const memo = document.getElementById('tmemo').value.trim();
     const tdt = document.getElementById('tdt').value || TODAY;
     const ttype = document.getElementById('ttype').value || 'spot';
-    const idx = H.findIndex(h => h.cd===cd);
-    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10}; }
-    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p});
+    // 🔧 修正: 銘柄コード + 取引区分（現物/信用）が同じ場合のみ合算
+    const idx = H.findIndex(h => h.cd===cd && h.type===ttype);
+    if (idx>=0) {
+      const ex=H[idx], tot=ex.sh+sh;
+      H[idx]={...ex, sh:tot, bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10};
+    } else {
+      H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p});
+    }
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY}); sv(KT,T);
-    toast('✅ ' + nm + ' 買い記録');
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype}); sv(KT,T);
+    toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + '） 買い記録');
   } else {
-    const h = H.find(h => h.cd===cd); let pnl=null;
-    if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
+    const ttype = document.getElementById('ttype').value || 'spot';
+    // 🔧 修正: 売り時も取引区分を考慮して対象を特定
+    const h = H.find(h => h.cd===cd && h.type===ttype)
+           || H.find(h => h.cd===cd); // 区分不明の場合はコードだけで検索
+    let pnl=null;
+    if (h) {
+      pnl=(p-h.bp)*sh;
+      if(h.sh<=sh) H=H.filter(hh=>!(hh.cd===cd && hh.type===h.type));
+      else h.sh-=sh;
+      sv(KH,H);
+    }
     cash+=p*sh; sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl,type:ttype}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
-    toast('✅ ' + nm + ' 売り記録' + ps);
+    toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + '） 売り記録' + ps);
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
   rTH();
@@ -769,7 +783,7 @@ function pfS() {
   const hs = H.length
     ? H.map(h => {
         const cp = h.cp||h.bp, pct = ((cp-h.bp)/h.bp*100).toFixed(1);
-        return h.cd + ' ' + h.nm + ': ' + h.sh + '株 買値' + h.bp + '円 現値' + cp + '円(' + (pct>=0?'+':'') + pct + '%) 損切' + (h.sl||'未') + '→目標' + (h.tgt||'未');
+        return h.cd + ' ' + h.nm + '(' + (h.type==='margin'?'信用':'現物') + '): ' + h.sh + '株 買値' + h.bp + '円 現値' + cp + '円(' + (pct>=0?'+':'') + pct + '%) 損切' + (h.sl||'未') + '→目標' + (h.tgt||'未');
       }).join('\n')
     : '保有銘柄なし（現金のみ）';
   const td = T.filter(t => t.dt===TODAY);
@@ -1791,7 +1805,7 @@ function doImport() {
     for(const it of checked){
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
-      const idx=H.findIndex(h=>h.cd===(cd||nm));
+      const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===(it.type||'spot'));
       if(idx>=0){if(it.current_price)H[idx].cp=it.current_price;}
       else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:it.type||'spot'});
       count++;
@@ -1804,7 +1818,7 @@ function doImport() {
       if(T.find(t=>t.cd===cd&&t.p===it.price&&t.dt===it.date&&t.a===it.action))continue;
       let pnl=null;
       if(it.action==='buy'){
-        const idx=H.findIndex(h=>h.cd===(cd||nm));
+        const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===(it.type||'spot'));
         if(idx>=0){const ex=H[idx],tot=ex.sh+(it.shares||0);H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+(it.price||0)*(it.shares||0))/tot*10)/10};}
         else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:'SS取込',dt:it.date||TODAY});
         sv(KH,H);
