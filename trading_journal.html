@@ -813,7 +813,7 @@ async function doMorning() {
 ④今日の相場 強気/中立/弱気 + 一言`;
 
   const gemMktP = callGemini(mktPrompt).then(txt => {
-    mktCard.querySelector('.mrn-body').textContent = txt;
+    mktCard.querySelector('.mrn-body').innerHTML = fmtRevText(txt);
   }).catch(e => {
     mktCard.querySelector('.mrn-body').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
   });
@@ -867,14 +867,14 @@ ${t.role === '保有中' ?
 
     const gP = callGemini(gPrompt).then(txt => {
       gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' +
-        '<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + txt + '</div>';
+        fmtRevText(txt);
     }).catch(e => {
       gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
     });
 
     const cP = callClaude(cPrompt).then(txt => {
       cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div>' +
-        '<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">' + txt + '</div>';
+        fmtRevText(txt);
     }).catch(e => {
       cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
     });
@@ -883,6 +883,13 @@ ${t.role === '保有中' ?
   });
 
   await Promise.all([gemMktP, ...stockPs]);
+
+  // 全カード展開
+  document.querySelectorAll('#mrnOut .rcard-body-wrap').forEach(w => {
+    w.classList.remove('collapsed');
+    w.classList.add('expanded','rcard-fade');
+  });
+  document.querySelectorAll('#mrnOut .rev-chevron').forEach(c => c.textContent='▼');
 
   btn.disabled = false;
   btn.innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
@@ -918,15 +925,18 @@ function rMrnHistory() {
 
 function mkMrnCard(icon, titleHtml, color, pill) {
   const card = document.createElement('div');
-  card.className = 'rcard';
+  card.className = 'rcard rcard-toggle';
   card.style.marginBottom = '10px';
   card.innerHTML =
-    '<div class="rhdr">' +
+    '<div class="rhdr" onclick="toggleRevCard(this)">' +
     '<span style="font-size:15px">' + icon + '</span>' +
     '<span style="font-size:12px;font-weight:700;color:' + color + '">' + titleHtml + '</span>' +
     (pill ? '<span class="ai-pill" style="margin-left:auto;background:rgba(66,133,244,.15);color:var(--gem);font-size:9px;padding:2px 6px;border-radius:4px">' + pill + '</span>' : '') +
+    '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
     '</div>' +
-    '<div class="mrn-body" style="padding:10px 0 2px"></div>';
+    '<div class="rcard-body-wrap collapsed rcard-fade">' +
+    '<div class="mrn-body" style="padding:10px 13px 4px"></div>' +
+    '</div>';
   return card;
 }
 
@@ -954,7 +964,7 @@ function mkRevCard(icon, title, color, pill, pillClass) {
     '<span class="ai-pill ' + pillClass + '" style="margin-left:auto">' + pill + '</span>' +
     '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
     '</div>' +
-    '<div class="rcard-body-wrap expanded rcard-fade">' +
+    '<div class="rcard-body-wrap collapsed rcard-fade">' +
     '<div class="rbody"><div class="ldg"><div class="spin"></div><span>分析中...</span></div></div>' +
     '</div>';
   return card;
@@ -985,12 +995,21 @@ async function doRev() {
     callGemini(s.p(pf)).then(txt => {
       const body = gemCards[i].querySelector('.rbody');
       body.innerHTML = fmtRevText(txt);
+      // 分析完了後に展開
+      const wrap = gemCards[i].querySelector('.rcard-body-wrap');
+      if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded','rcard-fade');}
+      const chev = gemCards[i].querySelector('.rev-chevron');
+      if(chev) chev.textContent='▼';
     }).catch(e => {
       gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
     })
   );
   const cldP = callClaude(CLD_STEP.p(pf)).then(txt => {
     cldCard.querySelector('.rbody').innerHTML = fmtRevText(txt);
+    const wrap = cldCard.querySelector('.rcard-body-wrap');
+    if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded','rcard-fade');}
+    const chev = cldCard.querySelector('.rev-chevron');
+    if(chev) chev.textContent='▼';
   }).catch(e => {
     cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
   });
