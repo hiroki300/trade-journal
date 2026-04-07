@@ -538,53 +538,96 @@ async function analyzeHolding(cd) {
     panel.style.display = 'none'; return;
   }
   panel.style.display = 'block';
-  panel.textContent = '🤝 GeminiとClaudeが合議中...';
+  panel.innerHTML = '<div class="ldg" style="padding:8px 0"><div class="spin"></div><span>J-Quantsデータ取得中...</span></div>';
 
   const cp = h.cp || h.bp;
   const pnl = (cp - h.bp) * h.sh;
   const pct = ((cp - h.bp) / h.bp * 100).toFixed(2);
-  const typeStr = h.type === 'margin' ? '信用買建' : '現物';
+  const isMargin = h.type === 'margin';
+  const typeStr = isMargin ? '信用買建' : '現物';
   const cost = h.bp * h.sh;
 
-  const prompt =
-    'あなたは運用資産5000億円規模・運用歴25年の日本株専門シニアファンドマネージャーです。\n'+
-    'Google検索で今日の最新情報（株価・ニュース・需給・材料）を必ず調べてから回答してください。\n'+
-    '曖昧な表現は禁止。プロとして断言し、具体的な数字で答えてください。\n\n'+
-    '【保有銘柄】\n'+
-    '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
-    '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株）\n'+
-    '現在値: '+cp.toLocaleString()+'円\n'+
-    '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
-    (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円\n':'')+
-    (h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'')+
-    (h.memo?'メモ: '+h.memo+'\n':'')+
-    '\n【依頼内容】私の大切な資産です。以下を超一流FMとして率直に答えてください：\n\n'+
-    '## 【売買判断】\n'+
-    '「今すぐ売る」「継続保有」「買い増し」のどれか1つを断言し、その理由を3行で。\n\n'+
-    '## 【損切りライン】\n'+
-    '具体的な価格（円）を1つ示し、その根拠（テクニカル・リスク管理の観点）を説明。\n'+
-    '現在値からの下落率も示すこと。\n\n'+
-    '## 【利確目標】\n'+
-    '具体的な価格（円）を1つ示し、その根拠を説明。\n'+
-    '段階的利確が望ましい場合は第1目標・最終目標を示すこと。\n\n'+
-    '## 【最新材料・リスク】\n'+
-    'Google検索で調べた直近のニュース・決算・需給の状況。\n'+
-    'この銘柄の最大のリスク要因も1つ挙げること。\n\n'+
-    '## 【シニアFMの本音】\n'+
-    '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。';
+  // J-Quants週次データを取得
+  const weeklyData = await fetchWeeklyData();
+  const wEntry = findWeeklyEntry(weeklyData, h.cd);
+  const wInfo = formatWeeklyInfo(wEntry);
+  const jqText = wInfo ? wInfo.lines.join('\n') : 'J-Quantsデータなし（週次スキャン未実行）';
+
+  // 現物・信用で異なる判断軸
+  const marginSpecific = isMargin ? `
+【信用取引固有の判断軸】
+・期日リスク: 制度信用の返済期限（6ヶ月）を考慮すること
+・金利コスト: 保有日数が長いほど金利負担が増加する点を考慮
+・追証リスク: 含み損が拡大した場合の追証発生ラインを示すこと
+・ロスカット優先: 現物より損切りを早めに判断すること
+・判断: 「返済（決済）」「継続保有」「ナンピン（追加買い）」のどれか断言` :
+`【現物取引固有の判断軸】
+・長期保有の可否: 下落しても期日がないため、ファンダが崩れていなければ保有継続も選択肢
+・配当・株主優待の有無も考慮（ある場合は言及）
+・判断: 「売却」「継続保有」「買い増し」のどれか断言`;
+
+  // Gemini専用プロンプト（需給・市場情報・テーマ）
+  const gPrompt =
+    `あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてから回答してください。\n\n` +
+    `【保有銘柄】${h.cd} ${h.nm}（${typeStr}）\n` +
+    `取得金額: ${cost.toLocaleString()}円（${h.bp.toLocaleString()}円 × ${h.sh}株）\n` +
+    `現在値: ${cp.toLocaleString()}円 / 含み損益: ${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円（${pct>=0?'+':''}${pct}%）\n` +
+    `${h.sl?'損切り設定: '+h.sl.toLocaleString()+'円\n':''}` +
+    `${h.tgt?'目標設定: '+h.tgt.toLocaleString()+'円\n':''}` +
+    `\n【J-Quants週次データ（参考）】\n${jqText}\n\n` +
+    `以下を調べて簡潔に答えてください（各1〜2行）:\n` +
+    `①今日の株価・前日比・出来高の状況\n` +
+    `②信用倍率（J-Quantsデータ参照）と需給の評価\n` +
+    `③空売り残高・外国人・機関の動向\n` +
+    `④直近の材料・ニュース（今週以内）\n` +
+    `⑤テーマ性: 今の市場テーマと合致しているか\n` +
+    `⑥${isMargin ? '信用建玉として継続保有すべきか（期日・金利コスト考慮）' : '現物として継続保有に値するか（ファンダ・テーマ面）'}`;
+
+  // Claude専用プロンプト（テクニカル・リスク管理）
+  const cPrompt =
+    `あなたは運用歴25年の日本株専門シニアFMです。以下のデータを基に判断してください。\n\n` +
+    `【保有銘柄】${h.cd} ${h.nm}（${typeStr}）\n` +
+    `取得金額: ${cost.toLocaleString()}円（${h.bp.toLocaleString()}円 × ${h.sh}株）\n` +
+    `現在値: ${cp.toLocaleString()}円 / 含み損益: ${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円（${pct>=0?'+':''}${pct}%）\n` +
+    `${h.sl?'損切り設定: '+h.sl.toLocaleString()+'円\n':''}` +
+    `${h.tgt?'目標設定: '+h.tgt.toLocaleString()+'円\n':''}` +
+    `\n【J-Quants週次データ】\n${jqText}\n\n` +
+    marginSpecific + `\n\n` +
+    `## 【テクニカル判断】\n` +
+    `J-QuantsのATR・シグナル・損切りラインを参照し、チャート状況を1〜2行で。\n\n` +
+    `## 【損切りライン】\n` +
+    `J-Quantsの損切りライン（${wEntry?.stop_loss?.toLocaleString()||'データなし'}円）を参考に、` +
+    `具体的な価格と現在値からの下落率を示すこと。${isMargin?'追証ラインも考慮すること。':''}\n\n` +
+    `## 【利確目標】\n` +
+    `J-Quantsの目標価格（${wEntry?.target?.toLocaleString()||'データなし'}円）を参考に、` +
+    `第1目標・最終目標を具体的に。\n\n` +
+    `## 【シニアFMの本音】\n` +
+    `${isMargin?'信用建玉として':'現物として'}持ち続けるか？率直に一言で。`;
 
   try {
     const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: '+e.message),
-      callClaude(prompt, null, null).catch(e => '⚠️ Claude: '+e.message),
+      callGemini(gPrompt, null, null).catch(e => '⚠️ Gemini: '+e.message),
+      callClaude(cPrompt, null, null).catch(e => '⚠️ Claude: '+e.message),
     ]);
 
-    panel.textContent =
-      '🤖 Gemini（市場情報・速報）:\n' + gRes +
-      '\n\n━━━━━━━━━━━━━━━\n\n'+
-      '🧠 Claude（戦略・判断）:\n' + cRes;
+    // J-Quantsサマリーを最初に表示
+    const jqSummary = wInfo ?
+      `📊 J-Quants: ${wInfo.rank}ランク ${wInfo.total}pt${wEntry?.atr?' / ATR:'+wEntry.atr+'円':''}${wEntry?.margin_ratio?' / 信用倍率:'+wEntry.margin_ratio+'倍':''}\n` +
+      `🛑 損切り:${wEntry?.stop_loss?.toLocaleString()||'?'}円  🎯 目標:${wEntry?.target?.toLocaleString()||'?'}円\n` +
+      `━━━━━━━━━━━━━━━\n` : '';
+
+    panel.innerHTML =
+      `<div style="font-size:11px;font-weight:700;color:${isMargin?'#f59e0b':'#10b981'};margin-bottom:6px">` +
+      `${isMargin?'📊 信用買建':'💴 現物'} 専用分析</div>` +
+      `<pre style="font-size:11px;color:#94a3b8;white-space:pre-wrap;margin-bottom:8px">${jqSummary}</pre>` +
+      `<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini（需給・市場情報）</div>` +
+      `<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap;margin-bottom:10px">${gRes}</div>` +
+      `<div style="border-top:1px solid var(--border);padding-top:10px">` +
+      `<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude（テクニカル・リスク管理）</div>` +
+      `<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">${cRes}</div>` +
+      `</div>`;
   } catch(e) {
-    panel.textContent = '⚠️ ' + e.message;
+    panel.innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
   }
 }
 
