@@ -177,7 +177,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .rcard-toggle .rhdr{user-select:none;}
 .rcard-body-wrap{overflow:hidden;transition:max-height .3s;}
 .rcard-body-wrap.collapsed{max-height:60px;}
-.rcard-body-wrap.expanded{max-height:2000px;}
+.rcard-body-wrap.expanded{max-height:99999px;}
 .rcard-fade{position:relative;}
 .rcard-fade::after{content:'';position:absolute;bottom:0;left:0;right:0;height:30px;background:linear-gradient(transparent,var(--s1));pointer-events:none;}
 .rcard-fade.expanded::after{display:none;}
@@ -833,6 +833,7 @@ async function doMorning() {
   const out = document.getElementById('mrnOut');
   out.innerHTML = '';
 
+  const today = new Date().toLocaleDateString('ja-JP',{month:'numeric',day:'numeric',weekday:'short'});
   const targets = getMrnTargets();
   if (!targets.length) {
     out.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px">保有銘柄・ウォッチリストが登録されていません</div>';
@@ -841,8 +842,21 @@ async function doMorning() {
     return;
   }
 
-  const today = new Date().toLocaleDateString('ja-JP', {month:'numeric',day:'numeric',weekday:'short'});
-  const pf = pfS();
+  // J-Quantsデータを事前取得
+  const weeklyData = await fetchWeeklyData();
+
+  // ポートフォリオの詳細情報を構築
+  const holdTargets = targets.filter(t => t.role === '保有中');
+  const totalCost = holdTargets.reduce((s, t) => s + (t.bp||0) * (t.sh||0), 0);
+  const totalVal  = holdTargets.reduce((s, t) => s + (t.cp||t.bp||0) * (t.sh||0), 0);
+  const totalPnl  = totalVal - totalCost;
+  const pfDetail  = holdTargets.map(t => {
+    const pnl = ((t.cp||t.bp) - t.bp) * t.sh;
+    const pct = ((t.cp||t.bp) - t.bp) / t.bp * 100;
+    const wE  = findWeeklyEntry(weeklyData, t.cd);
+    const jqLine = wE ? ` [J-Quants: ${wE.rank||'?'}ランク${wE.margin_ratio?' 信用倍率'+wE.margin_ratio+'倍':''}${wE.atr?' ATR'+wE.atr+'円':''}${wE.stop_loss?' 損切'+wE.stop_loss.toLocaleString()+'円':''}]` : '';
+    return `${t.cd} ${t.nm}（${t.type==='margin'?'信用':'現物'} ${t.sh}株 買値${t.bp?.toLocaleString()}円 現値${(t.cp||t.bp)?.toLocaleString()}円 ${pct>=0?'+':''}${pct.toFixed(1)}% 損益${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円 損切${t.sl?.toLocaleString()||'未'}→目標${t.tgt?.toLocaleString()||'未'}）${jqLine}`;
+  }).join('\n');
 
   // ① Gemini: 市場全体の地合い（1枚目カード）
   const mktCard = mkMrnCard('🌅', '今日の地合い・相場環境', 'var(--gem)', '🤖 Gemini');
@@ -852,25 +866,31 @@ async function doMorning() {
   const stockCards = targets.map(t => {
     const card = mkMrnCard(
       t.role === '保有中' ? '💼' : '👁',
-      t.cd + ' ' + t.nm + '　<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') + ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' + t.role + '</span>',
+      t.cd + ' ' + t.nm + '　<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') + ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' + (t.type==='margin'?'📊信用':'💴現物') + ' ' + t.role + '</span>',
       t.role==='保有中'?'var(--acc)':'var(--green)', ''
     );
     out.appendChild(card);
     return {card, target: t};
   });
 
-  // 地合いをGeminiで取得
+  // 地合いプロンプト（ポートフォリオ全体を把握した上での相場判断）
   const mktPrompt = `あなたは日本株専門のシニアFMです。Google検索で${today}の最新情報を調べてください。
-対象銘柄: ${targets.map(t=>t.cd+' '+t.nm).join(', ')}
 
-以下を簡潔に（各項目1〜2行）:
-①日経平均・グロース指数の寄り付き予想（前夜のNYダウ・ナスダック・為替を踏まえて）
-②今日の市場テーマ・注目セクター（1行）
-③対象銘柄に関連するニュース・材料（箇条書き）
-④今日の相場 強気/中立/弱気 + 一言`;
+【保有ポートフォリオ全体】
+${pfDetail || '保有なし'}
+合計評価額: ${totalVal.toLocaleString()}円 / 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+以下を詳しく答えてください:
+①【相場環境】昨夜のNYダウ・ナスダック・SOX指数・為替（ドル円）の動きと、今日の日経平均・グロース指数への影響予測
+②【今日のテーマ】市場で注目されているセクター・テーマ（保有銘柄との関連性も言及）
+③【保有銘柄の材料】各保有銘柄の直近ニュース・適時開示・アナリスト動向（見つかったものだけで可）
+④【ポートフォリオ評価】現在のポジション配分について、集中リスク・セクター偏りがあれば指摘
+⑤【今日の戦略】強気/中立/弱気 + 今日取るべきアクション（買い増し・利確・損切り・様子見）を具体的に`;
 
   const gemMktP = callGemini(mktPrompt).then(txt => {
     mktCard.querySelector('.mrn-body').innerHTML = fmtRevText(txt);
+    const wrap = mktCard.querySelector('.rcard-body-wrap');
+    if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded');wrap.classList.remove('rcard-fade');}
   }).catch(e => {
     mktCard.querySelector('.mrn-body').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
   });
@@ -887,40 +907,78 @@ async function doMorning() {
     // Claudeブロック
     const cBlock = document.createElement('div');
     cBlock.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)';
-    cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div><div class="ldg"><div class="spin"></div><span>判断中...</span></div>';
+    cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜' + (t.type==='margin'?'信用建玉判断':'現物判断') + '</div><div class="ldg"><div class="spin"></div><span>判断中...</span></div>';
     bodyEl.appendChild(cBlock);
 
-    const holdInfo = t.bp ?
-      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株 / 現値: ${(t.cp||t.bp).toLocaleString()}円 / 損益: ${((( t.cp||t.bp)-t.bp)*t.sh>=0?'+':'')}${Math.round(((t.cp||t.bp)-t.bp)*t.sh).toLocaleString()}円` : '';
-    const slInfo = t.sl ? `損切: ${t.sl.toLocaleString()}円 / 目標: ${(t.tgt||0).toLocaleString()}円` : '';
+    // J-Quantsデータ取得
+    const wE = findWeeklyEntry(weeklyData, t.cd);
+    const wInfo = formatWeeklyInfo(wE);
+    const jqText = wInfo ? wInfo.lines.join('\n') : 'J-Quantsデータなし';
+    const isMargin = t.type === 'margin';
 
-    // Geminiプロンプト（需給・板・信用倍率重点）
-    const gPrompt = `あなたは日本株専門アナリストです。Google検索で${t.cd} ${t.nm}の今日の最新情報を調べてください。
+    const holdInfo = t.bp ? [
+      `取引区分: ${isMargin ? '📊信用買建' : '💴現物'}`,
+      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株（取得総額: ${(t.bp*t.sh).toLocaleString()}円）`,
+      `現在値: ${(t.cp||t.bp).toLocaleString()}円`,
+      `含み損益: ${((t.cp||t.bp)-t.bp)*t.sh>=0?'+':''}${Math.round(((t.cp||t.bp)-t.bp)*t.sh).toLocaleString()}円（${(((t.cp||t.bp)-t.bp)/t.bp*100).toFixed(2)}%）`,
+      t.sl ? `損切り設定: ${t.sl.toLocaleString()}円（現在値から${((t.sl-(t.cp||t.bp))/(t.cp||t.bp)*100).toFixed(1)}%）` : '損切り: 未設定',
+      t.tgt ? `目標設定: ${t.tgt.toLocaleString()}円（現在値から+${((t.tgt-(t.cp||t.bp))/(t.cp||t.bp)*100).toFixed(1)}%）` : '目標: 未設定',
+    ].join('\n') : '新規候補銘柄（未保有）';
 
-【銘柄】${t.cd} ${t.nm}（${t.role}）
+    // Geminiプロンプト（需給・板・最新情報）
+    const gPrompt = `あなたは日本株専門アナリストです。Google検索で${t.cd} ${t.nm}の今日の最新情報を必ず調べてから答えてください。
+
+【銘柄・ポジション情報】
 ${holdInfo}
-${slInfo}
 
-以下を調べて簡潔に答えてください（各1〜2行）:
-①現在の株価・前日比・出来高（今朝の状況）
-②信用倍率（最新値）と需給の評価
-③空売り残高・機関の動向
-④直近の材料・ニュース（3日以内）
-⑤テクニカル: 5日線・25日線との位置関係
-⑥今日の値動き予想（強気/中立/弱気 + 理由1行）`;
+【J-Quants週次データ（先週末時点）】
+${jqText}
 
-    // Claudeプロンプト（エントリー判断重点）
-    const cPrompt = `あなたは運用歴25年のシニアFMです。スイングトレード（1〜4週間）の観点で判断してください。
-ポートフォリオ全体: ${pf}
+以下を詳しく答えてください:
+①【今日の株価・出来高】現在値・前日比・出来高（平均比）・板の状況
+②【需給】信用倍率（J-Quantsデータと最新値を比較）・空売り残高・外国人動向
+③【直近材料】今週以内のニュース・適時開示・アナリストレーティング変更
+④【テクニカル】5日線・25日線・75日線との位置関係、出来高トレンド
+⑤【今日の値動き予想】強気/中立/弱気 + 具体的な理由と注目価格帯`;
 
-【対象銘柄】${t.cd} ${t.nm}（${t.role}）
+    // Claudeプロンプト（現物/信用で完全分岐）
+    const cPrompt = isMargin ?
+    `あなたは運用歴25年の日本株専門シニアFMです。信用取引の専門家として判断してください。
+
+【信用建玉】${t.cd} ${t.nm}
 ${holdInfo}
-${slInfo}
 
-以下を率直・断言的に答えてください:
-${t.role === '保有中' ?
-  '①継続保有 / 利確 / 損切り のどれか断言して理由\n②今日注意すべき価格帯・ライン\n③ポジション管理の具体的アドバイス' :
-  '①今日エントリーすべきか（◎今すぐ/○条件付き/×見送り）断言して理由\n②エントリーするなら理想の価格帯\n③損切りライン・目標価格の提案'}`;
+【J-Quants週次データ】
+${jqText}
+
+【ポートフォリオ全体】
+${pfDetail || '情報なし'}
+合計評価額: ${totalVal.toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+以下を断言的に答えてください:
+①【売買判断】「今日中に返済」「継続保有」「ナンピン」のどれか1つを断言し理由を3行で
+②【信用固有リスク】期日リスク・金利コスト・追証ライン（買値の約70〜75%水準）を具体的に
+③【損切りライン】J-Quantsの損切りライン(${wE?.stop_loss?.toLocaleString()||'未取得'}円)を参考に具体的な価格と根拠
+④【利確目標】J-Quantsの目標価格(${wE?.target?.toLocaleString()||'未取得'}円)を参考に段階的利確プランを
+⑤【今日の注意価格帯】上値抵抗・下値支持ラインを具体的に` :
+    `あなたは運用歴25年の日本株専門シニアFMです。現物投資の専門家として判断してください。
+
+【現物保有】${t.cd} ${t.nm}
+${holdInfo}
+
+【J-Quants週次データ】
+${jqText}
+
+【ポートフォリオ全体】
+${pfDetail || '情報なし'}
+合計評価額: ${totalVal.toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+以下を断言的に答えてください:
+①【売買判断】「売却」「継続保有」「買い増し」のどれか1つを断言し理由を3行で
+②【継続保有の根拠】ファンダメンタルズ・テーマ性から長期保有に値するか判断
+③【損切りライン】J-Quantsの損切りライン(${wE?.stop_loss?.toLocaleString()||'未取得'}円)を参考に具体的な価格と根拠
+④【利確目標】J-Quantsの目標価格(${wE?.target?.toLocaleString()||'未取得'}円)を参考に段階的利確プランを
+⑤【ポジションサイズ評価】現在の保有額(${(t.bp*(t.sh||0)).toLocaleString()}円)はポートフォリオ全体に対して適切か`;
 
     const gP = callGemini(gPrompt).then(txt => {
       gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' +
@@ -1041,18 +1099,52 @@ async function doRev() {
   btn.disabled = true; btn.textContent = '🔄 分析中...';
   const out = document.getElementById('revOut'); out.innerHTML = '';
   const pf = pfS();
-  const gemCards = GEM_STEPS.map(s => {
+
+  // J-Quantsデータを取得してポートフォリオ詳細を構築
+  const weeklyData = await fetchWeeklyData();
+  const holdDetail = H.map(h => {
+    const cp = h.cp || h.bp;
+    const pnl = (cp - h.bp) * h.sh;
+    const pct = ((cp - h.bp) / h.bp * 100).toFixed(1);
+    const wE  = findWeeklyEntry(weeklyData, h.cd);
+    const jqLine = wE ? ` ／ J-Quants[${wE.rank||'?'}ランク${wE.margin_ratio?' 信用倍率'+wE.margin_ratio+'倍':''}${wE.atr?' ATR'+wE.atr+'円':''}${wE.stop_loss?' 損切'+wE.stop_loss.toLocaleString()+'円':''}${wE.target?' 目標'+wE.target.toLocaleString()+'円':''}${wE.signals?.length?' シグナル:'+wE.signals.map(s=>s.type).join('/'):''} ${wE.earn_note||''}]` : ' ／ J-Quantsデータなし';
+    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'} ${h.sh}株 買${h.bp.toLocaleString()}円 現${cp.toLocaleString()}円 ${pct>=0?'+':''}${pct}% 損益${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円 損切${h.sl?.toLocaleString()||'未設定'}→目標${h.tgt?.toLocaleString()||'未設定'}）${jqLine}`;
+  }).join('\n') || '保有なし';
+
+  const totalCost = H.reduce((s,h)=>s+h.bp*h.sh, 0);
+  const totalVal  = H.reduce((s,h)=>s+(h.cp||h.bp)*h.sh, 0);
+  const totalPnl  = totalVal - totalCost;
+  const pfJq = `【保有銘柄（J-Quants週次データ付き）】\n${holdDetail}\n合計評価額: ${totalVal.toLocaleString()}円 ／ 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 ／ 残金: ${Math.round(cash).toLocaleString()}円`;
+
+  // GEM_STEPSをJ-Quants活用版に動的生成
+  const revSteps = [
+    {
+      icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)', ai:'g',
+      prompt: `あなたは日本株専門アナリストです。Google検索で今日の終値・動きを調べてください。\n\n${pfJq}\n\n各銘柄について以下を答えてください:\n【終値・前日比・出来高】今日の実際の数値\n【本日の動きの理由】ニュース・需給・市場全体との連動\n【J-Quantsシグナルとの整合性】週次スキャンのシグナルが発動中か、それとも逆行したか`
+    },
+    {
+      icon:'🌍', title:'明日に影響する材料', color:'var(--gem)', ai:'g',
+      prompt: `あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n\n${pfJq}\n\n以下を詳しく答えてください:\n①明日の日本株に影響するNY・為替・SOX・商品市況の動き\n②保有銘柄の明日の材料・決算・適時開示・アナリスト動向\n③J-Quantsの損切りライン・目標価格に対して現在どのポジションにあるか\n④明日の相場予想（強気/中立/弱気）と理由`
+    },
+    {
+      icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)', ai:'g',
+      prompt: `あなたは市場センチメント分析の専門家です。Google検索で今日の情報を調べてください。\n\n保有銘柄: ${H.map(h=>h.cd+' '+h.nm).join(', ')}\n\n以下を答えてください:\n・今日のX/SNSで話題の日本株テーマ（保有銘柄との関連性）\n・保有銘柄への個人投資家の評判・話題\n・機関投資家・外国人の今週の動向（J-Quants外国人動向も参照）\n・市場センチメント: 強気/中立/弱気 + 根拠`
+    },
+  ];
+
+  const cldRevPrompt = `あなたは運用歴25年のシニアFMです。J-Quantsのデータを判断の軸にしながら、明日の作戦を立案してください。\n\n${pfJq}\n\n以下を率直・具体的に答えてください:\n① 今日の総括: J-Quantsの週次シグナル・ランクと今日の実際の値動きのギャップを評価\n② 銘柄ごとの明日の判断:\n   - 継続保有/利確/損切りを断言\n   - J-Quantsの損切りライン・目標価格を基準に判断価格を明示\n   - 信用建玉は期日・金利コストも考慮\n③ 明日の具体的アクション: 価格・タイミングを含めた行動計画\n④ リスク管理: J-Quantsの信用倍率・ATRを踏まえた注意点\n⑤ ポートフォリオ全体の改善提言`;
+
+  const gemCards = revSteps.map(s => {
     const card = mkRevCard(s.icon, s.title, s.color, '🤖 Gemini', 'pill-g');
     out.appendChild(card); return card;
   });
-  const cldCard = mkRevCard(CLD_STEP.icon, CLD_STEP.title, CLD_STEP.color, '🧠 Claude', 'pill-c');
+  const cldCard = mkRevCard('🎯', '明日の作戦・行動計画', 'var(--cld)', '🧠 Claude', 'pill-c');
   out.appendChild(cldCard);
 
-  const gemPs = GEM_STEPS.map((s, i) =>
-    callGemini(s.p(pf)).then(txt => {
+  const gemPs = revSteps.map((s, i) =>
+    callGemini(s.prompt).then(txt => {
       const body = gemCards[i].querySelector('.rbody');
       body.innerHTML = fmtRevText(txt);
-      // 分析完了後に展開
       const wrap = gemCards[i].querySelector('.rcard-body-wrap');
       if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded','rcard-fade');}
       const chev = gemCards[i].querySelector('.rev-chevron');
@@ -1061,7 +1153,7 @@ async function doRev() {
       gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
     })
   );
-  const cldP = callClaude(CLD_STEP.p(pf)).then(txt => {
+  const cldP = callClaude(cldRevPrompt).then(txt => {
     cldCard.querySelector('.rbody').innerHTML = fmtRevText(txt);
     const wrap = cldCard.querySelector('.rcard-body-wrap');
     if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded','rcard-fade');}
@@ -1588,7 +1680,7 @@ async function callGemini(prompt, sys, history) {
   const contents = [];
   if (history && history.length > 0) contents.push(...history.slice(0, -1));
   contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
-  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens:1500}};
+  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens:2500}};
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
     {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
@@ -1599,7 +1691,7 @@ async function callGemini(prompt, sys, history) {
 // Claude API
 async function callClaude(prompt, sys, history) {
   const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
-  const body = {model:'claude-haiku-4-5-20251001', max_tokens:1000, messages:msgs};
+  const body = {model:'claude-haiku-4-5-20251001', max_tokens:1500, messages:msgs};
   if (sys) body.system = sys;
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
