@@ -311,6 +311,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
   <!-- 結果表示エリア -->
   <div id="mrnOut"></div>
+
+  <!-- 過去の履歴 -->
+  <div id="mrnHistory"></div>
 </div>
 
 <div class="page" id="page-rev">
@@ -320,6 +323,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>
   </button>
   <div id="revOut"></div>
+  <div id="revHistory"></div>
 </div>
 
 
@@ -341,6 +345,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
   <!-- 結果エリア -->
   <div id="azOut"></div>
+  <div id="azHistory"></div>
 </div>
 
 <div class="page" id="page-chat">
@@ -400,6 +405,26 @@ let CK = localStorage.getItem('tj_ck') || '';
 
 // ストレージ
 const KH='tj_h5', KT='tj_t5', KC='tj_c5', KW='tj_w2';
+const K_MRN='tj_mrn', K_REV='tj_rev', K_AZ='tj_az';  // 朝チェック・振り返り・銘柄分析の保存キー
+
+// 日次レポートを保存（日付をキーにして最大30日分保持）
+function saveReport(baseKey, date, html) {
+  try {
+    const data = ld(baseKey, {});
+    data[date] = { html, savedAt: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'}) };
+    // 30日以上古いものを削除
+    const keys = Object.keys(data).sort().reverse();
+    keys.slice(30).forEach(k => delete data[k]);
+    sv(baseKey, data);
+  } catch(e) { console.warn('保存失敗:', e); }
+}
+function loadReport(baseKey, date) {
+  const data = ld(baseKey, {});
+  return data[date] || null;
+}
+function getReportDates(baseKey) {
+  return Object.keys(ld(baseKey, {})).sort().reverse();
+}
 const ld = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const sv = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 let H = ld(KH, []), T = ld(KT, []), cash = ld(KC, 0), W = ld(KW, []);
@@ -430,7 +455,9 @@ function go(id) {
   if (id==='hold')  rHold();
   if (id==='trade') rTH();
   if (id==='watch') rWatch();
-  if (id==='analyze') rAnalyzeQuick();
+  if (id==='analyze') { rAnalyzeQuick(); rAzHistory(); }
+  if (id==='morning') rMrnHistory();
+  if (id==='rev') rRevHistory();
 }
 
 function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
@@ -859,6 +886,34 @@ ${t.role === '保有中' ?
 
   btn.disabled = false;
   btn.innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
+
+  // 結果を保存
+  saveReport(K_MRN, TODAY, document.getElementById('mrnOut').innerHTML);
+  toast('💾 朝チェックを保存しました');
+  rMrnHistory();
+}
+
+function rMrnHistory() {
+  const el = document.getElementById('mrnHistory');
+  if (!el) return;
+  const dates = getReportDates(K_MRN);
+  // 今日以外の履歴
+  const past = dates.filter(d => d !== TODAY);
+  if (!past.length) { el.innerHTML = ''; return; }
+
+  let html = '<div style="margin-top:16px"><div class="sec-lbl" style="margin-bottom:8px">📂 過去の朝チェック履歴</div>';
+  past.slice(0, 7).forEach(d => {
+    const r = loadReport(K_MRN, d);
+    html += '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleHistory(this)">' +
+      '<span style="font-size:13px;font-weight:700">🌅 ' + d + ' <span style="font-size:10px;color:var(--t3);font-weight:400">保存 ' + (r?.savedAt||'') + '</span></span>' +
+      '<span style="color:var(--t3);font-size:12px">▼</span>' +
+      '</div>' +
+      '<div style="display:none;padding:0 4px 8px">' + (r?.html||'') + '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 function mkMrnCard(icon, titleHtml, color, pill) {
@@ -942,6 +997,33 @@ async function doRev() {
   await Promise.all([...gemPs, cldP]);
   btn.disabled = false;
   btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>';
+
+  // 結果を保存
+  saveReport(K_REV, TODAY, document.getElementById('revOut').innerHTML);
+  toast('💾 振り返りを保存しました');
+  rRevHistory();
+}
+
+function rRevHistory() {
+  const el = document.getElementById('revHistory');
+  if (!el) return;
+  const dates = getReportDates(K_REV);
+  const past = dates.filter(d => d !== TODAY);
+  if (!past.length) { el.innerHTML = ''; return; }
+
+  let html = '<div style="margin-top:16px"><div class="sec-lbl" style="margin-bottom:8px">📂 過去の振り返り履歴</div>';
+  past.slice(0, 14).forEach(d => {
+    const r = loadReport(K_REV, d);
+    html += '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleHistory(this)">' +
+      '<span style="font-size:13px;font-weight:700">🌆 ' + d + ' <span style="font-size:10px;color:var(--t3);font-weight:400">保存 ' + (r?.savedAt||'') + '</span></span>' +
+      '<span style="color:var(--t3);font-size:12px">▼</span>' +
+      '</div>' +
+      '<div style="display:none;padding:0 4px 8px">' + (r?.html||'') + '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 function fmtRevText(txt) {
@@ -1167,6 +1249,52 @@ Google検索で${code} ${nm}の株価・チャート情報を調べてくださ�
   } catch(e) {
     out.innerHTML = '<div style="color:var(--red);padding:16px">⚠️ ' + e.message + '</div>';
   }
+
+  // 銘柄分析結果を保存（銘柄コードと日付をキーに）
+  setTimeout(() => {
+    const outHtml = document.getElementById('azOut').innerHTML;
+    if (outHtml) {
+      const azData = ld(K_AZ, {});
+      const key = code + '_' + TODAY;
+      azData[key] = { code, nm, html: outHtml, date: TODAY,
+        savedAt: new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) };
+      // 90件を超えたら古いものを削除
+      const keys = Object.keys(azData).sort().reverse();
+      keys.slice(90).forEach(k => delete azData[k]);
+      sv(K_AZ, azData);
+      rAzHistory();
+    }
+  }, 100);
+}
+
+function toggleHistory(hdr) {
+  const body = hdr.nextElementSibling;
+  const chev = hdr.querySelector('span:last-child');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  chev.textContent = isOpen ? '▼' : '▲';
+}
+
+function rAzHistory() {
+  const el = document.getElementById('azHistory');
+  if (!el) return;
+  const azData = ld(K_AZ, {});
+  const entries = Object.entries(azData).sort((a,b) => b[0].localeCompare(a[0])).slice(0, 20);
+  if (!entries.length) { el.innerHTML = ''; return; }
+
+  let html = '<div style="margin-top:16px"><div class="sec-lbl" style="margin-bottom:8px">📂 過去の銘柄分析</div>';
+  entries.forEach(([key, r]) => {
+    html += '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleHistory(this)">' +
+      '<span style="font-size:13px;font-weight:700">🔬 ' + r.code + ' ' + r.nm +
+      ' <span style="font-size:10px;color:var(--t3);font-weight:400">' + r.date + ' ' + (r.savedAt||'') + '</span></span>' +
+      '<span style="color:var(--t3);font-size:12px">▼</span>' +
+      '</div>' +
+      '<div style="display:none;padding:0 4px 8px">' + (r.html||'') + '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 function mkScoreBar(lbl, score, color) {
@@ -1557,6 +1685,21 @@ function doImport() {
 // 初期化
 calcS(); rTH(); rWatch();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
+
+// 当日の保存済みレポートがあれば復元して表示
+const todayMrn = loadReport(K_MRN, TODAY);
+if (todayMrn) {
+  document.getElementById('mrnOut').innerHTML = todayMrn.html;
+  document.getElementById('mrnBtn').innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">💾 本日 ' + todayMrn.savedAt + ' 保存済み</span>';
+}
+const todayRev = loadReport(K_REV, TODAY);
+if (todayRev) {
+  document.getElementById('revOut').innerHTML = todayRev.html;
+  document.getElementById('revBtn').innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">💾 本日 ' + todayRev.savedAt + ' 保存済み</span>';
+}
+// 履歴を初期表示
+rRevHistory();
+rAzHistory();
 </script>
 <!-- SW removed -->
 </body>
