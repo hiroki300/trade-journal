@@ -864,9 +864,18 @@ async function doMorning() {
 
   // ② 銘柄別カード（Gemini需給 + Claude判断を並列）
   const stockCards = targets.map(t => {
+    const pnlAmt = t.bp ? Math.round(((t.cp||t.bp) - t.bp) * (t.sh||0)) : 0;
+    const pnlPct = t.bp ? (((t.cp||t.bp) - t.bp) / t.bp * 100) : 0;
+    const pnlStr = t.bp ? (' <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' +
+      (pnlAmt >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+      (pnlAmt >= 0 ? '+' : '') + pnlAmt.toLocaleString() + '円（' +
+      (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%）</span>') : '';
+    const typeTag = '<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') +
+      ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' +
+      (t.type==='margin'?'📊信用':'💴現物') + ' ' + t.role + '</span>';
     const card = mkMrnCard(
       t.role === '保有中' ? '💼' : '👁',
-      t.cd + ' ' + t.nm + '　<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') + ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' + (t.type==='margin'?'📊信用':'💴現物') + ' ' + t.role + '</span>',
+      t.cd + ' ' + t.nm + '　' + typeTag + pnlStr,
       t.role==='保有中'?'var(--acc)':'var(--green)', ''
     );
     out.appendChild(card);
@@ -942,43 +951,79 @@ ${jqText}
 ⑤【今日の値動き予想】強気/中立/弱気 + 具体的な理由と注目価格帯`;
 
     // Claudeプロンプト（現物/信用で完全分岐）
+    // 損益状況を計算
+    const cp = t.cp || t.bp || 0;
+    const pnlAmt2 = t.bp ? Math.round((cp - t.bp) * (t.sh||0)) : 0;
+    const pnlPct2 = t.bp ? ((cp - t.bp) / t.bp * 100) : 0;
+    const pnlStatus = t.bp ? `現在${pnlPct2>=0?'+':''}${pnlPct2.toFixed(1)}%（${pnlAmt2>=0?'+':''}${pnlAmt2.toLocaleString()}円）` : '';
+    const toTarget = (t.tgt && cp) ? ((t.tgt - cp) / cp * 100).toFixed(1) : null;
+    const toStop   = (t.sl  && cp) ? ((cp - t.sl)  / cp * 100).toFixed(1) : null;
+    const distanceInfo = [
+      toTarget ? `目標まで+${toTarget}%` : null,
+      toStop   ? `損切りまで-${toStop}%` : null,
+    ].filter(Boolean).join(' / ');
+
     const cPrompt = isMargin ?
-    `あなたは運用歴25年の日本株専門シニアFMです。信用取引の専門家として判断してください。
+    `あなたは運用歴25年の日本株専門シニアFMです。信用取引の専門家として今日の判断を断言してください。
 
 【信用建玉】${t.cd} ${t.nm}
-${holdInfo}
+━━ 損益状況 ━━
+買値: ${t.bp?.toLocaleString()}円 × ${t.sh}株（投資額: ${(t.bp*(t.sh||0)).toLocaleString()}円）
+現在値: ${cp.toLocaleString()}円
+含み損益: ${pnlStatus}
+${t.sl?'損切り設定: '+t.sl.toLocaleString()+'円（現在値から'+((t.sl-cp)/cp*100).toFixed(1)+'%）':'損切り: 未設定'}
+${t.tgt?'目標設定: '+t.tgt.toLocaleString()+'円（現在値から+'+(( t.tgt-cp)/cp*100).toFixed(1)+'%）':'目標: 未設定'}
+${distanceInfo}
 
-【J-Quants週次データ】
+【J-Quantsデータ】
 ${jqText}
 
-【ポートフォリオ全体】
-${pfDetail || '情報なし'}
+【ポートフォリオ全体】${pfDetail||'なし'}
 合計評価額: ${totalVal.toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
 
-以下を断言的に答えてください:
-①【売買判断】「今日中に返済」「継続保有」「ナンピン」のどれか1つを断言し理由を3行で
-②【信用固有リスク】期日リスク・金利コスト・追証ライン（買値の約70〜75%水準）を具体的に
-③【損切りライン】J-Quantsの損切りライン(${wE?.stop_loss?.toLocaleString()||'未取得'}円)を参考に具体的な価格と根拠
-④【利確目標】J-Quantsの目標価格(${wE?.target?.toLocaleString()||'未取得'}円)を参考に段階的利確プランを
-⑤【今日の注意価格帯】上値抵抗・下値支持ラインを具体的に` :
-    `あなたは運用歴25年の日本株専門シニアFMです。現物投資の専門家として判断してください。
+━━ 判断してください ━━
+① 【今日の判断】「今日返済」「継続保有」「ナンピン」を一言で断言してから理由3行
+  ※ 含み益${pnlPct2>=0?'+':''}${pnlPct2.toFixed(1)}%の状況でどう動くべきか具体的に
+② 【利確ライン】
+  - J-Quants目標(${wE?.target?.toLocaleString()||'未取得'}円)と現在値の差を踏まえ、
+    今日中に利確すべき水準か、それとも伸ばすべきか断言
+  - 段階利確するなら第1目標・最終目標を具体的な円で
+③ 【損切りライン】
+  - J-Quants損切り(${wE?.stop_loss?.toLocaleString()||'未取得'}円)と自分の設定を比較
+  - 今日ここを割ったら即返済する価格を明示
+④ 【信用固有リスク】追証ライン(買値の約75%＝${t.bp?Math.round(t.bp*0.75).toLocaleString():'?'}円)・金利コスト
+⑤ 【一言】このポジションを今日どうしたいか` :
+    `あなたは運用歴25年の日本株専門シニアFMです。現物保有の専門家として今日の判断を断言してください。
 
 【現物保有】${t.cd} ${t.nm}
-${holdInfo}
+━━ 損益状況 ━━
+買値: ${t.bp?.toLocaleString()}円 × ${t.sh}株（投資額: ${(t.bp*(t.sh||0)).toLocaleString()}円）
+現在値: ${cp.toLocaleString()}円
+含み損益: ${pnlStatus}
+${t.sl?'損切り設定: '+t.sl.toLocaleString()+'円（現在値から'+((t.sl-cp)/cp*100).toFixed(1)+'%）':'損切り: 未設定'}
+${t.tgt?'目標設定: '+t.tgt.toLocaleString()+'円（現在値から+'+(( t.tgt-cp)/cp*100).toFixed(1)+'%）':'目標: 未設定'}
+${distanceInfo}
 
-【J-Quants週次データ】
+【J-Quantsデータ】
 ${jqText}
 
-【ポートフォリオ全体】
-${pfDetail || '情報なし'}
+【ポートフォリオ全体】${pfDetail||'なし'}
 合計評価額: ${totalVal.toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
 
-以下を断言的に答えてください:
-①【売買判断】「売却」「継続保有」「買い増し」のどれか1つを断言し理由を3行で
-②【継続保有の根拠】ファンダメンタルズ・テーマ性から長期保有に値するか判断
-③【損切りライン】J-Quantsの損切りライン(${wE?.stop_loss?.toLocaleString()||'未取得'}円)を参考に具体的な価格と根拠
-④【利確目標】J-Quantsの目標価格(${wE?.target?.toLocaleString()||'未取得'}円)を参考に段階的利確プランを
-⑤【ポジションサイズ評価】現在の保有額(${(t.bp*(t.sh||0)).toLocaleString()}円)はポートフォリオ全体に対して適切か`;
+━━ 判断してください ━━
+① 【今日の判断】「売却」「継続保有」「買い増し」を一言で断言してから理由3行
+  ※ 含み益${pnlPct2>=0?'+':''}${pnlPct2.toFixed(1)}%の状況でどう動くべきか具体的に
+② 【利確ライン】
+  - J-Quants目標(${wE?.target?.toLocaleString()||'未取得'}円)と現在値の差を踏まえ、
+    今日中に利確すべき水準か、それとも伸ばすべきか断言
+  - 段階利確するなら第1目標・最終目標を具体的な円で
+③ 【損切りライン】
+  - J-Quants損切り(${wE?.stop_loss?.toLocaleString()||'未取得'}円)と自分の設定を比較
+  - 今日ここを割ったら売る価格を明示
+④ 【継続保有の根拠】
+  - 今の含み益を手放してまで保有を続ける理由があるか
+  - テーマ・ファンダ・チャートから判断
+⑤ 【一言】このポジションを今日どうしたいか`;
 
     const gP = callGemini(gPrompt).then(txt => {
       gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' +
@@ -1132,7 +1177,33 @@ async function doRev() {
     },
   ];
 
-  const cldRevPrompt = `あなたは運用歴25年のシニアFMです。J-Quantsのデータを判断の軸にしながら、明日の作戦を立案してください。\n\n${pfJq}\n\n以下を率直・具体的に答えてください:\n① 今日の総括: J-Quantsの週次シグナル・ランクと今日の実際の値動きのギャップを評価\n② 銘柄ごとの明日の判断:\n   - 継続保有/利確/損切りを断言\n   - J-Quantsの損切りライン・目標価格を基準に判断価格を明示\n   - 信用建玉は期日・金利コストも考慮\n③ 明日の具体的アクション: 価格・タイミングを含めた行動計画\n④ リスク管理: J-Quantsの信用倍率・ATRを踏まえた注意点\n⑤ ポートフォリオ全体の改善提言`;
+  // 振り返り用の詳細損益情報を生成
+  const pnlDetail = H.map(h => {
+    const cp2 = h.cp || h.bp;
+    const pnl2 = Math.round((cp2 - h.bp) * h.sh);
+    const pct2 = ((cp2 - h.bp) / h.bp * 100).toFixed(1);
+    const wE2  = findWeeklyEntry(weeklyData, h.cd);
+    const toTgt = (h.tgt && cp2) ? '+'+((h.tgt-cp2)/cp2*100).toFixed(1)+'%' : '目標未設定';
+    const toSl  = (h.sl  && cp2) ? '-'+((cp2-h.sl)/cp2*100).toFixed(1)+'%'  : '損切未設定';
+    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'}）: 買${h.bp.toLocaleString()}円→現${cp2.toLocaleString()}円 ${pct2>=0?'+':''}${pct2}%（${pnl2>=0?'+':''}${pnl2.toLocaleString()}円） 目標まで${toTgt} 損切まで${toSl}${wE2?' [J-Quants:'+wE2.rank+'ランク 損切'+(wE2.stop_loss?.toLocaleString()||'?')+'円 目標'+(wE2.target?.toLocaleString()||'?')+'円]':''}`;
+  }).join('\n') || '保有なし';
+
+  const cldRevPrompt = `あなたは運用歴25年のシニアFMです。実際の損益状況とJ-Quantsデータを基に明日の作戦を立案してください。
+
+【保有銘柄の損益状況（最重要・必ず全銘柄に言及）】
+${pnlDetail}
+合計評価額: ${totalVal.toLocaleString()}円 / 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+以下を率直・具体的に答えてください:
+① 【今日の総括】各銘柄が「買値から何%損益」かを評価し、今のポートフォリオ状況を一言で
+② 【銘柄ごとの明日の判断】（全銘柄を必ず個別に言及）
+   含み益がある銘柄 → 今の利益を確定すべきか？何円になったら利確するか明示
+   含み損がある銘柄 → 損切り水準まで何%か？どこで損切りするか明示
+   J-Quantsの損切りライン・目標価格と現在値の差を具体的な円と%で示す
+③ 【明日の具体的な売買ライン】
+   各銘柄について「ここを超えたら利確: XX円」「ここを割ったら損切り: XX円」を明示
+④ 【最大リスクのポジション】今一番危ないポジションはどれか・理由
+⑤ 【一言アドバイス】明日の相場に向けてポートフォリオ全体として何をすべきか`;
 
   const gemCards = revSteps.map(s => {
     const card = mkRevCard(s.icon, s.title, s.color, '🤖 Gemini', 'pill-g');
