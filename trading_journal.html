@@ -318,6 +318,20 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
 <div class="page" id="page-rev">
   <div class="cost-note"><span>🤖 Gemini: 相場分析　🧠 Claude: 明日の戦略</span></div>
+
+  <!-- 終値スクショアップロードエリア -->
+  <div style="background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:12px;margin-bottom:10px">
+    <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">📸 今日の終値スクショ（任意・より正確な分析になります）</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="flex:1;background:var(--s2);border:1.5px dashed var(--border);border-radius:8px;padding:10px;text-align:center;cursor:pointer;font-size:12px;color:var(--t3)">
+        📷 スクショを選択
+        <input type="file" accept="image/*" id="revSsInput" style="display:none" multiple onchange="onRevSsSelect(event)">
+      </label>
+      <div id="revSsPreview" style="display:none;font-size:11px;color:var(--green);font-weight:700"></div>
+    </div>
+    <div id="revSsReadResult" style="display:none;margin-top:8px;font-size:11px;color:var(--t2);background:var(--s2);border-radius:6px;padding:8px;line-height:1.8"></div>
+  </div>
+
   <button class="rev-btn" id="revBtn" onclick="doRev()" style="background:linear-gradient(135deg,#1e3a5f,#3b1f5e)">
     🌆 夕方の振り返りを開始<br>
     <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>
@@ -1165,71 +1179,190 @@ function toggleRevCard(hdr) {
   chev.textContent = expanded ? '▶' : '▼';
 }
 
+// ═══════════════════════════════════════════
+// 📸 振り返り用スクショ読み取り
+// ═══════════════════════════════════════════
+let revSsImages = [];   // {b64, mime, name}
+let revSsPrices = {};   // {code: {price, chg, chgPct, name}}
+
+function onRevSsSelect(e) {
+  const files = Array.from(e.target.files).slice(0, 5);
+  if (!files.length) return;
+  revSsImages = [];
+  revSsPrices = {};
+  const preview = document.getElementById('revSsPreview');
+  const result  = document.getElementById('revSsReadResult');
+  preview.style.display = 'none';
+  result.style.display  = 'none';
+
+  const reads = files.map(file => new Promise(res => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64  = ev.target.result.split(',')[1];
+      const mime = file.type || 'image/jpeg';
+      revSsImages.push({b64, mime, name: file.name});
+      res();
+    };
+    reader.readAsDataURL(file);
+  }));
+
+  Promise.all(reads).then(async () => {
+    preview.style.display = 'block';
+    preview.textContent = '📷 ' + revSsImages.length + '枚選択済み → 読み取り中...';
+    if (!GK) { preview.textContent = '⚠️ Gemini APIキーを設定してください'; return; }
+
+    let allPrices = {};
+    for (const img of revSsImages) {
+      try {
+        const prompt = `この画像は証券会社アプリの保有銘柄・終値画面です。
+表示されているすべての銘柄の「証券コード・銘柄名・現在値（終値）・前日比（円）・前日比（%）」を読み取ってください。
+以下のJSON配列のみ返してください（他の文字は一切不要）：
+[{"code":"4桁コード","name":"銘柄名","price":終値数値,"chg":前日比円数値,"chgPct":前日比パーセント数値}]
+数値のみ（円マーク・%・カンマなし）。読み取れない項目は0。`;
+
+        const body = {
+          contents: [{parts: [{text: prompt}, {inlineData: {mimeType: img.mime, data: img.b64}}]}],
+          generationConfig: {maxOutputTokens: 1000, temperature: 0.0}
+        };
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+          {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        let raw = (d.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json|```/g,'').trim();
+        const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+        if (s >= 0 && e > s) {
+          const items = JSON.parse(raw.slice(s, e+1));
+          items.forEach(it => {
+            if (it.code && it.price) allPrices[String(it.code)] = it;
+          });
+        }
+      } catch(err) {
+        console.warn('スクショ読み取りエラー:', err);
+      }
+    }
+
+    revSsPrices = allPrices;
+    const cnt = Object.keys(allPrices).length;
+    preview.textContent = cnt > 0 ? '✅ ' + cnt + '銘柄の終値を読み取りました' : '⚠️ 終値を読み取れませんでした';
+
+    if (cnt > 0) {
+      result.style.display = 'block';
+      result.innerHTML = Object.values(allPrices).map(it => {
+        const clr = it.chg >= 0 ? 'var(--green)' : 'var(--red)';
+        return `<span style="color:var(--text);font-weight:700">${it.code} ${it.name}</span> `+
+               `<span style="font-family:var(--mono)">${it.price?.toLocaleString()}円</span> `+
+               `<span style="color:${clr}">${it.chg>=0?'+':''}${it.chg}円（${it.chgPct>=0?'+':''}${it.chgPct}%）</span>`;
+      }).join('<br>');
+    }
+
+    // 保有銘柄の現在値を自動更新
+    let updated = 0;
+    H.forEach(h => {
+      const p = allPrices[h.cd];
+      if (p && p.price > 0) { h.cp = p.price; updated++; }
+    });
+    if (updated > 0) { sv(KH, H); toast('✅ ' + updated + '銘柄の現在値を更新しました'); }
+  });
+}
+
 async function doRev() {
   const btn = document.getElementById('revBtn');
   btn.disabled = true; btn.textContent = '🔄 分析中...';
   const out = document.getElementById('revOut'); out.innerHTML = '';
-  const pf = pfS();
 
-  // J-Quantsデータを取得してポートフォリオ詳細を構築
+  // J-Quantsデータを取得
   const weeklyData = await fetchWeeklyData();
+
+  // ── スクショから読み取った終値を保有銘柄に反映 ──
+  const hasSsPrices = Object.keys(revSsPrices).length > 0;
+  if (hasSsPrices) {
+    H.forEach(h => {
+      const p = revSsPrices[h.cd];
+      if (p?.price > 0) h.cp = p.price;
+    });
+    sv(KH, H);
+  }
+
+  // ── 保有銘柄の詳細情報を構築（スクショの前日比も含める）──
   const holdDetail = H.map(h => {
     const cp = h.cp || h.bp;
     const pnl = (cp - h.bp) * h.sh;
     const pct = ((cp - h.bp) / h.bp * 100).toFixed(1);
     const wE  = findWeeklyEntry(weeklyData, h.cd);
-    const jqLine = wE ? ` ／ J-Quants[${wE.rank||'?'}ランク${wE.margin_ratio?' 信用倍率'+wE.margin_ratio+'倍':''}${wE.atr?' ATR'+wE.atr+'円':''}${wE.stop_loss?' 損切'+wE.stop_loss.toLocaleString()+'円':''}${wE.target?' 目標'+wE.target.toLocaleString()+'円':''}${wE.signals?.length?' シグナル:'+wE.signals.map(s=>s.type).join('/'):''} ${wE.earn_note||''}]` : ' ／ J-Quantsデータなし';
-    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'} ${h.sh}株 買${h.bp.toLocaleString()}円 現${cp.toLocaleString()}円 ${pct>=0?'+':''}${pct}% 損益${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円 損切${h.sl?.toLocaleString()||'未設定'}→目標${h.tgt?.toLocaleString()||'未設定'}）${jqLine}`;
+    const jqLine = wE ?
+      ` ／ J-Quants[${wE.rank||'?'}ランク${wE.margin_ratio?' 信用倍率'+wE.margin_ratio+'倍':''}${wE.atr?' ATR'+wE.atr+'円':''}${wE.stop_loss?' 損切'+wE.stop_loss.toLocaleString()+'円':''}${wE.target?' 目標'+wE.target.toLocaleString()+'円':''}${wE.signals?.length?' シグナル:'+wE.signals.map(s=>s.type).join('/'):''} ${wE.earn_note||''}]`
+      : ' ／ J-Quantsデータなし';
+    // スクショの前日比情報
+    const ssP = revSsPrices[h.cd];
+    const chgStr = ssP ? ` 今日${ssP.chg>=0?'+':''}${ssP.chg}円（${ssP.chgPct>=0?'+':''}${ssP.chgPct}%）` : '';
+    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'} ${h.sh}株）`+
+           ` 買${h.bp.toLocaleString()}円→終値${cp.toLocaleString()}円${chgStr}`+
+           ` 損益${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円（${pct>=0?'+':''}${pct}%）`+
+           ` 損切${h.sl?.toLocaleString()||'未'}→目標${h.tgt?.toLocaleString()||'未'}${jqLine}`;
   }).join('\n') || '保有なし';
 
   const totalCost = H.reduce((s,h)=>s+h.bp*h.sh, 0);
   const totalVal  = H.reduce((s,h)=>s+(h.cp||h.bp)*h.sh, 0);
   const totalPnl  = totalVal - totalCost;
-  const pfJq = `【保有銘柄（J-Quants週次データ付き）】\n${holdDetail}\n合計評価額: ${totalVal.toLocaleString()}円 ／ 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 ／ 残金: ${Math.round(cash).toLocaleString()}円`;
 
-  // GEM_STEPSをJ-Quants活用版に動的生成
+  // スクショ情報の注記
+  const ssNote = hasSsPrices
+    ? `\n【本日の終値（スクショより）】\n` + Object.values(revSsPrices).map(p =>
+        `${p.code} ${p.name}: ${p.price?.toLocaleString()}円 ${p.chg>=0?'+':''}${p.chg}円（${p.chgPct>=0?'+':''}${p.chgPct}%）`
+      ).join('\n')
+    : '\n（終値スクショ未アップロード → Google検索で補完してください）';
+
+  const pfJq = `【本日の保有銘柄・終値・損益】${ssNote}\n\n【詳細データ（J-Quants付き）】\n${holdDetail}\n合計評価額: ${totalVal.toLocaleString()}円 ／ 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 ／ 残金: ${Math.round(cash).toLocaleString()}円`;
+
+  // Geminiステップ（スクショの終値を基に分析）
   const revSteps = [
     {
-      icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)', ai:'g',
-      prompt: `あなたは日本株専門アナリストです。Google検索で今日の終値・動きを調べてください。\n\n${pfJq}\n\n各銘柄について以下を答えてください:\n【終値・前日比・出来高】今日の実際の数値\n【本日の動きの理由】ニュース・需給・市場全体との連動\n【J-Quantsシグナルとの整合性】週次スキャンのシグナルが発動中か、それとも逆行したか`
+      icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)',
+      prompt: `あなたは日本株専門アナリストです。${hasSsPrices?'以下のスクショ終値データを使って分析してください。':'Google検索で今日の終値を調べてください。'}\n\n${pfJq}\n\n各銘柄について:\n① 今日の終値・前日比の評価（強かったか弱かったか）\n② 本日の値動きの理由（ニュース・需給・市場テーマとの連動）\n③ J-Quantsのシグナルと実際の動きの整合性\n④ 明日への引き継ぎ事項（注目すべきポイント）`
     },
     {
-      icon:'🌍', title:'明日に影響する材料', color:'var(--gem)', ai:'g',
-      prompt: `あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n\n${pfJq}\n\n以下を詳しく答えてください:\n①明日の日本株に影響するNY・為替・SOX・商品市況の動き\n②保有銘柄の明日の材料・決算・適時開示・アナリスト動向\n③J-Quantsの損切りライン・目標価格に対して現在どのポジションにあるか\n④明日の相場予想（強気/中立/弱気）と理由`
+      icon:'🌍', title:'明日に影響する材料', color:'var(--gem)',
+      prompt: `あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n\n${pfJq}\n\n以下を詳しく:\n① 明日の日本株に影響するNY・為替・SOX・商品市況\n② 各保有銘柄の明日の材料・決算・適時開示（Google検索で確認）\n③ J-Quantsの損切りライン・目標価格に対して今の位置を評価\n④ 明日の相場予想（強気/中立/弱気）と根拠`
     },
     {
-      icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)', ai:'g',
-      prompt: `あなたは市場センチメント分析の専門家です。Google検索で今日の情報を調べてください。\n\n保有銘柄: ${H.map(h=>h.cd+' '+h.nm).join(', ')}\n\n以下を答えてください:\n・今日のX/SNSで話題の日本株テーマ（保有銘柄との関連性）\n・保有銘柄への個人投資家の評判・話題\n・機関投資家・外国人の今週の動向（J-Quants外国人動向も参照）\n・市場センチメント: 強気/中立/弱気 + 根拠`
+      icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)',
+      prompt: `あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ${H.map(h=>h.cd+' '+h.nm).join(', ')}\n\n・今日のSNS/Xで話題の日本株テーマ\n・保有銘柄への評判・個人投資家の見方\n・外国人・機関投資家の今週の動向\n・市場センチメント: 強気/中立/弱気 + 根拠`
     },
   ];
 
-  // 振り返り用の詳細損益情報を生成
+  // Claude（損益・J-Quants基軸の明日の作戦）
   const pnlDetail = H.map(h => {
     const cp2 = h.cp || h.bp;
     const pnl2 = Math.round((cp2 - h.bp) * h.sh);
     const pct2 = ((cp2 - h.bp) / h.bp * 100).toFixed(1);
     const wE2  = findWeeklyEntry(weeklyData, h.cd);
+    const ssP2 = revSsPrices[h.cd];
     const toTgt = (h.tgt && cp2) ? '+'+((h.tgt-cp2)/cp2*100).toFixed(1)+'%' : '目標未設定';
     const toSl  = (h.sl  && cp2) ? '-'+((cp2-h.sl)/cp2*100).toFixed(1)+'%'  : '損切未設定';
-    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'}）: 買${h.bp.toLocaleString()}円→現${cp2.toLocaleString()}円 ${pct2>=0?'+':''}${pct2}%（${pnl2>=0?'+':''}${pnl2.toLocaleString()}円） 目標まで${toTgt} 損切まで${toSl}${wE2?' [J-Quants:'+wE2.rank+'ランク 損切'+(wE2.stop_loss?.toLocaleString()||'?')+'円 目標'+(wE2.target?.toLocaleString()||'?')+'円]':''}`;
+    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'}）`+
+      ` 買${h.bp.toLocaleString()}→終値${cp2.toLocaleString()}円`+
+      (ssP2 ? ` 今日${ssP2.chg>=0?'+':''}${ssP2.chg}円` : '')+
+      ` ${pct2>=0?'+':''}${pct2}%（${pnl2>=0?'+':''}${pnl2.toLocaleString()}円）`+
+      ` 目標まで${toTgt} 損切まで${toSl}`+
+      (wE2 ? ` [J-Quants:${wE2.rank}ランク 損切${wE2.stop_loss?.toLocaleString()||'?'}円 目標${wE2.target?.toLocaleString()||'?'}円]` : '');
   }).join('\n') || '保有なし';
 
-  const cldRevPrompt = `あなたは運用歴25年のシニアFMです。実際の損益状況とJ-Quantsデータを基に明日の作戦を立案してください。
+  const cldRevPrompt = `あなたは運用歴25年のシニアFMです。本日の終値と損益・J-Quantsデータを基に明日の作戦を立案してください。
+${ssNote}
 
-【保有銘柄の損益状況（最重要・必ず全銘柄に言及）】
+【保有銘柄の損益状況（必ず全銘柄に言及）】
 ${pnlDetail}
 合計評価額: ${totalVal.toLocaleString()}円 / 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
 
-以下を率直・具体的に答えてください:
-① 【今日の総括】各銘柄が「買値から何%損益」かを評価し、今のポートフォリオ状況を一言で
-② 【銘柄ごとの明日の判断】（全銘柄を必ず個別に言及）
-   含み益がある銘柄 → 今の利益を確定すべきか？何円になったら利確するか明示
-   含み損がある銘柄 → 損切り水準まで何%か？どこで損切りするか明示
-   J-Quantsの損切りライン・目標価格と現在値の差を具体的な円と%で示す
-③ 【明日の具体的な売買ライン】
-   各銘柄について「ここを超えたら利確: XX円」「ここを割ったら損切り: XX円」を明示
-④ 【最大リスクのポジション】今一番危ないポジションはどれか・理由
-⑤ 【一言アドバイス】明日の相場に向けてポートフォリオ全体として何をすべきか`;
+以下を率直・具体的に:
+① 今日の総括: 各銘柄の今日の動き（前日比）を評価・ポートフォリオ全体の状況
+② 銘柄ごとの明日の判断（全銘柄必ず言及）
+   含み益あり → 今の利益を確定すべきか、何円で利確するか
+   含み損あり → 損切り水準まであと何%、どこで損切りするか
+   J-Quantsの損切り・目標価格との距離を円と%で具体的に
+③ 明日の売買ライン: 「ここを超えたら利確: XX円」「ここを割ったら損切り: XX円」
+④ 最大リスクポジション: 今一番危ないポジションと理由
+⑤ 明日へのアドバイス: 相場環境も踏まえた一言`;
 
   const gemCards = revSteps.map(s => {
     const card = mkRevCard(s.icon, s.title, s.color, '🤖 Gemini', 'pill-g');
