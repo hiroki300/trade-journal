@@ -319,17 +319,23 @@ select.fi{appearance:none;-webkit-appearance:none;}
 <div class="page" id="page-rev">
   <div class="cost-note"><span>🤖 Gemini: 相場分析　🧠 Claude: 明日の戦略</span></div>
 
-  <!-- 終値スクショアップロードエリア -->
+  <!-- 終値スクショアップロードエリア（タブ別） -->
   <div style="background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:12px;margin-bottom:10px">
-    <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">📸 今日の終値スクショ（任意・より正確な分析になります）</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <label style="flex:1;background:var(--s2);border:1.5px dashed var(--border);border-radius:8px;padding:10px;text-align:center;cursor:pointer;font-size:12px;color:var(--t3)">
-        📷 スクショを選択
-        <input type="file" accept="image/*" id="revSsInput" style="display:none" multiple onchange="onRevSsSelect(event)">
+    <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">📸 今日の終値スクショ（SBI証券 口座管理画面）</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <label style="background:var(--s2);border:1.5px dashed rgba(59,130,246,.5);border-radius:8px;padding:10px;text-align:center;cursor:pointer">
+        <div style="font-size:10px;color:#60a5fa;font-weight:700;margin-bottom:3px">💴 保有証券タブ</div>
+        <div style="font-size:11px;color:var(--t3)">📷 選択</div>
+        <input type="file" accept="image/*" id="revSsSpot" style="display:none" onchange="onRevSsSelectTab(event,'spot')">
       </label>
-      <div id="revSsPreview" style="display:none;font-size:11px;color:var(--green);font-weight:700"></div>
+      <label style="background:var(--s2);border:1.5px dashed rgba(251,191,36,.5);border-radius:8px;padding:10px;text-align:center;cursor:pointer">
+        <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:3px">📊 信用建玉タブ</div>
+        <div style="font-size:11px;color:var(--t3)">📷 選択</div>
+        <input type="file" accept="image/*" id="revSsMargin" style="display:none" onchange="onRevSsSelectTab(event,'margin')">
+      </label>
     </div>
-    <div id="revSsReadResult" style="display:none;margin-top:8px;font-size:11px;color:var(--t2);background:var(--s2);border-radius:6px;padding:8px;line-height:1.8"></div>
+    <div id="revSsPreview" style="font-size:11px;color:var(--green);font-weight:700;min-height:16px"></div>
+    <div id="revSsReadResult" style="display:none;margin-top:8px;font-size:11px;color:var(--t2);background:var(--s2);border-radius:6px;padding:8px;line-height:1.9"></div>
   </div>
 
   <button class="rev-btn" id="revBtn" onclick="doRev()" style="background:linear-gradient(135deg,#1e3a5f,#3b1f5e)">
@@ -1180,154 +1186,185 @@ function toggleRevCard(hdr) {
 }
 
 // ═══════════════════════════════════════════
-// 📸 振り返り用スクショ読み取り
+// 📸 振り返り用スクショ読み取り（タブ別）
 // ═══════════════════════════════════════════
-let revSsImages = [];   // {b64, mime, name}
-let revSsPrices = {};   // {code: {price, chg, chgPct, name}}
+let revSsImages = [];
+let revSsPrices = {};  // {code: {code,name,shares,price,chg,chgPct,type}}
 
-function onRevSsSelect(e) {
-  const files = Array.from(e.target.files).slice(0, 5);
-  if (!files.length) return;
-  revSsImages = [];
-  revSsPrices = {};
+// タブ別の専用プロンプト
+const SS_PROMPTS = {
+  spot: `SBI証券アプリ「保有証券」タブのスクリーンショットです。
+
+画面の各銘柄行を読み取ります。
+各行の表示形式（例）:
+  銘柄名: ＶＲＡＩＮ  または  三菱重
+  コード行: 135A 特定  または  7011 特定  または  247A 特定
+  株数: 100株 または 200株
+  評価額: 269,300円
+  評価額前日比: +12,600円(+4.91%)
+
+【重要】コードは「特定」の直前の英数字部分のみ抽出（例: "135A 特定"→"135A", "7011 特定"→"7011"）
+
+以下のJSON配列のみ返してください（余分な文字一切不要）:
+[{"code":"135A","name":"VRAIN","shares":100,"eval":269300,"chg_amt":12600,"chg_pct":4.91}]
+
+ルール:
+- code: 特定の前の英数字のみ（例: 135A, 247A, 3660, 7011, 8306）
+- name: 銘柄名（全角→半角に変換不要、そのまま）
+- shares: 株数の数字のみ
+- eval: 評価額（カンマ・円なし）
+- chg_amt: 評価額前日比の円額（符号付き、カンマなし）
+- chg_pct: 評価額前日比の%（符号付き数字のみ）`,
+
+  margin: `SBI証券アプリ「信用建玉」タブのスクリーンショットです。
+
+各銘柄行の表示形式（例）:
+  銘柄名: カカクコム
+  コード行: 2371 買建/特定
+  返済期限: 6ヵ月
+  建株数: 100株
+  評価額: 227,400円
+  評価額前日比: +4,750円(+2.13%)
+
+以下のJSON配列のみ返してください（余分な文字一切不要）:
+[{"code":"2371","name":"カカクコム","shares":100,"eval":227400,"chg_amt":4750,"chg_pct":2.13}]
+
+ルール:
+- code: 買建/特定の前の数字のみ（例: 2371, 6196, 7011）
+- name: 銘柄名
+- shares: 建株数の数字のみ
+- eval: 評価額（カンマ・円なし）
+- chg_amt: 評価額前日比の円額（符号付き）
+- chg_pct: 評価額前日比の%（符号付き数字のみ）`
+};
+
+async function onRevSsSelectTab(e, tabType) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!GK) { toast('⚠️ Gemini APIキーを設定してください'); return; }
+
   const preview = document.getElementById('revSsPreview');
   const result  = document.getElementById('revSsReadResult');
-  preview.style.display = 'block';
-  preview.textContent = '読み込み中...';
+  const label   = tabType === 'spot' ? '💴保有証券' : '📊信用建玉';
+  preview.textContent = label + ' 読み取り中...';
+  preview.style.color = 'var(--t3)';
   result.style.display = 'none';
-  result.innerHTML = '';
 
-  const reads = files.map(file => new Promise(res => {
+  // 画像をbase64に変換
+  const b64 = await new Promise(res => {
     const reader = new FileReader();
-    reader.onload = ev => {
-      revSsImages.push({
-        b64:  ev.target.result.split(',')[1],
-        mime: file.type || 'image/jpeg',
-        name: file.name
-      });
-      res();
-    };
+    reader.onload = ev => res(ev.target.result.split(',')[1]);
     reader.readAsDataURL(file);
-  }));
-
-  Promise.all(reads).then(async () => {
-    if (!GK) { preview.textContent = '⚠️ Gemini APIキーを設定してください'; return; }
-    preview.textContent = '📷 ' + revSsImages.length + '枚 → Geminiで読み取り中...';
-
-    // ── Step1: Geminiに「生データだけ」を返させる（計算はJS側でやる）──
-    const PROMPT = `SBI証券アプリのスクリーンショットです。
-画面に表示されているすべての銘柄行を読み取り、JSONのみ返してください。
-
-返すフィールド:
-- code: 銘柄コード（例: 7011, 135A, 247A, 2371）
-- name: 銘柄名
-- shares: 株数の数字のみ（例: 100, 200）
-- eval: 評価額の数字のみ・カンマなし（例: 269300, 125300）
-- chg_amt: 評価額前日比の円額・符号付き数字のみ（例: 12600, -5100）
-- chg_pct: 評価額前日比の%・符号付き数字のみ（例: 4.91, -2.13）
-- is_margin: 信用建玉タブなら true、保有証券タブなら false
-
-JSONのみ返す。説明不要。
-[{"code":"...","name":"...","shares":100,"eval":269300,"chg_amt":12600,"chg_pct":4.91,"is_margin":false}]`;
-
-    let allPrices = {};
-    let debugLines = [];
-
-    for (const img of revSsImages) {
-      try {
-        const body = {
-          contents: [{parts: [
-            {text: PROMPT},
-            {inlineData: {mimeType: img.mime, data: img.b64}}
-          ]}],
-          generationConfig: {maxOutputTokens: 1000, temperature: 0.0}
-        };
-        const r = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
-          {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}
-        );
-        if (!r.ok) {
-          const e = await r.json().catch(()=>({}));
-          throw new Error(e.error?.message || 'HTTP ' + r.status);
-        }
-        const d = await r.json();
-        const raw = (d.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-        debugLines.push('[' + img.name + '] Gemini応答: ' + raw.slice(0, 200));
-
-        // JSONを抽出してパース
-        const clean = raw.replace(/```json|```/g, '').trim();
-        const s = clean.indexOf('['), en = clean.lastIndexOf(']');
-        if (s < 0 || en <= s) throw new Error('JSON配列が見つかりません: ' + clean.slice(0,100));
-
-        const items = JSON.parse(clean.slice(s, en + 1));
-        items.forEach(it => {
-          if (!it.code) return;
-          const cd = String(it.code).trim();
-          const shares = Number(it.shares) || 100;
-          const eval_  = Number(it.eval)   || 0;
-          const chgAmt = Number(it.chg_amt)|| 0;
-          const chgPct = Number(it.chg_pct)|| 0;
-
-          // 単価 = 評価額合計 ÷ 株数（小数点以下切り捨て）
-          const price = eval_ > 0 ? Math.floor(eval_ / shares) : 0;
-          // 前日比円 = 評価額前日比合計 ÷ 株数（整数化）
-          const chg   = shares > 0 ? Math.round(chgAmt / shares) : 0;
-
-          if (price > 0) {
-            allPrices[cd] = {
-              code: cd, name: it.name || cd,
-              shares, price, chg, chgPct,
-              type: it.is_margin ? 'margin' : 'spot',
-            };
-          }
-        });
-      } catch(err) {
-        debugLines.push('エラー: ' + err.message);
-        console.warn('スクショ読み取りエラー:', err);
-      }
-    }
-
-    revSsPrices = allPrices;
-    const cnt = Object.keys(allPrices).length;
-
-    // 結果表示
-    result.style.display = 'block';
-    if (cnt > 0) {
-      preview.textContent = '✅ ' + cnt + '銘柄の終値を読み取りました';
-      result.innerHTML = Object.values(allPrices).map(it => {
-        const clr = it.chg >= 0 ? 'var(--green)' : 'var(--red)';
-        const tag  = it.type === 'margin'
-          ? '<span style="font-size:9px;background:rgba(251,191,36,.15);color:#f59e0b;border-radius:3px;padding:1px 5px;margin-right:4px">信用</span>'
-          : '<span style="font-size:9px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:1px 5px;margin-right:4px">現物</span>';
-        return tag +
-          `<b style="color:var(--text)">${it.code} ${it.name}</b> ` +
-          `<span style="font-family:var(--mono)">${it.price.toLocaleString()}円</span> ` +
-          `<span style="color:${clr}">${it.chg>=0?'+':''}${it.chg}円（${it.chgPct>=0?'+':''}${it.chgPct}%）</span>`;
-      }).join('<br>');
-    } else {
-      preview.textContent = '⚠️ 読み取りできませんでした';
-      // デバッグ情報を表示
-      result.innerHTML = '<span style="color:var(--red)">読み取り失敗</span><br><small style="color:var(--t3)">' +
-        debugLines.map(l => l.replace(/</g,'&lt;')).join('<br>') + '</small>';
-    }
-
-    // 保有銘柄の現在値を自動更新
-    let updated = 0;
-    H.forEach(h => {
-      // 1. コード完全一致
-      let p = allPrices[h.cd];
-      // 2. 銘柄名の先頭4文字で部分一致（コードが違う場合の救済）
-      if (!p && h.nm) {
-        const key = h.nm.replace(/\s/g, '').slice(0, 4);
-        p = Object.values(allPrices).find(it =>
-          it.name.replace(/\s/g, '').slice(0, 4) === key
-        );
-      }
-      if (p && p.price > 0) { h.cp = p.price; updated++; }
-    });
-    if (updated > 0) { sv(KH, H); calcS(); toast('✅ ' + updated + '銘柄の現在値を更新'); }
   });
+  const mime = file.type || 'image/jpeg';
+
+  try {
+    const body = {
+      contents: [{parts: [
+        {text: SS_PROMPTS[tabType]},
+        {inlineData: {mimeType: mime, data: b64}}
+      ]}],
+      generationConfig: {maxOutputTokens: 1000, temperature: 0.0}
+    };
+    const r = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}
+    );
+    if (!r.ok) {
+      const e2 = await r.json().catch(()=>({}));
+      throw new Error(e2.error?.message || 'HTTP ' + r.status);
+    }
+    const d = await r.json();
+    const raw = (d.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json|```/g,'').trim();
+
+    // JSON抽出
+    const s = raw.indexOf('['), en = raw.lastIndexOf(']');
+    if (s < 0 || en <= s) {
+      // デバッグ: Geminiの生応答を表示
+      result.style.display = 'block';
+      result.innerHTML = '<span style="color:var(--red)">❌ JSON読み取り失敗</span><br>' +
+        '<span style="color:var(--t3);font-size:10px">Gemini応答: ' + raw.slice(0,200).replace(/</g,'&lt;') + '</span>';
+      preview.textContent = label + ' ❌ 読み取り失敗';
+      return;
+    }
+
+    const items = JSON.parse(raw.slice(s, en+1));
+    let newCount = 0;
+    items.forEach(it => {
+      if (!it.code) return;
+      const cd = String(it.code).trim();
+      const shares = Number(it.shares) || 100;
+      const eval_  = Number(it.eval)    || 0;
+      const chgAmt = Number(it.chg_amt) || 0;
+      const chgPct = Number(it.chg_pct) || 0;
+      // 単価 = 評価額合計 ÷ 株数（JSで計算）
+      const price = eval_ > 0 ? Math.round(eval_ / shares) : 0;
+      const chg   = shares > 0 ? Math.round(chgAmt / shares) : 0;
+      if (price > 0) {
+        revSsPrices[cd] = {code:cd, name:it.name||cd, shares, price, chg, chgPct, type:tabType};
+        newCount++;
+      }
+    });
+
+    if (newCount > 0) {
+      preview.textContent = '✅ ' + Object.keys(revSsPrices).length + '銘柄読み取り済み';
+      preview.style.color = 'var(--green)';
+      _renderSsPrices(result);
+      _applySsPricesToHoldings();
+    } else {
+      result.style.display = 'block';
+      result.innerHTML = '<span style="color:var(--red)">❌ 銘柄データなし</span><br>' +
+        '<span style="color:var(--t3);font-size:10px">応答: ' + raw.slice(0,200).replace(/</g,'&lt;') + '</span>';
+      preview.textContent = label + ' ❌ 読み取り失敗';
+    }
+
+  } catch(err) {
+    preview.textContent = label + ' ⚠️ ' + err.message;
+    preview.style.color = 'var(--red)';
+    console.error('スクショ読み取り:', err);
+  }
 }
+
+function _renderSsPrices(el) {
+  el.style.display = 'block';
+  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">読み取り結果（単価は評価額÷株数で計算）:</div>' +
+    Object.values(revSsPrices).map(it => {
+      const clr = it.chg >= 0 ? 'var(--green)' : 'var(--red)';
+      const tag  = it.type === 'margin'
+        ? '<span style="font-size:9px;background:rgba(251,191,36,.15);color:#f59e0b;border-radius:3px;padding:0 4px">信用</span> '
+        : '<span style="font-size:9px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:0 4px">現物</span> ';
+      return tag +
+        `<b>${it.code} ${it.name}</b> ` +
+        `<span style="font-family:var(--mono)">${it.price.toLocaleString()}円</span> ` +
+        `<span style="color:${clr}">${it.chg>=0?'+':''}${it.chg}円（${it.chgPct>=0?'+':''}${it.chgPct}%）</span>`;
+    }).join('<br>');
+}
+
+function _applySsPricesToHoldings() {
+  let updated = 0;
+  H.forEach(h => {
+    // 1. コード完全一致
+    let p = revSsPrices[h.cd];
+    // 2. 銘柄名の先頭4文字で部分一致（救済）
+    if (!p && h.nm) {
+      const key = h.nm.replace(/[\s　]/g,'').slice(0,4);
+      p = Object.values(revSsPrices).find(it => {
+        const itKey = (it.name||'').replace(/[\s　]/g,'').slice(0,4);
+        return itKey && key && (itKey === key || it.code === h.cd);
+      });
+    }
+    if (p && p.price > 0) { h.cp = p.price; updated++; }
+  });
+  if (updated > 0) {
+    sv(KH, H);
+    calcS();
+    rHold(); // 保有タブの表示も更新
+    toast('✅ 保有タブの株価を ' + updated + '銘柄 更新しました');
+  }
+}
+
+// 後方互換（旧onRevSsSelectが呼ばれた場合の空関数）
+function onRevSsSelect(e) {}
 
 async function doRev() {
   const btn = document.getElementById('revBtn');
