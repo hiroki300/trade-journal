@@ -859,7 +859,7 @@ async function doMorning() {
   }).join('\n');
 
   // ① Gemini: 市場全体の地合い（1枚目カード）
-  const mktCard = mkMrnCard('🌅', '今日の地合い・相場環境', 'var(--gem)', '🤖 Gemini');
+  const mktCard = mkMrnCard('🌅', '今日の地合い・相場環境', 'var(--gem)', '🤖 Gemini', true);
   out.appendChild(mktCard);
 
   // ② 銘柄別カード（Gemini需給 + Claude判断を並列）
@@ -925,14 +925,30 @@ ${pfDetail || '保有なし'}
     const jqText = wInfo ? wInfo.lines.join('\n') : 'J-Quantsデータなし';
     const isMargin = t.type === 'margin';
 
+    // 信用金利コスト計算（制度信用・一般信用ともに買方金利あり）
+    // SBI証券 制度信用買方金利: 約2.8%/年
+    const MARGIN_RATE = 0.028;
+    let interestInfo = '';
+    if (isMargin && t.bp && t.sh && t.dt) {
+      const buyDate = new Date(t.dt);
+      const today2  = new Date();
+      const days    = Math.max(1, Math.round((today2 - buyDate) / (1000*60*60*24)));
+      const cost    = Math.round(t.bp * t.sh * MARGIN_RATE / 365 * days);
+      const remain  = Math.max(0, 180 - days); // 制度信用6ヶ月=180日
+      interestInfo  = `金利コスト: 約${cost.toLocaleString()}円（${days}日間 × 年率2.8%）／期日まで残${remain}日`;
+    } else if (isMargin) {
+      interestInfo = '金利コスト: 年率2.8%（買付日未設定のため計算不可）';
+    }
+
     const holdInfo = t.bp ? [
-      `取引区分: ${isMargin ? '📊信用買建' : '💴現物'}`,
-      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株（取得総額: ${(t.bp*t.sh).toLocaleString()}円）`,
+      `取引区分: ${isMargin ? '📊信用買建（制度信用6ヶ月・金利あり）' : '💴現物'}`,
+      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株（投資額: ${(t.bp*t.sh).toLocaleString()}円）`,
       `現在値: ${(t.cp||t.bp).toLocaleString()}円`,
       `含み損益: ${((t.cp||t.bp)-t.bp)*t.sh>=0?'+':''}${Math.round(((t.cp||t.bp)-t.bp)*t.sh).toLocaleString()}円（${(((t.cp||t.bp)-t.bp)/t.bp*100).toFixed(2)}%）`,
       t.sl ? `損切り設定: ${t.sl.toLocaleString()}円（現在値から${((t.sl-(t.cp||t.bp))/(t.cp||t.bp)*100).toFixed(1)}%）` : '損切り: 未設定',
       t.tgt ? `目標設定: ${t.tgt.toLocaleString()}円（現在値から+${((t.tgt-(t.cp||t.bp))/(t.cp||t.bp)*100).toFixed(1)}%）` : '目標: 未設定',
-    ].join('\n') : '新規候補銘柄（未保有）';
+      interestInfo ? interestInfo : '',
+    ].filter(Boolean).join('\n') : '新規候補銘柄（未保有）';
 
     // Geminiプロンプト（需給・板・最新情報）
     const gPrompt = `あなたは日本株専門アナリストです。Google検索で${t.cd} ${t.nm}の今日の最新情報を必ず調べてから答えてください。
@@ -1026,15 +1042,24 @@ ${jqText}
 ⑤ 【一言】このポジションを今日どうしたいか`;
 
     const gP = callGemini(gPrompt).then(txt => {
-      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' +
-        fmtRevText(txt);
+      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' + fmtRevText(txt);
+      const sum1El = card.querySelector('.mrn-summary-g');
+      if(sum1El) { const l1 = txt.split('\n').find(l=>l.trim().length>5)||''; sum1El.textContent = l1.slice(0,42)+(l1.length>42?'…':''); }
     }).catch(e => {
       gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
     });
 
     const cP = callClaude(cPrompt).then(txt => {
-      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜エントリー判断</div>' +
-        fmtRevText(txt);
+      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜' + (isMargin?'信用建玉判断':'現物判断') + '</div>' + fmtRevText(txt);
+      const sum2El = card.querySelector('.mrn-summary-c');
+      if(sum2El) {
+        const judge = txt.match(/継続保有|売却|利確|損切り|返済|買い増し|ナンピン/);
+        const j1 = judge ? judge[0] : '分析完了';
+        const firstLine = txt.split('\n').find(l=>l.trim().length>5)||'';
+        sum2El.textContent = '🧠 ' + j1 + '｜' + firstLine.slice(0,28) + (firstLine.length>28?'…':'');
+        sum2El.style.color = (j1==='売却'||j1==='返済'||j1==='損切り') ? 'var(--red)' :
+                             (j1==='買い増し'||j1==='ナンピン') ? 'var(--acc)' : 'var(--green)';
+      }
     }).catch(e => {
       cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
     });
@@ -1044,12 +1069,11 @@ ${jqText}
 
   await Promise.all([gemMktP, ...stockPs]);
 
-  // 全カード展開
-  document.querySelectorAll('#mrnOut .rcard-body-wrap').forEach(w => {
-    w.classList.remove('collapsed');
-    w.classList.add('expanded','rcard-fade');
-  });
-  document.querySelectorAll('#mrnOut .rev-chevron').forEach(c => c.textContent='▼');
+  // 地合いカードのみ展開、銘柄カードは折りたたみのまま（タップで読む）
+  const mktWrap = mktCard.querySelector('.rcard-body-wrap');
+  if(mktWrap){ mktWrap.classList.remove('collapsed'); mktWrap.classList.add('expanded'); mktWrap.classList.remove('rcard-fade'); }
+  const mktChev = mktCard.querySelector('.rev-chevron');
+  if(mktChev) mktChev.textContent='▼';
 
   btn.disabled = false;
   btn.innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
@@ -1083,19 +1107,21 @@ function rMrnHistory() {
   el.innerHTML = html;
 }
 
-function mkMrnCard(icon, titleHtml, color, pill) {
+function mkMrnCard(icon, titleHtml, color, pill, defaultOpen) {
   const card = document.createElement('div');
   card.className = 'rcard rcard-toggle';
   card.style.marginBottom = '10px';
   card.innerHTML =
-    '<div class="rhdr" onclick="toggleRevCard(this)">' +
-    '<span style="font-size:15px">' + icon + '</span>' +
-    '<span style="font-size:12px;font-weight:700;color:' + color + '">' + titleHtml + '</span>' +
-    (pill ? '<span class="ai-pill" style="margin-left:auto;background:rgba(66,133,244,.15);color:var(--gem);font-size:9px;padding:2px 6px;border-radius:4px">' + pill + '</span>' : '') +
-    '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+    '<div class="rhdr" onclick="toggleRevCard(this)" style="background:linear-gradient(135deg,var(--s1),var(--s2));padding:12px 14px">' +
+    '<span style="font-size:18px;flex-shrink:0">' + icon + '</span>' +
+    '<div style="flex:1;min-width:0;margin-left:6px">' +
+    '<div style="font-size:13px;font-weight:700;color:' + color + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + titleHtml + '</div>' +
+    (pill ? '<div style="font-size:9px;color:var(--t3);margin-top:1px">' + pill + '</div>' : '') +
     '</div>' +
-    '<div class="rcard-body-wrap collapsed rcard-fade">' +
-    '<div class="mrn-body" style="padding:10px 13px 4px"></div>' +
+    '<span class="rev-chevron" style="font-size:14px;color:var(--t3);flex-shrink:0;margin-left:8px">▶</span>' +
+    '</div>' +
+    '<div class="rcard-body-wrap ' + (defaultOpen ? 'expanded' : 'collapsed') + (defaultOpen ? '' : ' rcard-fade') + '">' +
+    '<div style="padding:6px 14px 4px;display:flex;flex-direction:column;gap:2px"><div class="mrn-summary-g" style="font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🤖 読み込み中...</div><div class="mrn-summary-c" style="font-size:10px;color:var(--t2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🧠 判断中...</div></div><div class="mrn-body" style="padding:10px 13px 8px"></div>' +
     '</div>';
   return card;
 }
@@ -1711,40 +1737,41 @@ function findWeeklyEntry(data, code) {
 
 function formatWeeklyInfo(entry) {
   if (!entry) return null;
-  const rank = entry.rank || 'N/A';
-  const total = entry.total || 0;
-  const rankColor = {S:'#f59e0b', A:'#10b981', B:'#3b82f6', C:'#4b6088'}[rank] || '#4b6088';
-  const lines = [];
-  if (entry.price)       lines.push('直近株価: ' + entry.price.toLocaleString() + '円');
-  if (entry.atr)         lines.push('ATR: ' + entry.atr.toLocaleString() + '円');
-  if (entry.stop_loss)   lines.push('損切りライン: ' + entry.stop_loss.toLocaleString() + '円');
-  if (entry.target)      lines.push('目標価格: ' + entry.target.toLocaleString() + '円');
-  if (entry.margin_ratio) lines.push('信用倍率: ' + entry.margin_ratio + '倍');
-  if (entry.fins_note)   lines.push('財務: ' + entry.fins_note);
-  if (entry.short_note)  lines.push('空売り: ' + entry.short_note);
-  if (entry.earn_note)   lines.push('決算特性: ' + entry.earn_note);
-  if (entry.investor_note) lines.push(entry.investor_note);
-  if (entry.earnings_risk) lines.push('⚠️ ' + entry.earnings_risk);
-
-  // シグナル
-  const sigs = (entry.signals || []).map(s => s.icon + s.type + '(' + '★'.repeat(s.strength) + ')');
-  if (sigs.length) lines.push('シグナル: ' + sigs.join(' / '));
-
-  // AI評価
-  if (entry.g_theme_score || entry.g_score) {
-    const gs = entry.g_theme_score || entry.g_score;
-    const cs = entry.c_logic_score || entry.c_score;
-    lines.push('AI評価: G:' + gs + 'pt / C:' + cs + 'pt / 合計:' + total + 'pt');
+  try {
+    const rank = entry.rank || 'N/A';
+    const total = entry.total || 0;
+    const rankColor = {S:'#f59e0b', A:'#10b981', B:'#3b82f6', C:'#4b6088'}[rank] || '#4b6088';
+    const fmt = v => (v != null && !isNaN(v)) ? Number(v).toLocaleString() : '?';
+    const lines = [];
+    if (entry.price)        lines.push('直近株価: ' + fmt(entry.price) + '円');
+    if (entry.atr)          lines.push('ATR: ' + fmt(entry.atr) + '円（日次変動幅）');
+    if (entry.stop_loss)    lines.push('損切りライン: ' + fmt(entry.stop_loss) + '円');
+    if (entry.target)       lines.push('目標価格: ' + fmt(entry.target) + '円');
+    if (entry.margin_ratio) lines.push('信用倍率: ' + entry.margin_ratio + '倍');
+    if (entry.fins_note)    lines.push('財務: ' + entry.fins_note);
+    if (entry.short_note)   lines.push('空売り: ' + entry.short_note);
+    if (entry.earn_note)    lines.push('決算特性: ' + entry.earn_note);
+    if (entry.investor_note) lines.push(entry.investor_note);
+    if (entry.earnings_risk) lines.push('⚠️ ' + entry.earnings_risk);
+    const sigs = (entry.signals || []).filter(s=>s).map(s =>
+      (s.icon||'') + (s.type||'') + '(' + '★'.repeat(Math.min(s.strength||0,3)) + ')'
+    );
+    if (sigs.length) lines.push('シグナル: ' + sigs.join(' / '));
+    if (entry.g_theme_score || entry.g_score) {
+      const gs = entry.g_theme_score || entry.g_score || 0;
+      const cs = entry.c_logic_score || entry.c_score || 0;
+      lines.push('AI評価: G:' + gs + 'pt / C:' + cs + 'pt / 合計:' + total + 'pt');
+    }
+    if (entry.entry_timing_gemini?.mark)
+      lines.push('Gemini判定: ' + entry.entry_timing_gemini.mark + ' ' + (entry.entry_timing_gemini.reason||''));
+    if (entry.entry_timing_claude?.mark)
+      lines.push('Claude判定: ' + entry.entry_timing_claude.mark + ' ' + (entry.entry_timing_claude.reason||''));
+    if (entry.analyzed_at) lines.push('週次分析: ' + entry.analyzed_at);
+    return {rank, total, rankColor, lines, entry};
+  } catch(e) {
+    console.warn('formatWeeklyInfo error:', e);
+    return null;
   }
-  if (entry.entry_timing_gemini?.mark) {
-    lines.push('Gemini判定: ' + entry.entry_timing_gemini.mark + ' ' + (entry.entry_timing_gemini.reason||''));
-  }
-  if (entry.entry_timing_claude?.mark) {
-    lines.push('Claude判定: ' + entry.entry_timing_claude.mark + ' ' + (entry.entry_timing_claude.reason||''));
-  }
-  if (entry.analyzed_at) lines.push('週次分析日時: ' + entry.analyzed_at);
-
-  return {rank, total, rankColor, lines, entry};
 }
 
 async function callGemini(prompt, sys, history) {
