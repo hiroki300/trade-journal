@@ -1351,80 +1351,104 @@ async function doAnalyze() {
   const wEntry = findWeeklyEntry(weeklyData, code);
   const wInfo = formatWeeklyInfo(wEntry);
 
-  // Geminiプロンプト（その銘柄単体のファンダ・需給・テーマ分析が主）
+  // ── J-Quantsデータを構造化して整理 ──
+  const jqBase = wEntry ? {
+    rank:         wEntry.rank        || 'データなし',
+    total:        wEntry.total       || 0,
+    price:        wEntry.price       || null,
+    atr:          wEntry.atr         || null,
+    stop_loss:    wEntry.stop_loss   || null,
+    target:       wEntry.target      || null,
+    margin_ratio: wEntry.margin_ratio|| null,
+    fins_note:    wEntry.fins_note   || '',
+    short_note:   wEntry.short_note  || '',
+    earn_note:    wEntry.earn_note   || '',
+    earn_avg:     wEntry.earn_avg_move || null,
+    investor_note:wEntry.investor_note|| '',
+    earnings_risk:wEntry.earnings_risk|| '',
+    signals:      (wEntry.signals||[]).map(s=>(s.icon||'')+(s.type||'')+'('+'★'.repeat(Math.min(s.strength||0,3))+')').join(' / ') || 'なし',
+    g_score:      wEntry.g_theme_score || wEntry.g_score || null,
+    c_score:      wEntry.c_logic_score || wEntry.c_score || null,
+    analyzed_at:  wEntry.analyzed_at || '',
+  } : null;
+
+  const jqSection = jqBase ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【J-Quants週次スキャンデータ】（${jqBase.analyzed_at}時点・これを分析の軸にすること）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+総合評価: ${jqBase.rank}ランク ${jqBase.total}pt（G:${jqBase.g_score||'?'}pt / C:${jqBase.c_score||'?'}pt）
+直近株価: ${jqBase.price?.toLocaleString()||'?'}円
+ATR（日次変動幅）: ${jqBase.atr?.toLocaleString()||'?'}円
+損切りライン: ${jqBase.stop_loss?.toLocaleString()||'?'}円
+目標価格: ${jqBase.target?.toLocaleString()||'?'}円
+信用倍率: ${jqBase.margin_ratio||'?'}倍
+財務: ${jqBase.fins_note||'データなし'}
+空売り需給: ${jqBase.short_note||'データなし'}
+決算特性: ${jqBase.earn_note||'データなし'}
+外国人動向: ${jqBase.investor_note||'データなし'}
+決算リスク: ${jqBase.earnings_risk||'なし'}
+テクニカルシグナル: ${jqBase.signals}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━` :
+`【J-Quantsデータ】週次スキャン未実行またはウォッチリスト外の銘柄（Google検索で補完すること）`;
+
+  // Geminiプロンプト（J-Quants基軸 + ファンダ・需給・テーマをWeb検索で補完）
   const portfolioNote = H.length > 0
-    ? '\n【参考: 現在の保有銘柄】' + H.map(h => h.cd+' '+h.nm+'（買値'+h.bp.toLocaleString()+'円）').join(', ')
+    ? '\n【保有銘柄（参考）】' + H.map(h => h.cd+' '+h.nm+'（買値'+h.bp.toLocaleString()+'円）').join(', ')
     : '';
 
-  // J-Quantsデータをプロンプトに組み込む
-  const jqNote = wInfo ? `
-━━ J-Quants週次データ（参考） ━━
-${wInfo.lines.join('\n')}` : '';
-
   const gPrompt = `あなたはマクロ経済・テーマ投資に強いチーフストラテジストです。
-Google検索で${code} ${nm}の最新情報を調べてから答えてください（${today}時点）。
+以下のJ-Quantsデータを分析の基礎として使い、Google検索で不足情報を補完してください（${today}時点）。
 
-━━ この銘柄の独立分析（メイン） ━━
+${jqSection}
+
 【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
+${holdInfo !== '新規候補銘柄' ? '【自分のポジション】\n'+holdInfo : '（新規候補銘柄）'}
+${portfolioNote}
 
-【ファンダメンタルズ】
-①事業内容・競合優位性（1〜2行）
-②直近決算: 売上・営業利益の成長率・上方修正の有無
-③PER・PBR・ROEの水準感（割安か割高か）
-
-【需給・市場情報】
-④信用倍率（最新値）と需給評価
-⑤空売り残高・機関・外国人の動向
-⑥直近1週間の材料・ニュース
-
-【スイングトレード適性】
-⑦テーマ性: 国策・世界トレンドとの合致度
-⑧今の旬度: 今週の市場テーマと合致しているか
-⑨上値余地: アナリスト目標株価・期待値${portfolioNote ? '\n\n━━ 保有銘柄との比較（サブ） ━━' + portfolioNote + '\n保有銘柄と比べてリスク分散・相関性の観点で一言だけ述べること' : ''}
-${jqNote}
+━━ J-Quantsデータを基に以下を分析してください ━━
+① J-Quantsの総合評価（${jqBase?.rank||'?'}ランク ${jqBase?.total||0}pt）の妥当性を評価
+② 信用倍率${jqBase?.margin_ratio||'?'}倍・空売り状況からの需給判断
+③ 決算特性（${jqBase?.earn_note||'データなし'}）を踏まえた今後のリスク
+④ Google検索で最新ニュース・材料・アナリスト評価を調べて追記
+⑤ テーマ性: 国策・世界トレンドとの合致度
 
 【採点基準（各0〜20点 × 5項目 = 100点）】
-1. ファンダメンタルズ: 成長性・収益性・バリュエーション（J-Quantsの財務データを参考にすること）
-2. 需給優位性: 信用倍率・外国人・空売り（J-Quantsの数値を参考にすること）
+1. ファンダメンタルズ: J-Quantsの財務データ（${jqBase?.fins_note||'?'}）＋最新決算
+2. 需給優位性: J-Quantsの信用倍率${jqBase?.margin_ratio||'?'}倍・空売り数値を基準に
 3. テーマ合致度: 国策・世界トレンドとの一致
-4. 材料の質: ニュース・決算・上方修正（J-Quantsの決算特性を参考にすること）
-5. スイング適性: 1〜4週間の見通し・旬度
+4. 材料の質: J-Quantsの決算特性＋Google検索で調べた最新ニュース
+5. スイング適性: J-QuantsのシグナルとAI評価を踏まえた1〜4週間の見通し
 
-【絶対ルール】良い銘柄65〜85点、普通40〜60点、悪い銘柄20〜35点。
+【絶対ルール】J-Quantsのランクを根拠にすること。良い銘柄65〜85点、悪い銘柄20〜35点。
 
 ファンダ・需給コメント（200字以内）:
 テーマ合致スコア: XX点/100点
 判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
 
-  // Claudeプロンプト（その銘柄単体のテクニカル分析が主）
+  // Claudeプロンプト（J-Quants基軸 + テクニカルをWeb検索で補完）
   const cPrompt = `あなたはスイングトレード専門のクオンツアナリストです（運用歴20年）。
-Google検索で${code} ${nm}の株価・チャート情報を調べてください（${today}時点）。
+以下のJ-Quantsデータを分析の基礎として使い、Google検索でチャート情報を補完してください（${today}時点）。
 
-━━ この銘柄の独立分析（メイン） ━━
+${jqSection}
+
 【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
+${holdInfo !== '新規候補銘柄' ? '【自分のポジション】\n'+holdInfo : '（新規候補銘柄）'}
 
-【チャート・テクニカル分析】
-①現在株価・5日線・25日線との位置関係と方向性
-②出来高トレンド（増加中か減少中か）
-③ATR（日次平均変動幅）の算出
-④直近のシグナル: 押し目買い / ブレイクアウト / ゴールデンクロス / デッドクロス
-⑤サポート・レジスタンスラインの位置
-
-【エントリー分析】
-⑥スイングトレードの最適エントリーゾーン（具体的な価格帯）
-⑦損切りライン（具体的な価格）
-⑧利確目標（第1目標・最終目標）
-⑨RR比（リスク・リワード）の評価${portfolioNote ? '\n\n━━ 保有銘柄との比較（サブ） ━━' + portfolioNote + '\n保有銘柄と比べてチャートの強さ・相対パフォーマンスを一言だけ述べること' : ''}
-${jqNote}
+━━ J-Quantsデータを基に以下を分析してください ━━
+① J-Quantsの損切りライン（${jqBase?.stop_loss?.toLocaleString()||'?'}円）・目標価格（${jqBase?.target?.toLocaleString()||'?'}円）の根拠を説明
+② ATR（${jqBase?.atr?.toLocaleString()||'?'}円）から今週の値幅予想とエントリー価格帯
+③ J-Quantsのシグナル（${jqBase?.signals||'なし'}）の信頼性を評価
+④ Google検索で5日線・25日線・出来高トレンドを調べて追記
+⑤ J-Quantsの損切り・目標を修正すべきか、そのままでよいか判断
 
 【採点基準（各0〜20点 × 5項目 = 100点）】
-1. トレンド強度: MA配列・価格の方向性・出来高（J-QuantsのATR・シグナルを参考にすること）
-2. エントリータイミング: シグナルの強度と種類（J-Quantsのシグナル検知結果を参考にすること）
-3. RR合理性: 損切り・目標の論理的妥当性（J-Quantsの損切りライン・目標価格を参考にすること）
-4. チャートパターン: 形成中のパターンの信頼性
-5. リスク管理: 信用倍率・空売り・決算リスク（J-Quantsの数値を使うこと）
+1. トレンド強度: J-QuantsのシグナルとATR（${jqBase?.atr||'?'}円）を軸に評価
+2. エントリータイミング: J-Quantsのシグナル（${jqBase?.signals||'なし'}）の質を評価
+3. RR合理性: J-Quantsの損切り${jqBase?.stop_loss?.toLocaleString()||'?'}円→目標${jqBase?.target?.toLocaleString()||'?'}円のRR比を計算
+4. チャートパターン: Google検索で確認した最新チャートと照合
+5. リスク管理: 信用倍率${jqBase?.margin_ratio||'?'}倍・決算リスク（${jqBase?.earnings_risk||'なし'}）
 
-【絶対ルール】良い銘柄65〜85点、普通40〜60点、悪い銘柄20〜35点。
+【絶対ルール】J-Quantsの数値を具体的に引用すること。±20点乖離禁止。良い銘柄65〜85点、悪い銘柄20〜35点。
 
 テクニカルコメント（200字以内）:
 論理的期待値スコア: XX点/100点
