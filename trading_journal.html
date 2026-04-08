@@ -1436,19 +1436,40 @@ async function doRev() {
 
   const pfJq = `【本日の保有銘柄・終値・損益】${ssNote}\n\n【詳細データ（J-Quants付き）】\n${holdDetail}\n合計評価額: ${totalVal.toLocaleString()}円 ／ 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 ／ 残金: ${Math.round(cash).toLocaleString()}円`;
 
-  // Geminiステップ（スクショの終値を基に分析）
+  // Geminiステップ（J-Quantsデータ主軸・Google検索は補完）
   const revSteps = [
     {
-      icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)',
-      prompt: `あなたは日本株専門アナリストです。${hasSsPrices?'以下のスクショ終値データを使って分析してください。':'Google検索で今日の終値を調べてください。'}\n\n${pfJq}\n\n各銘柄について:\n① 今日の終値・前日比の評価（強かったか弱かったか）\n② 本日の値動きの理由（ニュース・需給・市場テーマとの連動）\n③ J-Quantsのシグナルと実際の動きの整合性\n④ 明日への引き継ぎ事項（注目すべきポイント）`
+      icon:'📊', title:'今日の保有銘柄の動き・明日への展望', color:'var(--gem)',
+      prompt: `あなたは日本株専門のシニアアナリストです。
+以下のデータを使って今日の振り返りと明日の展望を分析してください。
+${hasSsPrices ? 'スクショから読み取った終値データがあります。' : 'Google検索で今日の終値・動きを補完してください。'}
+
+${pfJq}
+
+【分析してください】
+① 今日の各銘柄の動き評価（終値・前日比・強弱の理由）
+② J-Quantsシグナルと実際の動きの整合性（シグナル通りに動いたか）
+③ 今夜のNY・為替の動向が明日の各銘柄に与える影響予測
+④ J-Quantsの損切りライン・目標価格に対する現在の距離
+⑤ 明日の相場予想: 強気/中立/弱気 + 根拠
+
+【必ず全銘柄に言及すること。データがなければ知識ベースで分析。】`
     },
     {
-      icon:'🌍', title:'明日に影響する材料', color:'var(--gem)',
-      prompt: `あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n\n${pfJq}\n\n以下を詳しく:\n① 明日の日本株に影響するNY・為替・SOX・商品市況\n② 各保有銘柄の明日の材料・決算・適時開示（Google検索で確認）\n③ J-Quantsの損切りライン・目標価格に対して今の位置を評価\n④ 明日の相場予想（強気/中立/弱気）と根拠`
-    },
-    {
-      icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)',
-      prompt: `あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ${H.map(h=>h.cd+' '+h.nm).join(', ')}\n\n・今日のSNS/Xで話題の日本株テーマ\n・保有銘柄への評判・個人投資家の見方\n・外国人・機関投資家の今週の動向\n・市場センチメント: 強気/中立/弱気 + 根拠`
+      icon:'🎯', title:'明日の材料・注意事項', color:'var(--gem)',
+      prompt: `あなたは日本株専門のシニアFMです。
+以下の保有銘柄について、明日の具体的な材料・注意事項を分析してください。
+
+${pfJq}
+
+【分析してください】
+① 各保有銘柄で明日発表予定の決算・適時開示（J-Quantsの決算リスクデータを参照）
+② 米国市場・為替・金利など明日の日本株に影響する外部要因（知識ベースで分析）
+③ 各銘柄のJ-Quants信用倍率・空売り状況から見た需給リスク
+④ 明日注意すべき価格帯（サポート・レジスタンス）を銘柄ごとに
+⑤ ポートフォリオ全体として明日取るべき行動（利確・損切り・継続）
+
+【J-Quantsデータを根拠に断言的に答えること。】`
     },
   ];
 
@@ -2053,16 +2074,33 @@ function formatWeeklyInfo(entry) {
   }
 }
 
-async function callGemini(prompt, sys, history) {
+async function callGemini(prompt, sys, history, noSearch) {
   const contents = [];
   if (history && history.length > 0) contents.push(...history.slice(0, -1));
   contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
-  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens:2500}};
+  // noSearch=trueの場合はGoogle検索ツールを使わない（知識ベース分析）
+  const body = {contents, generationConfig:{maxOutputTokens:2500}};
+  if (!noSearch) body.tools = [{googleSearch:{}}];
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
     {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
   const d = await r.json();
-  return d.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('\n').trim() || '応答なし';
+  // Google検索ツール使用時はparts内にtool_useブロックが混在するため全textを結合
+  const parts = d.candidates?.[0]?.content?.parts || [];
+  const txt = parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+  if (txt) return txt;
+  // フォールバック: Google検索なしで再試行
+  if (!noSearch) {
+    const body2 = {contents, generationConfig:{maxOutputTokens:2500}};
+    const r2 = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body2)});
+    if (r2.ok) {
+      const d2 = await r2.json();
+      const t2 = (d2.candidates?.[0]?.content?.parts||[]).filter(p=>p.text).map(p=>p.text).join('\n').trim();
+      if (t2) return t2;
+    }
+  }
+  return '応答なし';
 }
 
 // Claude API
