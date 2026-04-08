@@ -1214,15 +1214,30 @@ function onRevSsSelect(e) {
     let allPrices = {};
     for (const img of revSsImages) {
       try {
-        const prompt = `この画像は証券会社アプリの保有銘柄・終値画面です。
-表示されているすべての銘柄の「証券コード・銘柄名・現在値（終値）・前日比（円）・前日比（%）」を読み取ってください。
-以下のJSON配列のみ返してください（他の文字は一切不要）：
-[{"code":"4桁コード","name":"銘柄名","price":終値数値,"chg":前日比円数値,"chgPct":前日比パーセント数値}]
-数値のみ（円マーク・%・カンマなし）。読み取れない項目は0。`;
+        // SBI証券アプリは「単価」を表示しない
+        // → 評価額（合計）÷ 株数 で単価を逆算する
+        const prompt = `この画像はSBI証券スマホアプリの「口座管理」画面です。
+「保有証券」タブまたは「信用建玉」タブのいずれかです。
+
+【読み取りルール】
+- 銘柄コード: 数字4桁または英数字混在（例: 7011, 135A, 247A）
+- 保有株数 or 建株数: 「100株」「200株」の数字部分のみ
+- 評価額: 「269,300円」のような金額（カンマ・円を除いた数値）
+- 評価額前日比: 「+12,600円(+4.91%)」の円額部分と%部分をそれぞれ読み取る
+- 信用建玉タブの場合: type="margin"、保有証券タブの場合: type="spot"
+
+【計算（重要）】
+単価（price） = 評価額 ÷ 株数  ← この計算を必ずJSON生成前に行うこと
+前日比円（chg） = 評価額前日比の円額 ÷ 株数  ← 同様に計算すること
+前日比%（chgPct） = 表示されているパーセント値をそのまま使う
+
+以下のJSON配列のみ返してください（前後の文字・説明・コードブロック一切不要）：
+[{"code":"コード","name":"銘柄名","shares":株数,"eval_total":評価額合計,"eval_chg_total":評価額前日比円,"chgPct":前日比%,"price":単価計算結果,"chg":前日比円計算結果,"type":"spot"または"margin"}]
+数値はすべて数字のみ（円・%・カンマなし）。読み取れない項目は0。`;
 
         const body = {
           contents: [{parts: [{text: prompt}, {inlineData: {mimeType: img.mime, data: img.b64}}]}],
-          generationConfig: {maxOutputTokens: 1000, temperature: 0.0}
+          generationConfig: {maxOutputTokens: 1500, temperature: 0.0}
         };
         const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
           {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
@@ -1233,7 +1248,25 @@ function onRevSsSelect(e) {
         if (s >= 0 && e > s) {
           const items = JSON.parse(raw.slice(s, e+1));
           items.forEach(it => {
-            if (it.code && it.price) allPrices[String(it.code)] = it;
+            if (!it.code) return;
+            const cd = String(it.code).trim();
+            // 単価が0またはnullの場合は評価額÷株数で再計算
+            let price = Number(it.price) || 0;
+            let chg   = Number(it.chg)   || 0;
+            const shares = Number(it.shares) || 100;
+            if (price === 0 && it.eval_total) price = Math.round(Number(it.eval_total) / shares);
+            if (chg   === 0 && it.eval_chg_total) chg = Math.round(Number(it.eval_chg_total) / shares);
+            if (price > 0) {
+              allPrices[cd] = {
+                code: cd,
+                name: it.name || cd,
+                shares: shares,
+                price: price,
+                chg: chg,
+                chgPct: Number(it.chgPct) || 0,
+                type: it.type || 'spot',
+              };
+            }
           });
         }
       } catch(err) {
@@ -1243,25 +1276,38 @@ function onRevSsSelect(e) {
 
     revSsPrices = allPrices;
     const cnt = Object.keys(allPrices).length;
-    preview.textContent = cnt > 0 ? '✅ ' + cnt + '銘柄の終値を読み取りました' : '⚠️ 終値を読み取れませんでした';
+    preview.textContent = cnt > 0 ? '✅ ' + cnt + '銘柄の終値を読み取りました' : '⚠️ 終値を読み取れませんでした（再度お試しください）';
 
     if (cnt > 0) {
       result.style.display = 'block';
       result.innerHTML = Object.values(allPrices).map(it => {
-        const clr = it.chg >= 0 ? 'var(--green)' : 'var(--red)';
-        return `<span style="color:var(--text);font-weight:700">${it.code} ${it.name}</span> `+
-               `<span style="font-family:var(--mono)">${it.price?.toLocaleString()}円</span> `+
-               `<span style="color:${clr}">${it.chg>=0?'+':''}${it.chg}円（${it.chgPct>=0?'+':''}${it.chgPct}%）</span>`;
+        const clr = (it.chg || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+        const typeTag = it.type === 'margin'
+          ? '<span style="font-size:9px;background:rgba(251,191,36,.2);color:#f59e0b;padding:1px 4px;border-radius:3px;margin-right:4px">信用</span>'
+          : '<span style="font-size:9px;background:rgba(59,130,246,.2);color:var(--acc);padding:1px 4px;border-radius:3px;margin-right:4px">現物</span>';
+        return typeTag +
+          `<span style="color:var(--text);font-weight:700">${it.code} ${it.name}</span> ` +
+          `<span style="font-family:var(--mono);color:var(--text)">${Number(it.price).toLocaleString()}円</span> ` +
+          `<span style="color:${clr}">${(it.chg||0)>=0?'+':''}${it.chg}円（${(it.chgPct||0)>=0?'+':''}${it.chgPct}%）</span>`;
       }).join('<br>');
     }
 
-    // 保有銘柄の現在値を自動更新
+    // 保有銘柄の現在値を自動更新（コード一致 + 銘柄名部分一致でフォールバック）
     let updated = 0;
     H.forEach(h => {
-      const p = allPrices[h.cd];
+      let p = allPrices[h.cd];
+      if (!p) {
+        // 銘柄名の最初の3文字で部分一致検索（135A等の新規コードに対応）
+        p = Object.values(allPrices).find(it =>
+          it.name && h.nm && (
+            it.name.replace(/\s/g,'').includes(h.nm.replace(/\s/g,'').slice(0,4)) ||
+            h.nm.replace(/\s/g,'').includes(it.name.replace(/\s/g,'').slice(0,4))
+          )
+        );
+      }
       if (p && p.price > 0) { h.cp = p.price; updated++; }
     });
-    if (updated > 0) { sv(KH, H); toast('✅ ' + updated + '銘柄の現在値を更新しました'); }
+    if (updated > 0) { sv(KH, H); calcS(); toast('✅ ' + updated + '銘柄の現在値を更新しました'); }
   });
 }
 
