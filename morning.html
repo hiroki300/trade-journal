@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>朝会 - Trade Journal</title>
+<meta name="theme-color" content="#0b0f18">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="朝会">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --bg:#0b0f18;--s1:#111827;--s2:#1a2236;--border:#1e2d45;
+  --acc:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6;
+  --text:#e2e8f0;--t2:#94a3b8;--t3:#4b6088;
+  --font:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN',sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  background:var(--bg);color:var(--text);font-family:var(--font);
+  display:flex;flex-direction:column;overflow-x:hidden;
+}
+button,input{font-family:inherit;}
+
+/* ─── ヘッダー ─── */
+header{
+  padding:12px 16px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--s1);flex-shrink:0;
+}
+.h-title{font-size:15px;font-weight:700;}
+.h-title span{color:var(--acc);}
+.h-date{font-size:11px;color:var(--t3);font-family:var(--mono);}
+.h-btn{
+  background:transparent;border:none;color:var(--t2);font-size:20px;
+  cursor:pointer;padding:4px 8px;
+}
+
+/* ─── メイン ─── */
+main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 80px;}
+
+/* ─── マクロアラート ─── */
+.macro-alert{
+  background:linear-gradient(135deg,#7c2d12,#9a3412);
+  border:1px solid #ea580c;border-radius:12px;
+  padding:12px 14px;margin-bottom:12px;display:flex;gap:10px;align-items:flex-start;
+}
+.macro-alert.info{background:linear-gradient(135deg,#1e3a8a,#1e40af);border-color:#3b82f6;}
+.macro-alert.warn{background:linear-gradient(135deg,#7c2d12,#9a3412);border-color:#ea580c;}
+.macro-alert .a-icon{font-size:24px;line-height:1;flex-shrink:0;}
+.macro-alert .a-body{flex:1;min-width:0;}
+.macro-alert .a-title{font-size:13px;font-weight:700;margin-bottom:4px;}
+.macro-alert .a-text{font-size:11px;color:#fff;opacity:.9;line-height:1.45;}
+.macro-alert .a-dismiss{
+  background:rgba(0,0,0,.3);border:none;color:#fff;
+  border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;margin-top:8px;
+}
+
+/* ─── セクション（折りたたみ） ─── */
+.sec{
+  background:var(--s1);border:1px solid var(--border);border-radius:12px;
+  margin-bottom:10px;overflow:hidden;
+}
+.sec-hdr{
+  padding:13px 14px;display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;user-select:none;
+}
+.sec-hdr-l{display:flex;align-items:center;gap:8px;}
+.sec-num{
+  background:var(--s2);color:var(--t2);font-size:11px;font-weight:700;
+  width:20px;height:20px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+}
+.sec-num.done{background:var(--green);color:#fff;}
+.sec-title{font-size:14px;font-weight:700;}
+.sec-badge{
+  font-size:10px;color:var(--t3);
+  background:var(--s2);padding:2px 8px;border-radius:10px;font-family:var(--mono);
+}
+.sec-badge.active{background:var(--acc);color:#fff;}
+.sec-badge.done{background:var(--green);color:#fff;}
+.sec-arrow{color:var(--t3);font-size:12px;transition:transform .2s;}
+.sec.open .sec-arrow{transform:rotate(180deg);}
+.sec-body{padding:0 14px 14px;display:none;}
+.sec.open .sec-body{display:block;}
+.sec-preview{padding:0 14px 12px;font-size:11px;color:var(--t3);}
+.sec.open .sec-preview{display:none;}
+
+/* ─── ① 地合い ─── */
+.regime-card{display:flex;gap:12px;align-items:center;margin-bottom:10px;}
+.regime-icon{font-size:36px;line-height:1;}
+.regime-info{flex:1;}
+.regime-name{font-size:18px;font-weight:700;}
+.regime-name.normal{color:var(--green);}
+.regime-name.caution{color:var(--yellow);}
+.regime-name.storm{color:#fb923c;}
+.regime-name.halt{color:var(--red);}
+.regime-meta{font-size:11px;color:var(--t2);font-family:var(--mono);margin-top:2px;}
+.regime-advice{
+  background:var(--s2);border-left:3px solid var(--acc);
+  padding:8px 10px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--t2);
+}
+.regime-advice.warn{border-left-color:var(--yellow);}
+.regime-advice.danger{border-left-color:var(--red);}
+
+/* ─── ② 保有銘柄カード ─── */
+.empty{
+  text-align:center;padding:30px 12px;color:var(--t3);font-size:13px;
+}
+.empty .ei{font-size:36px;margin-bottom:10px;}
+.h-card{
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
+  padding:12px;margin-bottom:10px;
+  transition:border-color .2s;
+}
+.h-card.judged{border-color:var(--green);background:#0f1d2e;}
+.h-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px;}
+.h-code-name{flex:1;min-width:0;}
+.h-code{font-size:11px;color:var(--t3);font-family:var(--mono);}
+.h-name{font-size:14px;font-weight:700;margin-top:1px;line-height:1.2;}
+.h-price{text-align:right;flex-shrink:0;}
+.h-cur{font-size:18px;font-weight:700;font-family:var(--mono);line-height:1;}
+.h-chg{font-size:11px;font-family:var(--mono);margin-top:3px;}
+.h-chg.up{color:var(--green);}
+.h-chg.dn{color:var(--red);}
+
+.h-meta{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;
+  background:var(--s1);border-radius:6px;padding:8px;margin-bottom:10px;
+  font-size:10px;
+}
+.h-meta-item{text-align:center;}
+.h-meta-lbl{color:var(--t3);margin-bottom:2px;}
+.h-meta-val{font-family:var(--mono);font-weight:700;color:var(--text);}
+.h-meta-val.dn{color:var(--red);}
+.h-meta-val.up{color:var(--green);}
+
+.h-judge-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+.j-btn{
+  background:var(--s1);color:var(--t2);border:1px solid var(--border);
+  border-radius:8px;padding:10px 4px;font-size:11px;font-weight:700;
+  cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;
+  transition:all .15s;
+}
+.j-btn .ji{font-size:18px;}
+.j-btn:active{transform:scale(.96);}
+.j-btn.sel-hold{background:var(--green);color:#fff;border-color:var(--green);}
+.j-btn.sel-cut{background:var(--red);color:#fff;border-color:var(--red);}
+.j-btn.sel-sell{background:var(--purple);color:#fff;border-color:var(--purple);}
+
+.h-judged-banner{
+  background:var(--s1);border-radius:6px;padding:8px 10px;
+  font-size:11px;color:var(--t2);text-align:center;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.h-judged-banner b{color:var(--text);}
+.h-judged-banner .change-link{color:var(--acc);font-size:10px;margin-left:4px;}
+
+/* 手動入力フォーム（保有データなし時） */
+.h-add-row{
+  display:grid;grid-template-columns:1fr 2fr 1fr 50px;gap:6px;margin-bottom:10px;
+}
+.h-add-row input{
+  background:var(--s1);border:1px solid var(--border);color:var(--text);
+  padding:8px;border-radius:6px;font-size:12px;font-family:var(--mono);
+}
+.h-add-row .add-btn{
+  background:var(--acc);color:#fff;border:none;border-radius:6px;
+  font-size:18px;font-weight:700;cursor:pointer;
+}
+.h-source-note{
+  font-size:10px;color:var(--t3);margin-bottom:8px;
+  display:flex;align-items:center;gap:6px;
+}
+
+/* ─── ③ 計画 ─── */
+.plan-pending{
+  text-align:center;padding:24px 12px;color:var(--t3);font-size:12px;
+}
+
+/* ─── 完了ボタン ─── */
+.done-btn-wrap{
+  position:fixed;bottom:0;left:0;right:0;
+  padding:12px 16px;background:linear-gradient(to top, var(--bg) 60%, transparent);
+  z-index:90;
+}
+.done-btn{
+  width:100%;padding:14px;border-radius:12px;border:none;
+  background:var(--acc);color:#fff;font-size:14px;font-weight:700;
+  cursor:pointer;transition:opacity .2s;
+}
+.done-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ─── トースト ─── */
+.toast{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+  background:var(--s2);color:var(--text);padding:10px 16px;border-radius:8px;
+  font-size:12px;z-index:1000;border:1px solid var(--border);
+  opacity:0;transition:opacity .25s;pointer-events:none;
+}
+.toast.on{opacity:1;}
+
+/* ─── 設定モーダル（後で第2段で実装） ─── */
+.settings-stub{
+  background:var(--s1);border:1px solid var(--border);border-radius:8px;
+  padding:14px;font-size:12px;color:var(--t2);text-align:center;
+}
+
+/* ─── ローディング ─── */
+.loading{display:inline-flex;gap:4px;align-items:center;color:var(--t3);font-size:12px;}
+.loading::before{
+  content:"";width:12px;height:12px;border:2px solid var(--border);
+  border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ─── 全般 ─── */
+.muted{color:var(--t3);}
+.error{color:var(--red);font-size:11px;padding:8px;background:#3a1818;border-radius:6px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="h-title">🌅 <span>朝会</span></div>
+    <div class="h-date" id="hDate"></div>
+  </div>
+  <button class="h-btn" id="settingsBtn" title="設定">⚙️</button>
+</header>
+
+<main>
+  <div id="alertArea"></div>
+
+  <!-- ① 地合い -->
+  <div class="sec open" id="secMacro">
+    <div class="sec-hdr" onclick="toggleSec('secMacro')">
+      <div class="sec-hdr-l">
+        <div class="sec-num" id="numMacro">1</div>
+        <div class="sec-title">地合い</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="sec-badge" id="badgeMacro">読込中</div>
+        <div class="sec-arrow">▼</div>
+      </div>
+    </div>
+    <div class="sec-preview" id="previewMacro">読込中...</div>
+    <div class="sec-body" id="bodyMacro">
+      <div class="loading">マクロ状態を取得中...</div>
+    </div>
+  </div>
+
+  <!-- ② 保有銘柄 -->
+  <div class="sec" id="secHoldings">
+    <div class="sec-hdr" onclick="toggleSec('secHoldings')">
+      <div class="sec-hdr-l">
+        <div class="sec-num" id="numHoldings">2</div>
+        <div class="sec-title">保有銘柄</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="sec-badge" id="badgeHoldings">-</div>
+        <div class="sec-arrow">▼</div>
+      </div>
+    </div>
+    <div class="sec-preview" id="previewHoldings">①完了後に展開</div>
+    <div class="sec-body" id="bodyHoldings"></div>
+  </div>
+
+  <!-- ③ 今日の計画 -->
+  <div class="sec" id="secPlan">
+    <div class="sec-hdr" onclick="toggleSec('secPlan')">
+      <div class="sec-hdr-l">
+        <div class="sec-num" id="numPlan">3</div>
+        <div class="sec-title">今日の計画</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="sec-badge" id="badgePlan">-</div>
+        <div class="sec-arrow">▼</div>
+      </div>
+    </div>
+    <div class="sec-preview" id="previewPlan">②完了後に生成</div>
+    <div class="sec-body" id="bodyPlan">
+      <div class="plan-pending">第2段で実装予定（Claude API による計画生成）</div>
+    </div>
+  </div>
+</main>
+
+<div class="done-btn-wrap">
+  <button class="done-btn" id="doneBtn" disabled>💾 朝会を完了する（第2段で実装）</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+//  trade-journal morning.html  v0.1 (Phase1 Step1)
+//  https://hiroki300.github.io/trade-journal/morning.html
+// ════════════════════════════════════════════════════════════════════
+
+// ── データソース ──
+const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-data/main";
+const URLS = {
+  macro_state:    `${DATA_BASE}/macro_state.json`,
+  macro_history:  `${DATA_BASE}/macro_history.json`,
+  latest_prices:  `${DATA_BASE}/latest_prices.json`,
+  weekly_results: `${DATA_BASE}/weekly_results.json`,
+};
+
+// ── キャッシュ（fetch 結果を 5 分間メモ） ──
+const CACHE_TTL = 5 * 60 * 1000;
+const cache = new Map();
+async function fetchJSON(url){
+  const c = cache.get(url);
+  if (c && Date.now() - c.t < CACHE_TTL) return c.data;
+  const r = await fetch(url, {cache: "no-store"});
+  if (!r.ok) throw new Error(`fetch ${url} failed: ${r.status}`);
+  const data = await r.json();
+  cache.set(url, {data, t: Date.now()});
+  return data;
+}
+
+// ── localStorage（設定・履歴の軽量保存） ──
+const LS = {
+  get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set: (k, v) => { localStorage.setItem(k, JSON.stringify(v)); },
+};
+
+// ── morning 自身の保存キー（v1 と衝突しない命名） ──
+const K = {
+  judgments:        "tjm_judgments",          // 当日の判定 [{code, name, judgment, ...}]
+  last_seen_macro:  "tjm_last_seen_macro",    // 最後に確認したマクロ変化時刻
+  api_key_claude:   "tj_ck",                  // ★v1 と共有（Claude API key）
+  api_key_gemini:   "tj_gk",                  // ★v1 と共有
+  manual_holdings:  "tjm_manual_holdings",    // v1 にデータが無いときの手動入力
+};
+
+// ── 日付フォーマット ──
+const D = new Date();
+const TODAY = D.toISOString().slice(0,10);
+const WD = ["日","月","火","水","木","金","土"][D.getDay()];
+document.getElementById("hDate").textContent = `${TODAY} (${WD})`;
+
+// ════════════════════════════════════════════════════════════════════
+//  ユーティリティ
+// ════════════════════════════════════════════════════════════════════
+
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("on");
+  clearTimeout(toast._tm);
+  toast._tm = setTimeout(()=>t.classList.remove("on"), 2200);
+}
+
+function fmt(n, decimals=0){
+  if (n == null || isNaN(n)) return "-";
+  return Number(n).toLocaleString("ja-JP", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function toggleSec(id){
+  document.getElementById(id).classList.toggle("open");
+}
+
+// 4桁コード → 5桁コード（latest_prices.json は 5桁形式）
+function code4to5(cd){
+  const s = String(cd).trim();
+  if (s.length === 5) return s;
+  if (s.length === 4 && /^[\dA-Za-z]+$/.test(s)) return s + "0";
+  return s;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ① 地合い
+// ════════════════════════════════════════════════════════════════════
+
+const REGIME_INFO = {
+  normal:  {icon:"🟢", name:"NORMAL",  label:"平常運転", advice:"通常通りのエントリー基準で OK", level:"" },
+  caution: {icon:"🟡", name:"CAUTION", label:"警戒",     advice:"新規ポジションは慎重に。スコア基準を1段上げる",  level:"warn" },
+  storm:   {icon:"⛈",  name:"STORM",   label:"乱高下",   advice:"ポジションサイズ50%、最低スコア8以上の銘柄のみ",  level:"warn" },
+  halt:    {icon:"🔴", name:"HALT",    label:"停止",     advice:"新規エントリー禁止。保有のみ管理",                level:"danger" },
+};
+
+async function loadMacro(){
+  try {
+    const macro = await fetchJSON(URLS.macro_state);
+    const info = REGIME_INFO[macro.regime] || REGIME_INFO.normal;
+
+    // ヘッダーバッジ
+    const badge = document.getElementById("badgeMacro");
+    badge.className = "sec-badge done";
+    badge.textContent = `${info.icon} ${info.name}`;
+
+    // セクション完了マーク
+    document.getElementById("numMacro").classList.add("done");
+    document.getElementById("numMacro").textContent = "✓";
+
+    // プレビュー（折りたたみ時）
+    document.getElementById("previewMacro").innerHTML =
+      `${info.icon} ${info.label} / HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}%`;
+
+    // 本体
+    document.getElementById("bodyMacro").innerHTML = `
+      <div class="regime-card">
+        <div class="regime-icon">${info.icon}</div>
+        <div class="regime-info">
+          <div class="regime-name ${macro.regime}">${info.name}</div>
+          <div class="regime-meta">
+            日経HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}% / ${macro.trend || "-"}
+          </div>
+        </div>
+      </div>
+      <div class="regime-advice ${info.level}">
+        💡 ${info.advice}
+      </div>
+      ${macro.reasons && macro.reasons.length ? `
+        <div style="font-size:11px;color:var(--t3);margin-top:8px;line-height:1.5;">
+          ${macro.reasons.map(r => `・${r}`).join("<br>")}
+        </div>
+      ` : ""}
+      <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:right;">
+        評価: ${macro.evaluated_at || "-"}
+      </div>
+    `;
+
+    // ②に自動移行
+    setTimeout(() => {
+      document.getElementById("secMacro").classList.remove("open");
+      document.getElementById("secHoldings").classList.add("open");
+    }, 400);
+
+    return macro;
+  } catch(e) {
+    document.getElementById("bodyMacro").innerHTML =
+      `<div class="error">マクロ状態の取得に失敗: ${e.message}<br>
+       stock-checker の Stock Checker → daily_submit が走るのを待つか、
+       <a href="${URLS.macro_state}" target="_blank" style="color:var(--acc)">直接URL</a> を確認してください。</div>`;
+    document.getElementById("badgeMacro").textContent = "❌";
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  マクロ遷移アラート
+// ════════════════════════════════════════════════════════════════════
+
+const REGIME_ADVICE_TRANSITION = {
+  "normal->caution": {icon:"⚠️", title:"NORMAL → CAUTION", text:"地合いが警戒モードに移行。新規ポジションは慎重に。", level:"info"},
+  "caution->storm":  {icon:"⛈",  title:"CAUTION → STORM",  text:"乱高下相場入り。利確検討、損切ライン死守。",       level:"warn"},
+  "storm->halt":     {icon:"🚨", title:"STORM → HALT",     text:"全保有見直し、新規エントリー禁止推奨。",           level:"warn"},
+  "caution->normal": {icon:"✅", title:"CAUTION → NORMAL", text:"平常運転に復帰。",                                  level:"info"},
+  "storm->normal":   {icon:"✅", title:"STORM → NORMAL",   text:"乱高下が落ち着き、平常運転に復帰。",               level:"info"},
+  "halt->storm":     {icon:"🌀", title:"HALT → STORM",     text:"段階的にエントリー再開可。慎重に。",               level:"info"},
+  "halt->caution":   {icon:"🔄", title:"HALT → CAUTION",   text:"地合い回復傾向。少額で打診から。",                 level:"info"},
+  "halt->normal":    {icon:"🌅", title:"HALT → NORMAL",    text:"完全に平常運転に復帰。",                           level:"info"},
+  "normal->storm":   {icon:"⛈",  title:"NORMAL → STORM",   text:"急激な悪化。ポジション縮小を強く推奨。",           level:"warn"},
+  "normal->halt":    {icon:"🚨", title:"NORMAL → HALT",    text:"暴落級の急変。新規禁止、損切ライン厳守。",         level:"warn"},
+  "caution->halt":   {icon:"🚨", title:"CAUTION → HALT",   text:"警戒から停止へ悪化。全保有見直し。",               level:"warn"},
+  "storm->caution":  {icon:"📉", title:"STORM → CAUTION",  text:"乱高下から警戒レベルに緩和。",                     level:"info"},
+};
+
+async function loadMacroAlert(){
+  try {
+    const history = await fetchJSON(URLS.macro_history);
+    if (!Array.isArray(history) || history.length === 0) return;
+
+    const lastSeen = LS.get(K.last_seen_macro, "1970-01-01T00:00:00+09:00");
+    const newChanges = history.filter(h =>
+      h.changed_at && h.changed_at > lastSeen && h.from
+    );
+    if (newChanges.length === 0) return;
+
+    // 直近の変化を表示
+    const latest = newChanges[newChanges.length - 1];
+    const key = `${latest.from}->${latest.regime}`;
+    const advice = REGIME_ADVICE_TRANSITION[key] || {
+      icon: "🔔", title: `${latest.from?.toUpperCase()} → ${latest.regime?.toUpperCase()}`,
+      text: latest.summary || "マクロレジームが変化しました。",
+      level: "info"
+    };
+
+    const dt = new Date(latest.changed_at);
+    const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+
+    document.getElementById("alertArea").innerHTML = `
+      <div class="macro-alert ${advice.level}">
+        <div class="a-icon">${advice.icon}</div>
+        <div class="a-body">
+          <div class="a-title">${advice.title}</div>
+          <div class="a-text">${advice.text}</div>
+          <div class="a-text" style="font-size:10px;margin-top:4px;opacity:.7;">変化: ${dtStr}</div>
+          <button class="a-dismiss" onclick="dismissAlert()">理解した</button>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    console.warn("macro_history fetch failed:", e);
+  }
+}
+
+function dismissAlert(){
+  LS.set(K.last_seen_macro, new Date().toISOString());
+  document.getElementById("alertArea").innerHTML = "";
+  toast("✅ アラートを閉じました");
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ② 保有銘柄
+// ════════════════════════════════════════════════════════════════════
+
+let HOLDINGS = [];   // 表示中の保有銘柄リスト
+let PRICES = {};     // latest_prices.json の中身
+let JUDGMENTS = LS.get(K.judgments, {});  // {code: {judgment, ...}}
+
+// 当日の判定だけを保持（日付が変わったらリセット）
+if (JUDGMENTS._date !== TODAY) {
+  JUDGMENTS = {_date: TODAY};
+  LS.set(K.judgments, JUDGMENTS);
+}
+
+async function loadHoldings(){
+  // ── データソースの優先順位 ──
+  //   1. v1 (localStorage["tj_h5"]) - 同一オリジンなので読める
+  //   2. morning 自身の手動入力 (localStorage["tjm_manual_holdings"])
+  //   どちらも空なら空表示 + 手動入力フォーム
+  let v1Data = [];
+  try {
+    const raw = localStorage.getItem("tj_h5");
+    if (raw) v1Data = JSON.parse(raw) || [];
+  } catch(e) {
+    console.warn("v1 holdings parse error:", e);
+  }
+
+  const manualData = LS.get(K.manual_holdings, []);
+
+  // 統合（v1 優先、ただし同コードがあれば v1 を使う）
+  const seen = new Set();
+  HOLDINGS = [];
+  for (const h of v1Data) {
+    if (!h || !h.cd) continue;
+    if (seen.has(h.cd)) continue;
+    seen.add(h.cd);
+    HOLDINGS.push({
+      code: h.cd,
+      name: h.nm || h.name || `(${h.cd})`,
+      buy_price: h.bp,
+      shares: h.sh,
+      stop_loss: h.sl,
+      target: h.tgt,
+      type: h.type || "spot",
+      source: "v1",
+    });
+  }
+  for (const h of manualData) {
+    if (!h || !h.code) continue;
+    if (seen.has(h.code)) continue;
+    seen.add(h.code);
+    HOLDINGS.push({...h, source: "manual"});
+  }
+
+  // 価格データを取得
+  try {
+    PRICES = await fetchJSON(URLS.latest_prices);
+  } catch(e) {
+    console.warn("prices fetch failed:", e);
+    PRICES = {};
+  }
+
+  renderHoldings();
+}
+
+function getPrice(code){
+  // 4桁→5桁変換を試す
+  const c5 = code4to5(code);
+  return PRICES[c5] || PRICES[code] || null;
+}
+
+function renderHoldings(){
+  const body = document.getElementById("bodyHoldings");
+  const total = HOLDINGS.length;
+  const judged = HOLDINGS.filter(h => JUDGMENTS[h.code]).length;
+  const allFromV1 = HOLDINGS.length > 0 && HOLDINGS.every(h => h.source === "v1");
+
+  // バッジ更新
+  const badge = document.getElementById("badgeHoldings");
+  if (total === 0) {
+    badge.className = "sec-badge";
+    badge.textContent = "0件";
+  } else if (judged === total) {
+    badge.className = "sec-badge done";
+    badge.textContent = `✓ ${judged}/${total}`;
+    document.getElementById("numHoldings").classList.add("done");
+    document.getElementById("numHoldings").textContent = "✓";
+  } else {
+    badge.className = "sec-badge active";
+    badge.textContent = `${judged}/${total}`;
+    document.getElementById("numHoldings").classList.remove("done");
+    document.getElementById("numHoldings").textContent = "2";
+  }
+
+  // プレビュー
+  document.getElementById("previewHoldings").textContent =
+    total === 0 ? "保有銘柄なし" : `${total}銘柄 / 判定済 ${judged}`;
+
+  // 本体
+  let html = "";
+
+  // ソース表示
+  if (HOLDINGS.length > 0) {
+    html += `
+      <div class="h-source-note">
+        ${allFromV1 ? "📦 v1 の保有データから自動取得" :
+          HOLDINGS.some(h => h.source === "v1") ? "📦 v1 + 手動入力" : "✏️ 手動入力"}
+        <button onclick="syncFromV1()" style="margin-left:auto;background:var(--s2);border:1px solid var(--border);color:var(--t2);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;">🔄 再読込</button>
+      </div>
+    `;
+  }
+
+  // 銘柄カード
+  if (HOLDINGS.length === 0) {
+    html += `
+      <div class="empty">
+        <div class="ei">💼</div>
+        保有銘柄が見つかりません<br>
+        <span style="font-size:11px;color:var(--t3);">v1 で登録するか、下から手動入力してください</span>
+      </div>
+    `;
+  } else {
+    html += HOLDINGS.map(h => renderHoldingCard(h)).join("");
+  }
+
+  // 手動入力フォーム
+  html += `
+    <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px;">
+      <div style="font-size:11px;color:var(--t3);margin-bottom:6px;">＋ 朝会だけ追加（v1 には反映されません）</div>
+      <div class="h-add-row">
+        <input id="addCode"   type="text" placeholder="6196" maxlength="5">
+        <input id="addName"   type="text" placeholder="銘柄名">
+        <input id="addStop"   type="number" placeholder="損切">
+        <button class="add-btn" onclick="addManualHolding()">＋</button>
+      </div>
+    </div>
+  `;
+
+  body.innerHTML = html;
+}
+
+function renderHoldingCard(h){
+  const code5 = code4to5(h.code);
+  const price = getPrice(h.code);
+  const judged = JUDGMENTS[h.code];
+
+  const curHtml = price ?
+    `<div class="h-cur">${fmt(price.close, 1)}</div>
+     <div class="h-chg ${price.change_pct >= 0 ? 'up' : 'dn'}">
+       ${price.change_pct >= 0 ? '+' : ''}${fmt(price.change_pct, 2)}%
+     </div>` :
+    `<div class="h-cur muted">-</div>
+     <div class="h-chg muted">価格不明</div>`;
+
+  // 損益
+  let pnlHtml = "";
+  if (price && h.buy_price) {
+    const pnlPct = (price.close / h.buy_price - 1) * 100;
+    pnlHtml = `<div class="h-meta-val ${pnlPct >= 0 ? 'up' : 'dn'}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 1)}%</div>`;
+  } else {
+    pnlHtml = `<div class="h-meta-val muted">-</div>`;
+  }
+
+  // 損切まで・目標まで
+  let slPctHtml = "-", tgtPctHtml = "-";
+  if (price && h.stop_loss) {
+    const slDist = (price.close / h.stop_loss - 1) * 100;
+    slPctHtml = `${fmt(h.stop_loss, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(slDist,1)}%</span>`;
+  } else if (h.stop_loss) {
+    slPctHtml = `${fmt(h.stop_loss, 0)}`;
+  }
+  if (price && h.target) {
+    const tgtDist = (h.target / price.close - 1) * 100;
+    tgtPctHtml = `${fmt(h.target, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(tgtDist,1)}%</span>`;
+  } else if (h.target) {
+    tgtPctHtml = `${fmt(h.target, 0)}`;
+  }
+
+  // 判定ボタン
+  let judgeHtml;
+  if (judged) {
+    const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
+    const icons  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰"};
+    judgeHtml = `
+      <div class="h-judged-banner" onclick="resetJudgment('${h.code}')">
+        ${icons[judged.judgment]} 判定: <b>${labels[judged.judgment]}</b>
+        <span class="change-link">変更</span>
+      </div>
+    `;
+  } else {
+    judgeHtml = `
+      <div class="h-judge-btns">
+        <button class="j-btn" onclick="setJudgment('${h.code}','hold')">
+          <span class="ji">✋</span>継続保有
+        </button>
+        <button class="j-btn" onclick="setJudgment('${h.code}','consider_cut')">
+          <span class="ji">⛔</span>損切検討
+        </button>
+        <button class="j-btn" onclick="setJudgment('${h.code}','consider_sell')">
+          <span class="ji">💰</span>利確検討
+        </button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="h-card ${judged ? 'judged' : ''}" id="card-${h.code}">
+      <div class="h-card-top">
+        <div class="h-code-name">
+          <div class="h-code">${code5} ${h.type === 'margin' ? '<span style="color:var(--yellow)">[信用]</span>' : ''}</div>
+          <div class="h-name">${h.name}</div>
+        </div>
+        <div class="h-price">${curHtml}</div>
+      </div>
+      <div class="h-meta">
+        <div class="h-meta-item">
+          <div class="h-meta-lbl">買付/含損益</div>
+          <div class="h-meta-val">${h.buy_price ? '¥'+fmt(h.buy_price,0) : '-'}</div>
+          ${pnlHtml}
+        </div>
+        <div class="h-meta-item">
+          <div class="h-meta-lbl">損切ライン</div>
+          <div class="h-meta-val">${slPctHtml}</div>
+        </div>
+        <div class="h-meta-item">
+          <div class="h-meta-lbl">目標</div>
+          <div class="h-meta-val">${tgtPctHtml}</div>
+        </div>
+      </div>
+      ${judgeHtml}
+    </div>
+  `;
+}
+
+// ── 判定操作 ──
+function setJudgment(code, judgment){
+  const h = HOLDINGS.find(x => x.code === code);
+  if (!h) return;
+  const price = getPrice(code);
+
+  JUDGMENTS[code] = {
+    code,
+    name: h.name,
+    judgment,
+    price_at_judgment: price?.close ?? null,
+    stop_loss: h.stop_loss ?? null,
+    target: h.target ?? null,
+    judged_at: new Date().toISOString(),
+  };
+  LS.set(K.judgments, JUDGMENTS);
+
+  renderHoldings();
+
+  // 次の未判定銘柄へスクロール
+  setTimeout(() => {
+    const next = HOLDINGS.find(x => !JUDGMENTS[x.code]);
+    if (next) {
+      const el = document.getElementById(`card-${next.code}`);
+      if (el) el.scrollIntoView({behavior: "smooth", block: "center"});
+    } else {
+      // 全銘柄判定完了 → ③に自動移行
+      setTimeout(() => {
+        document.getElementById("secHoldings").classList.remove("open");
+        document.getElementById("secPlan").classList.add("open");
+        toast("✅ 全銘柄判定完了！");
+      }, 300);
+    }
+  }, 100);
+}
+
+function resetJudgment(code){
+  delete JUDGMENTS[code];
+  LS.set(K.judgments, JUDGMENTS);
+  renderHoldings();
+}
+
+// ── 手動入力 ──
+function addManualHolding(){
+  const code = document.getElementById("addCode").value.trim();
+  const name = document.getElementById("addName").value.trim();
+  const stop = parseFloat(document.getElementById("addStop").value) || null;
+  if (!code || !name) {
+    toast("⚠️ コードと銘柄名は必須");
+    return;
+  }
+  const list = LS.get(K.manual_holdings, []);
+  if (list.some(h => h.code === code)) {
+    toast("⚠️ 既に追加済み");
+    return;
+  }
+  list.push({code, name, stop_loss: stop, type: "spot"});
+  LS.set(K.manual_holdings, list);
+  toast(`✅ ${name} を追加`);
+  loadHoldings();
+}
+
+// ── v1 から再読込 ──
+function syncFromV1(){
+  cache.delete(URLS.latest_prices);  // 価格も再取得
+  loadHoldings();
+  toast("🔄 再読込完了");
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  設定（第2段で本実装、いまはスタブ）
+// ════════════════════════════════════════════════════════════════════
+
+document.getElementById("settingsBtn").onclick = () => {
+  alert("⚙️ 設定画面は第2段で実装予定です。\n\n" +
+        "現在: マクロ表示 + 保有銘柄取得 + 判定保存 のみ\n" +
+        "次: ③計画生成（Claude API）+ 設定モーダル");
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  起動
+// ════════════════════════════════════════════════════════════════════
+
+(async function init(){
+  await loadMacroAlert();
+  await loadMacro();
+  await loadHoldings();
+})();
+</script>
+
+</body>
+</html>
