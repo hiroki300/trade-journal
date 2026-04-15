@@ -10,6 +10,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="朝会">
 <link rel="apple-touch-icon" href="icon-192.png">
+<!-- PWA: manifest を inline data URL で埋め込み -->
+<link rel="manifest" id="pwaManifest">
 <style>
 :root{
   --bg:#0b0f18;--s1:#111827;--s2:#1a2236;--border:#1e2d45;
@@ -24,7 +26,7 @@ body{
   background:var(--bg);color:var(--text);font-family:var(--font);
   display:flex;flex-direction:column;overflow-x:hidden;
 }
-button,input{font-family:inherit;}
+button,input,textarea,select{font-family:inherit;}
 
 /* ─── ヘッダー ─── */
 header{
@@ -39,9 +41,10 @@ header{
   background:transparent;border:none;color:var(--t2);font-size:20px;
   cursor:pointer;padding:4px 8px;
 }
+.h-btn:hover{color:var(--text);}
 
 /* ─── メイン ─── */
-main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 80px;}
+main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 100px;}
 
 /* ─── マクロアラート ─── */
 .macro-alert{
@@ -73,9 +76,10 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
 .sec-num{
   background:var(--s2);color:var(--t2);font-size:11px;font-weight:700;
   width:20px;height:20px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
 }
 .sec-num.done{background:var(--green);color:#fff;}
+.sec-num.active{background:var(--acc);color:#fff;}
 .sec-title{font-size:14px;font-weight:700;}
 .sec-badge{
   font-size:10px;color:var(--t3);
@@ -83,6 +87,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
 }
 .sec-badge.active{background:var(--acc);color:#fff;}
 .sec-badge.done{background:var(--green);color:#fff;}
+.sec-badge.error{background:var(--red);color:#fff;}
 .sec-arrow{color:var(--t3);font-size:12px;transition:transform .2s;}
 .sec.open .sec-arrow{transform:rotate(180deg);}
 .sec-body{padding:0 14px 14px;display:none;}
@@ -114,8 +119,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
 .empty .ei{font-size:36px;margin-bottom:10px;}
 .h-card{
   background:var(--s2);border:1px solid var(--border);border-radius:10px;
-  padding:12px;margin-bottom:10px;
-  transition:border-color .2s;
+  padding:12px;margin-bottom:10px;transition:border-color .2s;
 }
 .h-card.judged{border-color:var(--green);background:#0f1d2e;}
 .h-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px;}
@@ -160,7 +164,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
 .h-judged-banner b{color:var(--text);}
 .h-judged-banner .change-link{color:var(--acc);font-size:10px;margin-left:4px;}
 
-/* 手動入力フォーム（保有データなし時） */
+/* 手動入力フォーム */
 .h-add-row{
   display:grid;grid-template-columns:1fr 2fr 1fr 50px;gap:6px;margin-bottom:10px;
 }
@@ -176,16 +180,35 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
   font-size:10px;color:var(--t3);margin-bottom:8px;
   display:flex;align-items:center;gap:6px;
 }
+.h-source-note button{
+  background:var(--s2);border:1px solid var(--border);color:var(--t2);
+  padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;
+}
 
 /* ─── ③ 計画 ─── */
-.plan-pending{
-  text-align:center;padding:24px 12px;color:var(--t3);font-size:12px;
+.plan-empty{text-align:center;padding:24px 12px;color:var(--t3);font-size:12px;}
+.plan-gen-btn{
+  width:100%;padding:12px;background:var(--acc);color:#fff;border:none;
+  border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.plan-gen-btn:disabled{opacity:.5;cursor:not-allowed;}
+.plan-text{
+  background:var(--s2);border-radius:8px;padding:14px;
+  font-size:13px;line-height:1.7;color:var(--text);
+  white-space:pre-wrap;word-wrap:break-word;
+}
+.plan-meta{font-size:10px;color:var(--t3);margin-top:8px;text-align:right;font-family:var(--mono);}
+.plan-error{
+  background:#3a1818;border:1px solid var(--red);border-radius:8px;
+  padding:10px 12px;color:#fca5a5;font-size:12px;line-height:1.5;
 }
 
 /* ─── 完了ボタン ─── */
 .done-btn-wrap{
   position:fixed;bottom:0;left:0;right:0;
-  padding:12px 16px;background:linear-gradient(to top, var(--bg) 60%, transparent);
+  padding:12px 16px env(safe-area-inset-bottom, 12px);
+  background:linear-gradient(to top, var(--bg) 65%, transparent);
   z-index:90;
 }
 .done-btn{
@@ -194,24 +217,73 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
   cursor:pointer;transition:opacity .2s;
 }
 .done-btn:disabled{opacity:.4;cursor:not-allowed;}
+.done-btn.completed{background:var(--green);}
 
 /* ─── トースト ─── */
 .toast{
-  position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+  position:fixed;bottom:90px;left:50%;transform:translateX(-50%);
   background:var(--s2);color:var(--text);padding:10px 16px;border-radius:8px;
   font-size:12px;z-index:1000;border:1px solid var(--border);
   opacity:0;transition:opacity .25s;pointer-events:none;
+  max-width:90%;text-align:center;
 }
 .toast.on{opacity:1;}
 
-/* ─── 設定モーダル（後で第2段で実装） ─── */
-.settings-stub{
-  background:var(--s1);border:1px solid var(--border);border-radius:8px;
-  padding:14px;font-size:12px;color:var(--t2);text-align:center;
+/* ─── モーダル ─── */
+.modal-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;
+  display:none;align-items:flex-end;justify-content:center;
 }
+.modal-bg.on{display:flex;}
+.modal{
+  background:var(--s1);border-top-left-radius:16px;border-top-right-radius:16px;
+  width:100%;max-width:480px;max-height:85vh;overflow-y:auto;
+  padding:14px 16px env(safe-area-inset-bottom, 16px);
+  border-top:1px solid var(--border);
+}
+.modal-hdr{
+  display:flex;justify-content:space-between;align-items:center;
+  padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:14px;
+}
+.modal-title{font-size:15px;font-weight:700;}
+.modal-close{
+  background:transparent;border:none;color:var(--t2);font-size:22px;cursor:pointer;
+}
+.modal-sec{margin-bottom:18px;}
+.modal-sec-title{
+  font-size:11px;color:var(--t3);text-transform:uppercase;
+  letter-spacing:.05em;margin-bottom:8px;font-weight:700;
+}
+.modal label{font-size:11px;color:var(--t2);display:block;margin-bottom:4px;}
+.modal input[type=text],.modal input[type=password]{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  color:var(--text);padding:10px;border-radius:6px;font-size:12px;
+  font-family:var(--mono);margin-bottom:8px;
+}
+.modal-btn{
+  background:var(--s2);border:1px solid var(--border);color:var(--text);
+  padding:9px 12px;border-radius:6px;font-size:12px;cursor:pointer;
+  width:100%;text-align:left;margin-bottom:6px;
+  display:flex;align-items:center;gap:8px;
+}
+.modal-btn:hover{background:var(--border);}
+.modal-btn.danger{color:#fca5a5;border-color:#7f1d1d;}
+.modal-btn.primary{background:var(--acc);border-color:var(--acc);color:#fff;}
+.modal-btn .ki{font-size:14px;}
+
+.history-item{
+  background:var(--s2);border-radius:6px;padding:8px 10px;margin-bottom:6px;
+  font-size:11px;
+}
+.history-item .hi-date{color:var(--t2);font-family:var(--mono);}
+.history-item .hi-summary{margin-top:3px;color:var(--text);}
+
+.api-status{font-size:10px;margin-top:4px;}
+.api-status.set{color:var(--green);}
+.api-status.unset{color:var(--yellow);}
 
 /* ─── ローディング ─── */
-.loading{display:inline-flex;gap:4px;align-items:center;color:var(--t3);font-size:12px;}
+.loading{display:inline-flex;gap:6px;align-items:center;color:var(--t3);font-size:12px;}
 .loading::before{
   content:"";width:12px;height:12px;border:2px solid var(--border);
   border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;
@@ -220,7 +292,8 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
 
 /* ─── 全般 ─── */
 .muted{color:var(--t3);}
-.error{color:var(--red);font-size:11px;padding:8px;background:#3a1818;border-radius:6px;}
+.error{color:var(--red);font-size:11px;padding:8px;background:#3a1818;border-radius:6px;line-height:1.4;}
+.error a{color:#fca5a5;}
 </style>
 </head>
 <body>
@@ -240,7 +313,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
   <div class="sec open" id="secMacro">
     <div class="sec-hdr" onclick="toggleSec('secMacro')">
       <div class="sec-hdr-l">
-        <div class="sec-num" id="numMacro">1</div>
+        <div class="sec-num active" id="numMacro">1</div>
         <div class="sec-title">地合い</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;">
@@ -284,21 +357,75 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 8
     </div>
     <div class="sec-preview" id="previewPlan">②完了後に生成</div>
     <div class="sec-body" id="bodyPlan">
-      <div class="plan-pending">第2段で実装予定（Claude API による計画生成）</div>
+      <div class="plan-empty">②保有銘柄の判定を完了すると、Claude が今日の計画を生成します</div>
     </div>
   </div>
 </main>
 
 <div class="done-btn-wrap">
-  <button class="done-btn" id="doneBtn" disabled>💾 朝会を完了する（第2段で実装）</button>
+  <button class="done-btn" id="doneBtn" disabled onclick="completeSession()">💾 朝会を完了する</button>
+</div>
+
+<!-- ─── 設定モーダル ─── -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">⚙️ 設定</div>
+      <button class="modal-close" onclick="closeSettings()">×</button>
+    </div>
+
+    <div class="modal-sec">
+      <div class="modal-sec-title">🔑 API キー (v1 と共有)</div>
+
+      <label>Claude (Anthropic) API Key</label>
+      <input type="password" id="inpClaudeKey" placeholder="sk-ant-...">
+      <div class="api-status" id="statClaudeKey"></div>
+
+      <label style="margin-top:10px;">Gemini API Key (将来用)</label>
+      <input type="password" id="inpGeminiKey" placeholder="AIzaSy...">
+      <div class="api-status" id="statGeminiKey"></div>
+
+      <button class="modal-btn primary" onclick="saveKeys()" style="margin-top:10px;justify-content:center;">
+        💾 API キーを保存
+      </button>
+    </div>
+
+    <div class="modal-sec">
+      <div class="modal-sec-title">📋 朝会履歴</div>
+      <div id="historyList">
+        <div class="loading">読込中...</div>
+      </div>
+    </div>
+
+    <div class="modal-sec">
+      <div class="modal-sec-title">🛠 メンテナンス</div>
+      <button class="modal-btn" onclick="exportHistory()">
+        <span class="ki">📤</span>判定履歴を JSON でエクスポート
+      </button>
+      <button class="modal-btn" onclick="clearCache()">
+        <span class="ki">🔄</span>キャッシュをクリア（再 fetch）
+      </button>
+      <button class="modal-btn danger" onclick="resetTodaySession()">
+        <span class="ki">🗑</span>当日の判定をリセット
+      </button>
+    </div>
+
+    <div class="modal-sec">
+      <div class="modal-sec-title">ℹ️ アプリ情報</div>
+      <div style="font-size:11px;color:var(--t2);line-height:1.6;">
+        <div>バージョン: <b style="color:var(--text);">v0.2</b></div>
+        <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
+        <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.1 (Phase1 Step1)
-//  https://hiroki300.github.io/trade-journal/morning.html
+//  trade-journal morning.html  v0.2 (Phase1 Step2)
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
@@ -310,7 +437,11 @@ const URLS = {
   weekly_results: `${DATA_BASE}/weekly_results.json`,
 };
 
-// ── キャッシュ（fetch 結果を 5 分間メモ） ──
+// ── Anthropic API ──
+const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const CLAUDE_MODEL = "claude-haiku-4-5-20251001";  // 安価で十分な性能
+
+// ── キャッシュ ──
 const CACHE_TTL = 5 * 60 * 1000;
 const cache = new Map();
 async function fetchJSON(url){
@@ -323,26 +454,81 @@ async function fetchJSON(url){
   return data;
 }
 
-// ── localStorage（設定・履歴の軽量保存） ──
+// ── localStorage ──
 const LS = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set: (k, v) => { localStorage.setItem(k, JSON.stringify(v)); },
+  raw: (k) => localStorage.getItem(k),
 };
-
-// ── morning 自身の保存キー（v1 と衝突しない命名） ──
 const K = {
-  judgments:        "tjm_judgments",          // 当日の判定 [{code, name, judgment, ...}]
-  last_seen_macro:  "tjm_last_seen_macro",    // 最後に確認したマクロ変化時刻
-  api_key_claude:   "tj_ck",                  // ★v1 と共有（Claude API key）
-  api_key_gemini:   "tj_gk",                  // ★v1 と共有
-  manual_holdings:  "tjm_manual_holdings",    // v1 にデータが無いときの手動入力
+  judgments:        "tjm_judgments",
+  last_seen_macro:  "tjm_last_seen_macro",
+  manual_holdings:  "tjm_manual_holdings",
+  api_claude:       "tj_ck",
+  api_gemini:       "tj_gk",
+  last_plan:        "tjm_last_plan",
 };
 
-// ── 日付フォーマット ──
-const D = new Date();
-const TODAY = D.toISOString().slice(0,10);
-const WD = ["日","月","火","水","木","金","土"][D.getDay()];
+// ── 日付 ──
+const D_NOW = new Date();
+const TODAY = D_NOW.toISOString().slice(0,10);
+const WD = ["日","月","火","水","木","金","土"][D_NOW.getDay()];
 document.getElementById("hDate").textContent = `${TODAY} (${WD})`;
+
+// ════════════════════════════════════════════════════════════════════
+//  IndexedDB (Dexie 不使用、素の API)
+// ════════════════════════════════════════════════════════════════════
+
+const DB_NAME = "trade-journal-morning";
+const DB_VERSION = 1;
+let _dbPromise = null;
+
+function openDB(){
+  if (_dbPromise) return _dbPromise;
+  _dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("daily_sessions")) {
+        const store = db.createObjectStore("daily_sessions", {keyPath: "id", autoIncrement: true});
+        store.createIndex("date", "date", {unique: false});
+      }
+    };
+  });
+  return _dbPromise;
+}
+
+async function dbAdd(storeName, value){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).add(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbAll(storeName){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readonly");
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDeleteAll(storeName){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  ユーティリティ
@@ -353,7 +539,7 @@ function toast(msg){
   t.textContent = msg;
   t.classList.add("on");
   clearTimeout(toast._tm);
-  toast._tm = setTimeout(()=>t.classList.remove("on"), 2200);
+  toast._tm = setTimeout(()=>t.classList.remove("on"), 2500);
 }
 
 function fmt(n, decimals=0){
@@ -364,16 +550,60 @@ function fmt(n, decimals=0){
   });
 }
 
-function toggleSec(id){
-  document.getElementById(id).classList.toggle("open");
-}
+function toggleSec(id){ document.getElementById(id).classList.toggle("open"); }
 
-// 4桁コード → 5桁コード（latest_prices.json は 5桁形式）
 function code4to5(cd){
   const s = String(cd).trim();
   if (s.length === 5) return s;
   if (s.length === 4 && /^[\dA-Za-z]+$/.test(s)) return s + "0";
   return s;
+}
+
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PWA: manifest を inline 埋め込み
+// ════════════════════════════════════════════════════════════════════
+
+(function setupPWA(){
+  const manifest = {
+    name: "朝会 - Trade Journal",
+    short_name: "朝会",
+    description: "朝の意思決定支援アプリ",
+    start_url: "morning.html",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: "#0b0f18",
+    theme_color: "#0b0f18",
+    icons: [
+      {src: "icon-192.png", sizes: "192x192", type: "image/png"},
+      {src: "icon-512.png", sizes: "512x512", type: "image/png"},
+    ],
+  };
+  const blob = new Blob([JSON.stringify(manifest)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  document.getElementById("pwaManifest").href = url;
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  グローバル状態
+// ════════════════════════════════════════════════════════════════════
+
+let HOLDINGS = [];
+let PRICES = {};
+let MACRO = null;
+let JUDGMENTS = LS.get(K.judgments, {_date: TODAY});
+let PLAN_TEXT = "";
+let SESSION_COMPLETED = false;
+
+// 日跨ぎでリセット
+if (JUDGMENTS._date !== TODAY) {
+  JUDGMENTS = {_date: TODAY};
+  LS.set(K.judgments, JUDGMENTS);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -390,57 +620,56 @@ const REGIME_INFO = {
 async function loadMacro(){
   try {
     const macro = await fetchJSON(URLS.macro_state);
+    MACRO = macro;
     const info = REGIME_INFO[macro.regime] || REGIME_INFO.normal;
 
-    // ヘッダーバッジ
     const badge = document.getElementById("badgeMacro");
     badge.className = "sec-badge done";
     badge.textContent = `${info.icon} ${info.name}`;
 
-    // セクション完了マーク
-    document.getElementById("numMacro").classList.add("done");
-    document.getElementById("numMacro").textContent = "✓";
+    const num = document.getElementById("numMacro");
+    num.classList.remove("active");
+    num.classList.add("done");
+    num.textContent = "✓";
 
-    // プレビュー（折りたたみ時）
     document.getElementById("previewMacro").innerHTML =
       `${info.icon} ${info.label} / HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}%`;
 
-    // 本体
     document.getElementById("bodyMacro").innerHTML = `
       <div class="regime-card">
         <div class="regime-icon">${info.icon}</div>
         <div class="regime-info">
           <div class="regime-name ${macro.regime}">${info.name}</div>
           <div class="regime-meta">
-            日経HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}% / ${macro.trend || "-"}
+            日経HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}% / ${escapeHtml(macro.trend || "-")}
           </div>
         </div>
       </div>
       <div class="regime-advice ${info.level}">
-        💡 ${info.advice}
+        💡 ${escapeHtml(info.advice)}
       </div>
       ${macro.reasons && macro.reasons.length ? `
         <div style="font-size:11px;color:var(--t3);margin-top:8px;line-height:1.5;">
-          ${macro.reasons.map(r => `・${r}`).join("<br>")}
+          ${macro.reasons.map(r => `・${escapeHtml(r)}`).join("<br>")}
         </div>
       ` : ""}
       <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:right;">
-        評価: ${macro.evaluated_at || "-"}
+        評価: ${escapeHtml(macro.evaluated_at || "-")}
       </div>
     `;
 
-    // ②に自動移行
     setTimeout(() => {
       document.getElementById("secMacro").classList.remove("open");
       document.getElementById("secHoldings").classList.add("open");
+      document.getElementById("numHoldings").classList.add("active");
     }, 400);
 
     return macro;
   } catch(e) {
     document.getElementById("bodyMacro").innerHTML =
-      `<div class="error">マクロ状態の取得に失敗: ${e.message}<br>
-       stock-checker の Stock Checker → daily_submit が走るのを待つか、
-       <a href="${URLS.macro_state}" target="_blank" style="color:var(--acc)">直接URL</a> を確認してください。</div>`;
+      `<div class="error">マクロ状態の取得に失敗: ${escapeHtml(e.message)}<br>
+       <a href="${URLS.macro_state}" target="_blank">直接URL</a> を確認してください。</div>`;
+    document.getElementById("badgeMacro").className = "sec-badge error";
     document.getElementById("badgeMacro").textContent = "❌";
     return null;
   }
@@ -476,7 +705,6 @@ async function loadMacroAlert(){
     );
     if (newChanges.length === 0) return;
 
-    // 直近の変化を表示
     const latest = newChanges[newChanges.length - 1];
     const key = `${latest.from}->${latest.regime}`;
     const advice = REGIME_ADVICE_TRANSITION[key] || {
@@ -492,8 +720,8 @@ async function loadMacroAlert(){
       <div class="macro-alert ${advice.level}">
         <div class="a-icon">${advice.icon}</div>
         <div class="a-body">
-          <div class="a-title">${advice.title}</div>
-          <div class="a-text">${advice.text}</div>
+          <div class="a-title">${escapeHtml(advice.title)}</div>
+          <div class="a-text">${escapeHtml(advice.text)}</div>
           <div class="a-text" style="font-size:10px;margin-top:4px;opacity:.7;">変化: ${dtStr}</div>
           <button class="a-dismiss" onclick="dismissAlert()">理解した</button>
         </div>
@@ -514,32 +742,16 @@ function dismissAlert(){
 //  ② 保有銘柄
 // ════════════════════════════════════════════════════════════════════
 
-let HOLDINGS = [];   // 表示中の保有銘柄リスト
-let PRICES = {};     // latest_prices.json の中身
-let JUDGMENTS = LS.get(K.judgments, {});  // {code: {judgment, ...}}
-
-// 当日の判定だけを保持（日付が変わったらリセット）
-if (JUDGMENTS._date !== TODAY) {
-  JUDGMENTS = {_date: TODAY};
-  LS.set(K.judgments, JUDGMENTS);
-}
-
 async function loadHoldings(){
-  // ── データソースの優先順位 ──
-  //   1. v1 (localStorage["tj_h5"]) - 同一オリジンなので読める
-  //   2. morning 自身の手動入力 (localStorage["tjm_manual_holdings"])
-  //   どちらも空なら空表示 + 手動入力フォーム
   let v1Data = [];
   try {
-    const raw = localStorage.getItem("tj_h5");
+    const raw = LS.raw("tj_h5");
     if (raw) v1Data = JSON.parse(raw) || [];
   } catch(e) {
     console.warn("v1 holdings parse error:", e);
   }
 
   const manualData = LS.get(K.manual_holdings, []);
-
-  // 統合（v1 優先、ただし同コードがあれば v1 を使う）
   const seen = new Set();
   HOLDINGS = [];
   for (const h of v1Data) {
@@ -547,14 +759,9 @@ async function loadHoldings(){
     if (seen.has(h.cd)) continue;
     seen.add(h.cd);
     HOLDINGS.push({
-      code: h.cd,
-      name: h.nm || h.name || `(${h.cd})`,
-      buy_price: h.bp,
-      shares: h.sh,
-      stop_loss: h.sl,
-      target: h.tgt,
-      type: h.type || "spot",
-      source: "v1",
+      code: h.cd, name: h.nm || h.name || `(${h.cd})`,
+      buy_price: h.bp, shares: h.sh, stop_loss: h.sl, target: h.tgt,
+      type: h.type || "spot", source: "v1",
     });
   }
   for (const h of manualData) {
@@ -564,7 +771,6 @@ async function loadHoldings(){
     HOLDINGS.push({...h, source: "manual"});
   }
 
-  // 価格データを取得
   try {
     PRICES = await fetchJSON(URLS.latest_prices);
   } catch(e) {
@@ -576,7 +782,6 @@ async function loadHoldings(){
 }
 
 function getPrice(code){
-  // 4桁→5桁変換を試す
   const c5 = code4to5(code);
   return PRICES[c5] || PRICES[code] || null;
 }
@@ -587,42 +792,38 @@ function renderHoldings(){
   const judged = HOLDINGS.filter(h => JUDGMENTS[h.code]).length;
   const allFromV1 = HOLDINGS.length > 0 && HOLDINGS.every(h => h.source === "v1");
 
-  // バッジ更新
   const badge = document.getElementById("badgeHoldings");
   if (total === 0) {
-    badge.className = "sec-badge";
-    badge.textContent = "0件";
+    badge.className = "sec-badge"; badge.textContent = "0件";
   } else if (judged === total) {
     badge.className = "sec-badge done";
     badge.textContent = `✓ ${judged}/${total}`;
+    document.getElementById("numHoldings").classList.remove("active");
     document.getElementById("numHoldings").classList.add("done");
     document.getElementById("numHoldings").textContent = "✓";
   } else {
     badge.className = "sec-badge active";
     badge.textContent = `${judged}/${total}`;
+    document.getElementById("numHoldings").classList.add("active");
     document.getElementById("numHoldings").classList.remove("done");
     document.getElementById("numHoldings").textContent = "2";
   }
 
-  // プレビュー
   document.getElementById("previewHoldings").textContent =
     total === 0 ? "保有銘柄なし" : `${total}銘柄 / 判定済 ${judged}`;
 
-  // 本体
   let html = "";
 
-  // ソース表示
   if (HOLDINGS.length > 0) {
     html += `
       <div class="h-source-note">
         ${allFromV1 ? "📦 v1 の保有データから自動取得" :
           HOLDINGS.some(h => h.source === "v1") ? "📦 v1 + 手動入力" : "✏️ 手動入力"}
-        <button onclick="syncFromV1()" style="margin-left:auto;background:var(--s2);border:1px solid var(--border);color:var(--t2);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;">🔄 再読込</button>
+        <button onclick="syncFromV1()" style="margin-left:auto;">🔄 再読込</button>
       </div>
     `;
   }
 
-  // 銘柄カード
   if (HOLDINGS.length === 0) {
     html += `
       <div class="empty">
@@ -632,10 +833,9 @@ function renderHoldings(){
       </div>
     `;
   } else {
-    html += HOLDINGS.map(h => renderHoldingCard(h)).join("");
+    html += HOLDINGS.map(renderHoldingCard).join("");
   }
 
-  // 手動入力フォーム
   html += `
     <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px;">
       <div style="font-size:11px;color:var(--t3);margin-bottom:6px;">＋ 朝会だけ追加（v1 には反映されません）</div>
@@ -661,40 +861,34 @@ function renderHoldingCard(h){
      <div class="h-chg ${price.change_pct >= 0 ? 'up' : 'dn'}">
        ${price.change_pct >= 0 ? '+' : ''}${fmt(price.change_pct, 2)}%
      </div>` :
-    `<div class="h-cur muted">-</div>
-     <div class="h-chg muted">価格不明</div>`;
+    `<div class="h-cur muted">-</div><div class="h-chg muted">価格不明</div>`;
 
-  // 損益
-  let pnlHtml = "";
+  let pnlHtml = `<div class="h-meta-val muted">-</div>`;
   if (price && h.buy_price) {
     const pnlPct = (price.close / h.buy_price - 1) * 100;
     pnlHtml = `<div class="h-meta-val ${pnlPct >= 0 ? 'up' : 'dn'}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 1)}%</div>`;
-  } else {
-    pnlHtml = `<div class="h-meta-val muted">-</div>`;
   }
 
-  // 損切まで・目標まで
   let slPctHtml = "-", tgtPctHtml = "-";
-  if (price && h.stop_loss) {
-    const slDist = (price.close / h.stop_loss - 1) * 100;
-    slPctHtml = `${fmt(h.stop_loss, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(slDist,1)}%</span>`;
-  } else if (h.stop_loss) {
-    slPctHtml = `${fmt(h.stop_loss, 0)}`;
+  if (h.stop_loss) {
+    if (price) {
+      const slDist = (price.close / h.stop_loss - 1) * 100;
+      slPctHtml = `${fmt(h.stop_loss, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(slDist,1)}%</span>`;
+    } else slPctHtml = `${fmt(h.stop_loss, 0)}`;
   }
-  if (price && h.target) {
-    const tgtDist = (h.target / price.close - 1) * 100;
-    tgtPctHtml = `${fmt(h.target, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(tgtDist,1)}%</span>`;
-  } else if (h.target) {
-    tgtPctHtml = `${fmt(h.target, 0)}`;
+  if (h.target) {
+    if (price) {
+      const tgtDist = (h.target / price.close - 1) * 100;
+      tgtPctHtml = `${fmt(h.target, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(tgtDist,1)}%</span>`;
+    } else tgtPctHtml = `${fmt(h.target, 0)}`;
   }
 
-  // 判定ボタン
   let judgeHtml;
   if (judged) {
     const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
     const icons  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰"};
     judgeHtml = `
-      <div class="h-judged-banner" onclick="resetJudgment('${h.code}')">
+      <div class="h-judged-banner" onclick="resetJudgment('${escapeHtml(h.code)}')">
         ${icons[judged.judgment]} 判定: <b>${labels[judged.judgment]}</b>
         <span class="change-link">変更</span>
       </div>
@@ -702,13 +896,13 @@ function renderHoldingCard(h){
   } else {
     judgeHtml = `
       <div class="h-judge-btns">
-        <button class="j-btn" onclick="setJudgment('${h.code}','hold')">
+        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','hold')">
           <span class="ji">✋</span>継続保有
         </button>
-        <button class="j-btn" onclick="setJudgment('${h.code}','consider_cut')">
+        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','consider_cut')">
           <span class="ji">⛔</span>損切検討
         </button>
-        <button class="j-btn" onclick="setJudgment('${h.code}','consider_sell')">
+        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','consider_sell')">
           <span class="ji">💰</span>利確検討
         </button>
       </div>
@@ -716,11 +910,11 @@ function renderHoldingCard(h){
   }
 
   return `
-    <div class="h-card ${judged ? 'judged' : ''}" id="card-${h.code}">
+    <div class="h-card ${judged ? 'judged' : ''}" id="card-${escapeHtml(h.code)}">
       <div class="h-card-top">
         <div class="h-code-name">
           <div class="h-code">${code5} ${h.type === 'margin' ? '<span style="color:var(--yellow)">[信用]</span>' : ''}</div>
-          <div class="h-name">${h.name}</div>
+          <div class="h-name">${escapeHtml(h.name)}</div>
         </div>
         <div class="h-price">${curHtml}</div>
       </div>
@@ -744,23 +938,22 @@ function renderHoldingCard(h){
   `;
 }
 
-// ── 判定操作 ──
 function setJudgment(code, judgment){
   const h = HOLDINGS.find(x => x.code === code);
   if (!h) return;
   const price = getPrice(code);
 
   JUDGMENTS[code] = {
-    code,
-    name: h.name,
-    judgment,
+    code, name: h.name, judgment,
     price_at_judgment: price?.close ?? null,
+    change_pct: price?.change_pct ?? null,
+    buy_price: h.buy_price ?? null,
     stop_loss: h.stop_loss ?? null,
     target: h.target ?? null,
+    type: h.type ?? null,
     judged_at: new Date().toISOString(),
   };
   LS.set(K.judgments, JUDGMENTS);
-
   renderHoldings();
 
   // 次の未判定銘柄へスクロール
@@ -770,11 +963,13 @@ function setJudgment(code, judgment){
       const el = document.getElementById(`card-${next.code}`);
       if (el) el.scrollIntoView({behavior: "smooth", block: "center"});
     } else {
-      // 全銘柄判定完了 → ③に自動移行
+      // 全銘柄判定完了 → ③に自動移行 + 計画生成準備
       setTimeout(() => {
         document.getElementById("secHoldings").classList.remove("open");
         document.getElementById("secPlan").classList.add("open");
+        document.getElementById("numPlan").classList.add("active");
         toast("✅ 全銘柄判定完了！");
+        renderPlanInitial();
       }, 300);
     }
   }, 100);
@@ -786,42 +981,388 @@ function resetJudgment(code){
   renderHoldings();
 }
 
-// ── 手動入力 ──
 function addManualHolding(){
   const code = document.getElementById("addCode").value.trim();
   const name = document.getElementById("addName").value.trim();
   const stop = parseFloat(document.getElementById("addStop").value) || null;
-  if (!code || !name) {
-    toast("⚠️ コードと銘柄名は必須");
-    return;
-  }
+  if (!code || !name) { toast("⚠️ コードと銘柄名は必須"); return; }
   const list = LS.get(K.manual_holdings, []);
-  if (list.some(h => h.code === code)) {
-    toast("⚠️ 既に追加済み");
-    return;
-  }
+  if (list.some(h => h.code === code)) { toast("⚠️ 既に追加済み"); return; }
   list.push({code, name, stop_loss: stop, type: "spot"});
   LS.set(K.manual_holdings, list);
   toast(`✅ ${name} を追加`);
   loadHoldings();
 }
 
-// ── v1 から再読込 ──
 function syncFromV1(){
-  cache.delete(URLS.latest_prices);  // 価格も再取得
+  cache.delete(URLS.latest_prices);
   loadHoldings();
   toast("🔄 再読込完了");
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  設定（第2段で本実装、いまはスタブ）
+//  ③ 計画生成 (Claude API)
 // ════════════════════════════════════════════════════════════════════
 
-document.getElementById("settingsBtn").onclick = () => {
-  alert("⚙️ 設定画面は第2段で実装予定です。\n\n" +
-        "現在: マクロ表示 + 保有銘柄取得 + 判定保存 のみ\n" +
-        "次: ③計画生成（Claude API）+ 設定モーダル");
+function renderPlanInitial(){
+  // 既に生成済みの計画があれば表示
+  const cached = LS.get(K.last_plan, null);
+  if (cached && cached.date === TODAY && cached.text) {
+    PLAN_TEXT = cached.text;
+    showPlan(cached.text, cached.generated_at);
+    return;
+  }
+
+  document.getElementById("bodyPlan").innerHTML = `
+    <button class="plan-gen-btn" onclick="generatePlan()">
+      🧠 Claude で今日の計画を生成
+    </button>
+    <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:center;">
+      モデル: ${CLAUDE_MODEL}<br>
+      コスト目安: 1回あたり 約1〜2円
+    </div>
+  `;
+  document.getElementById("badgePlan").textContent = "未生成";
+  document.getElementById("badgePlan").className = "sec-badge active";
+  document.getElementById("doneBtn").disabled = true;
+}
+
+async function generatePlan(){
+  const apiKey = LS.raw(K.api_claude);
+  if (!apiKey || !apiKey.trim()) {
+    document.getElementById("bodyPlan").innerHTML = `
+      <div class="plan-error">
+        ⚠️ Claude API キーが未設定です<br>
+        画面右上の <b>⚙️ 設定</b> から登録してください。
+      </div>
+      <button class="plan-gen-btn" onclick="openSettings()" style="margin-top:10px;">
+        ⚙️ 設定を開く
+      </button>
+    `;
+    return;
+  }
+
+  // ローディング
+  document.getElementById("bodyPlan").innerHTML = `
+    <div class="loading" style="padding:24px 12px;justify-content:center;">
+      Claude が今日の方針を考えています...
+    </div>
+  `;
+
+  try {
+    const prompt = buildPlanPrompt();
+    const text = await callClaude(apiKey, prompt);
+    PLAN_TEXT = text;
+
+    // localStorage キャッシュ
+    LS.set(K.last_plan, {
+      date: TODAY,
+      text,
+      generated_at: new Date().toISOString(),
+    });
+
+    showPlan(text, new Date().toISOString());
+  } catch(e) {
+    console.error("plan generation failed:", e);
+    document.getElementById("bodyPlan").innerHTML = `
+      <div class="plan-error">
+        ⚠️ 計画生成に失敗しました<br>
+        ${escapeHtml(e.message)}
+      </div>
+      <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:10px;">
+        🔄 再試行
+      </button>
+    `;
+    document.getElementById("badgePlan").textContent = "❌";
+    document.getElementById("badgePlan").className = "sec-badge error";
+  }
+}
+
+function showPlan(text, generatedAt){
+  const dt = new Date(generatedAt);
+  const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  document.getElementById("bodyPlan").innerHTML = `
+    <div class="plan-text">${escapeHtml(text)}</div>
+    <div class="plan-meta">🧠 ${CLAUDE_MODEL} · ${dtStr}</div>
+    <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:10px;background:var(--s2);color:var(--t2);">
+      🔄 再生成
+    </button>
+  `;
+  document.getElementById("badgePlan").textContent = "✓ 生成済";
+  document.getElementById("badgePlan").className = "sec-badge done";
+  document.getElementById("numPlan").classList.remove("active");
+  document.getElementById("numPlan").classList.add("done");
+  document.getElementById("numPlan").textContent = "✓";
+  document.getElementById("previewPlan").textContent = text.slice(0, 60) + (text.length > 60 ? "..." : "");
+  document.getElementById("doneBtn").disabled = false;
+}
+
+function buildPlanPrompt(){
+  const judgmentsList = HOLDINGS.map(h => {
+    const j = JUDGMENTS[h.code];
+    if (!j) return null;
+    const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
+    const code5 = code4to5(h.code);
+    const price = getPrice(h.code);
+    const pnlPct = (price && h.buy_price) ? ((price.close / h.buy_price - 1) * 100).toFixed(1) : null;
+    return {
+      code: code5, name: h.name, judgment: labels[j.judgment],
+      buy_price: h.buy_price, current: price?.close, pnl_pct: pnlPct,
+      stop_loss: h.stop_loss, target: h.target, type: h.type,
+    };
+  }).filter(Boolean);
+
+  const macroSummary = MACRO ? {
+    regime: MACRO.regime,
+    summary: MACRO.summary,
+    hv_20d: MACRO.hv_20d,
+    ma25_dev: MACRO.ma25_dev,
+    trend: MACRO.trend,
+    reasons: MACRO.reasons,
+  } : null;
+
+  return `あなたはひろき様の専属トレーディング・コーチです。
+スイングトレーダーであるひろき様が朝会で記録した本日の判断を踏まえ、
+**今日一日の具体的な行動計画**を簡潔にアドバイスしてください。
+
+## 📊 マクロ状態
+${macroSummary ? "```json\n" + JSON.stringify(macroSummary, null, 2) + "\n```" : "(データなし)"}
+
+## 💼 保有銘柄と本日の判断
+${judgmentsList.length > 0 ? "```json\n" + JSON.stringify(judgmentsList, null, 2) + "\n```" : "(保有なし)"}
+
+## 📅 日付
+${TODAY} (${WD})
+
+## 🎯 出力フォーマット（必ず守ってください）
+
+# 🌅 今日の方針
+
+(1〜2行でマクロ環境を踏まえた基本スタンス)
+
+## ⚡ 優先アクション
+(本日中にやるべきことを3つまで、優先順に)
+1. ...
+2. ...
+
+## 💼 銘柄別の具体策
+(各保有銘柄について、判断を踏まえた具体的アクション)
+- **[銘柄名]**: ...
+
+## ⚠️ 注意点
+(マクロ・個別銘柄から見て特に気をつけること)
+- ...
+
+## 🚪 撤退ライン
+(どうなったら今日の計画を見直すか)
+- ...
+
+---
+
+【執筆ルール】
+- 全体で 400〜600 字程度に収める
+- マクロ "${macroSummary?.regime}" を必ず考慮（特に STORM/HALT 時はサイズ縮小強調）
+- 「損切検討」「利確検討」と判断した銘柄には、具体的な価格水準で行動指示
+- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
+- 不確実性を避けず、リスクは率直に明示`;
+}
+
+async function callClaude(apiKey, prompt){
+  const r = await fetch(CLAUDE_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 1500,
+      messages: [{role: "user", content: prompt}],
+    }),
+  });
+
+  if (!r.ok) {
+    let errMsg = `HTTP ${r.status}`;
+    try {
+      const err = await r.json();
+      errMsg = err.error?.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = await r.json();
+  const text = data.content?.map(b => b.text || "").join("") || "";
+  if (!text) throw new Error("Claude が空のレスポンスを返しました");
+  return text;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  朝会完了 → IndexedDB に保存
+// ════════════════════════════════════════════════════════════════════
+
+async function completeSession(){
+  if (SESSION_COMPLETED) {
+    toast("✅ 既に保存済み");
+    return;
+  }
+
+  const judgmentsList = HOLDINGS.map(h => JUDGMENTS[h.code]).filter(Boolean);
+  if (judgmentsList.length === 0 && HOLDINGS.length > 0) {
+    toast("⚠️ まだ判定が完了していません");
+    return;
+  }
+
+  const session = {
+    date: TODAY,
+    completed_at: new Date().toISOString(),
+    macro: MACRO ? {
+      regime: MACRO.regime,
+      hv_20d: MACRO.hv_20d,
+      ma25_dev: MACRO.ma25_dev,
+      trend: MACRO.trend,
+      summary: MACRO.summary,
+    } : null,
+    judgments: judgmentsList,
+    plan_text: PLAN_TEXT || null,
+  };
+
+  try {
+    const id = await dbAdd("daily_sessions", session);
+    SESSION_COMPLETED = true;
+    const btn = document.getElementById("doneBtn");
+    btn.classList.add("completed");
+    btn.textContent = "✅ 朝会を保存しました";
+    btn.disabled = true;
+    toast(`💾 保存完了 (ID: ${id})`);
+  } catch(e) {
+    console.error("save session failed:", e);
+    toast("⚠️ 保存失敗: " + e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  設定モーダル
+// ════════════════════════════════════════════════════════════════════
+
+document.getElementById("settingsBtn").onclick = openSettings;
+
+async function openSettings(){
+  // API キー欄に既存値をマスク表示
+  const ck = LS.raw(K.api_claude) || "";
+  const gk = LS.raw(K.api_claude) || "";
+  document.getElementById("inpClaudeKey").value = ck;
+  document.getElementById("inpGeminiKey").value = LS.raw(K.api_gemini) || "";
+
+  document.getElementById("statClaudeKey").textContent = ck ? "✅ 設定済" : "⚠️ 未設定";
+  document.getElementById("statClaudeKey").className = "api-status " + (ck ? "set" : "unset");
+  const gk2 = LS.raw(K.api_gemini) || "";
+  document.getElementById("statGeminiKey").textContent = gk2 ? "✅ 設定済" : "未設定（任意）";
+  document.getElementById("statGeminiKey").className = "api-status " + (gk2 ? "set" : "unset");
+
+  // 履歴を読込
+  await renderHistory();
+
+  document.getElementById("settingsModal").classList.add("on");
+}
+
+function closeSettings(){
+  document.getElementById("settingsModal").classList.remove("on");
+}
+
+document.getElementById("settingsModal").onclick = (e) => {
+  if (e.target.id === "settingsModal") closeSettings();
 };
+
+function saveKeys(){
+  const ck = document.getElementById("inpClaudeKey").value.trim();
+  const gk = document.getElementById("inpGeminiKey").value.trim();
+
+  if (ck) localStorage.setItem(K.api_claude, ck);
+  else localStorage.removeItem(K.api_claude);
+
+  if (gk) localStorage.setItem(K.api_gemini, gk);
+  else localStorage.removeItem(K.api_gemini);
+
+  toast("✅ API キーを保存しました");
+  document.getElementById("statClaudeKey").textContent = ck ? "✅ 設定済" : "⚠️ 未設定";
+  document.getElementById("statClaudeKey").className = "api-status " + (ck ? "set" : "unset");
+}
+
+async function renderHistory(){
+  const wrap = document.getElementById("historyList");
+  try {
+    const sessions = await dbAll("daily_sessions");
+    if (sessions.length === 0) {
+      wrap.innerHTML = `<div style="font-size:11px;color:var(--t3);text-align:center;padding:8px;">まだ履歴がありません</div>`;
+      return;
+    }
+    const recent = sessions.sort((a,b) => b.completed_at.localeCompare(a.completed_at)).slice(0,10);
+    wrap.innerHTML = recent.map(s => {
+      const j = s.judgments || [];
+      const counts = {hold:0, consider_cut:0, consider_sell:0};
+      j.forEach(x => counts[x.judgment] = (counts[x.judgment]||0) + 1);
+      return `
+        <div class="history-item">
+          <div class="hi-date">${s.date} · ${(s.macro?.regime || "?").toUpperCase()}</div>
+          <div class="hi-summary">
+            判定 ${j.length}件: ✋${counts.hold} ⛔${counts.consider_cut} 💰${counts.consider_sell}
+            ${s.plan_text ? '· 🧠計画あり' : ''}
+          </div>
+        </div>
+      `;
+    }).join("");
+  } catch(e) {
+    wrap.innerHTML = `<div class="error">履歴取得エラー: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function exportHistory(){
+  try {
+    const sessions = await dbAll("daily_sessions");
+    const blob = new Blob([JSON.stringify(sessions, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `morning-history-${TODAY}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`✅ ${sessions.length}件をエクスポート`);
+  } catch(e) {
+    toast("⚠️ エクスポート失敗: " + e.message);
+  }
+}
+
+function clearCache(){
+  cache.clear();
+  toast("🔄 キャッシュをクリアしました");
+  closeSettings();
+  // 全部リロード
+  location.reload();
+}
+
+function resetTodaySession(){
+  if (!confirm("当日の判定と計画をリセットしますか？\n（IndexedDB の履歴は消えません）")) return;
+  JUDGMENTS = {_date: TODAY};
+  PLAN_TEXT = "";
+  SESSION_COMPLETED = false;
+  LS.set(K.judgments, JUDGMENTS);
+  localStorage.removeItem(K.last_plan);
+  toast("🗑 当日の判定をリセット");
+  closeSettings();
+  // 再描画
+  renderHoldings();
+  document.getElementById("bodyPlan").innerHTML =
+    `<div class="plan-empty">②保有銘柄の判定を完了すると、Claude が今日の計画を生成します</div>`;
+  document.getElementById("badgePlan").className = "sec-badge";
+  document.getElementById("badgePlan").textContent = "-";
+  document.getElementById("numPlan").classList.remove("done","active");
+  document.getElementById("numPlan").textContent = "3";
+  document.getElementById("doneBtn").disabled = true;
+  document.getElementById("doneBtn").classList.remove("completed");
+  document.getElementById("doneBtn").textContent = "💾 朝会を完了する";
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  起動
@@ -831,6 +1372,11 @@ document.getElementById("settingsBtn").onclick = () => {
   await loadMacroAlert();
   await loadMacro();
   await loadHoldings();
+
+  // 既に当日の全銘柄判定済みなら ③ も初期表示
+  if (HOLDINGS.length > 0 && HOLDINGS.every(h => JUDGMENTS[h.code])) {
+    renderPlanInitial();
+  }
 })();
 </script>
 
