@@ -427,6 +427,42 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;
 }
 .watch-toggle input{width:auto;}
+
+/* ─── 月次Claude分析 (v0.6) ─── */
+.ma-card{
+  background:var(--s2);border-radius:8px;padding:12px;border-left:3px solid var(--purple);
+}
+.ma-loading{
+  text-align:center;padding:18px 12px;color:var(--t3);font-size:12px;
+}
+.ma-empty{
+  text-align:center;padding:18px 12px;color:var(--t3);font-size:11px;line-height:1.5;
+}
+.ma-text{
+  font-size:12px;line-height:1.7;color:var(--text);
+  white-space:pre-wrap;word-wrap:break-word;
+}
+.ma-meta{
+  display:flex;justify-content:space-between;align-items:center;margin-top:10px;
+  padding-top:10px;border-top:1px solid var(--border);
+  font-size:10px;color:var(--t3);font-family:var(--mono);
+}
+.ma-regen-btn{
+  background:transparent;border:1px solid var(--border);color:var(--t2);
+  padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;
+}
+.ma-regen-btn:hover{background:var(--s1);color:var(--text);}
+.ma-regen-btn:disabled{opacity:.4;cursor:not-allowed;}
+.ma-error{
+  background:#3a1818;border:1px solid var(--red);border-radius:6px;
+  padding:8px 10px;color:#fca5a5;font-size:11px;line-height:1.5;
+}
+.ma-gen-btn{
+  width:100%;padding:10px;background:var(--purple);color:#fff;border:none;
+  border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-top:8px;
+}
+.ma-gen-btn:hover{opacity:.9;}
+.ma-gen-btn:disabled{opacity:.5;cursor:not-allowed;}
 </style>
 </head>
 <body>
@@ -565,7 +601,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.5</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.6</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -593,7 +629,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.5 (Phase2 Step4 - 指値ウォッチ連携)
+//  trade-journal morning.html  v0.6 (Phase2 Step5 - 月次Claude分析)
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
@@ -637,6 +673,7 @@ const K = {
   api_gemini:       "tj_gk",
   last_plan:        "tjm_last_plan",
   watch_settings:   "tjm_watch_settings",  // v0.5: 指値ウォッチの設定
+  monthly_analysis: "tjm_monthly_analysis", // v0.6: 月次Claude分析キャッシュ
 };
 
 // v0.5: 指値ウォッチのデフォルト設定
@@ -1914,6 +1951,223 @@ function aggregateReview(sessions, periodDays){
 // レビューモーダル制御
 let _reviewCurrentPeriod = 30;
 
+// ── 月次Claude分析 (v0.6) ──
+const MONTHLY_MIN_JUDGMENTS = 5;          // この件数未満なら分析しない
+const MONTHLY_CACHE_MAX_MONTHS = 3;       // localStorage に保持する月数
+
+function currentYearMonth(){
+  return TODAY.slice(0, 7);  // "2026-04"
+}
+
+function getMonthlyAnalysisCache(){
+  return LS.get(K.monthly_analysis, {});
+}
+
+function saveMonthlyAnalysisCache(yearMonth, data){
+  const cache = getMonthlyAnalysisCache();
+  cache[yearMonth] = data;
+  // 古い月を削除
+  const months = Object.keys(cache).sort().reverse();
+  if (months.length > MONTHLY_CACHE_MAX_MONTHS) {
+    for (const m of months.slice(MONTHLY_CACHE_MAX_MONTHS)) {
+      delete cache[m];
+    }
+  }
+  LS.set(K.monthly_analysis, cache);
+}
+
+function buildMonthlyAnalysisPrompt(stats){
+  const evaluatedJudgments = stats.all
+    .filter(j => j.outcome)
+    .slice(0, 15);
+
+  const judgmentLines = evaluatedJudgments.map(j => {
+    const judgeLabel = JUDGE_LABELS[j.judgment] || j.judgment;
+    const score = j.outcome_score != null
+      ? (j.outcome_score >= 0 ? '+' : '') + j.outcome_score.toFixed(1) + '%'
+      : '-';
+    return `- ${j._date} ${code4to5(j.code)} ${j.name || ''} → ${judgeLabel} → ${score} (${j.outcome})`;
+  }).join("\n");
+
+  const correctPct = stats.evaluated > 0 ? Math.round(stats.correct_rate * 100) : 0;
+  const ym = currentYearMonth();
+
+  return `あなたは日本株スイングトレーダーであるひろき様の専属コーチです。
+過去30日のトレード判定データを分析し、傾向と来月のアドバイスを提示してください。
+
+## 📊 判定統計
+- 評価済み判定数: ${stats.evaluated}件
+- 正解率: ${correctPct}% (${stats.counts.correct}/${stats.evaluated})
+- 「手放した」(too_early): ${stats.counts.too_early}件
+- 「抱えた」(wrong + caution, hold判定): ${stats.held_wrong.length}件
+- 中立: ${stats.counts.neutral}件
+- 平均outcome_score: ${stats.avg_score >= 0 ? '+' : ''}${stats.avg_score.toFixed(1)}%
+
+## 📋 個別判定（直近順、最大15件）
+${judgmentLines || "(なし)"}
+
+## 🎯 出力フォーマット（必ず守ってください）
+
+# 📊 ${ym} の傾向
+
+(2〜3行で全体的な傾向の要約)
+
+## 💪 強み
+(データから読み取れる得意パターンを1〜2点)
+
+## ⚠️ 注意点
+(データから読み取れる弱点・気をつけるべきパターンを1〜2点)
+
+## 🎯 来月への提案
+(具体的なアクション提案を1点)
+
+---
+
+【執筆ルール】
+- 全体で 300〜450 字程度
+- データの数字を必ず根拠として引用する
+- 抽象論でなく、具体的な改善提案を1つ
+- too_early が多いなら「利確/損切判断が早すぎる」、wrong/cautionが多いなら「ホールド判断の精度」など、傾向に応じた指摘
+- ひろき様への口調は丁寧、励ましつつも率直に`;
+}
+
+async function generateMonthlyAnalysis(stats, force=false){
+  const ym = currentYearMonth();
+  const cache = getMonthlyAnalysisCache();
+
+  if (!force && cache[ym]) {
+    return {cached: true, ...cache[ym]};
+  }
+
+  if (stats.evaluated < MONTHLY_MIN_JUDGMENTS) {
+    return {
+      insufficient: true,
+      message: `評価済み判定が${stats.evaluated}件です（最低${MONTHLY_MIN_JUDGMENTS}件必要）。判定後${EVAL_DAYS}日経過したものが評価対象です。`,
+    };
+  }
+
+  const apiKey = LS.raw(K.api_claude);
+  if (!apiKey || !apiKey.trim()) {
+    return {
+      no_api_key: true,
+      message: "Claude API キーが未設定です。設定モーダル（⚙️）から登録してください。",
+    };
+  }
+
+  try {
+    const prompt = buildMonthlyAnalysisPrompt(stats);
+    const r = await fetch(CLAUDE_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 800,
+        messages: [{role: "user", content: prompt}],
+      }),
+    });
+    if (!r.ok) {
+      let errMsg = `HTTP ${r.status}`;
+      try {
+        const err = await r.json();
+        errMsg = err.error?.message || errMsg;
+      } catch {}
+      throw new Error(errMsg);
+    }
+    const data = await r.json();
+    const text = data.content?.map(b => b.text || "").join("") || "";
+    if (!text) throw new Error("Claude が空のレスポンスを返しました");
+
+    const result = {
+      text,
+      generated_at: new Date().toISOString(),
+      judgment_count: stats.evaluated,
+    };
+    saveMonthlyAnalysisCache(ym, result);
+    return {cached: false, ...result};
+  } catch(e) {
+    console.error("[monthly] generation failed:", e);
+    return {error: e.message};
+  }
+}
+
+function renderMonthlyAnalysisSection(stats){
+  const ym = currentYearMonth();
+  const cache = getMonthlyAnalysisCache();
+
+  if (cache[ym]) {
+    return renderMonthlyAnalysisResult({cached: true, ...cache[ym]});
+  }
+
+  if (stats.evaluated < MONTHLY_MIN_JUDGMENTS) {
+    return `<div class="ma-card">
+      <div class="ma-empty">
+        評価済み判定が <b>${stats.evaluated}件</b> です。<br>
+        最低 ${MONTHLY_MIN_JUDGMENTS}件 必要（判定後${EVAL_DAYS}日経過分）。
+      </div>
+    </div>`;
+  }
+
+  const apiKey = LS.raw(K.api_claude);
+  if (!apiKey || !apiKey.trim()) {
+    return `<div class="ma-card">
+      <div class="ma-empty">
+        Claude API キー未設定です。<br>
+        設定モーダル（⚙️）から登録してください。
+      </div>
+    </div>`;
+  }
+
+  return `<div class="ma-card">
+    <div class="ma-empty">
+      ${stats.evaluated}件の評価データが揃っています。<br>
+      Claude による傾向分析を生成できます。
+    </div>
+    <button class="ma-gen-btn" onclick="triggerMonthlyAnalysis()">
+      🧠 ${currentYearMonth()} の分析を生成
+    </button>
+  </div>`;
+}
+
+function renderMonthlyAnalysisResult(result){
+  if (result.error) {
+    return `<div class="ma-card">
+      <div class="ma-error">⚠️ 生成失敗: ${escapeHtml(result.error)}</div>
+      <button class="ma-gen-btn" onclick="triggerMonthlyAnalysis(true)">🔄 再試行</button>
+    </div>`;
+  }
+
+  const dt = result.generated_at ? new Date(result.generated_at) : null;
+  const dtStr = dt
+    ? `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`
+    : "-";
+
+  return `<div class="ma-card">
+    <div class="ma-text">${escapeHtml(result.text)}</div>
+    <div class="ma-meta">
+      <span>🧠 ${escapeHtml(CLAUDE_MODEL.split('-').slice(0,3).join('-'))} · ${result.judgment_count || '?'}件分析</span>
+      <button class="ma-regen-btn" onclick="triggerMonthlyAnalysis(true)" title="再生成">
+        🔄 ${dtStr}
+      </button>
+    </div>
+  </div>`;
+}
+
+async function triggerMonthlyAnalysis(force=false){
+  const sec = document.getElementById("monthlyAnalysisSection");
+  if (!sec) return;
+  sec.innerHTML = `<div class="ma-card"><div class="ma-loading"><span class="loading">Claude が分析中...</span></div></div>`;
+
+  const sessions = await dbAll("daily_sessions");
+  const stats = aggregateReview(sessions, _reviewCurrentPeriod);
+  const result = await generateMonthlyAnalysis(stats, force);
+  sec.innerHTML = renderMonthlyAnalysisResult(result);
+}
+
 async function openReviewModal(){
   document.getElementById("reviewModal").classList.add("on");
   await refreshReviewModal();
@@ -2046,14 +2300,11 @@ function renderReviewBody(stats){
     </div>
   `;
 
-  // 月次 Claude 分析（v0.6 で追加予定のプレースホルダ）
+  // 月次 Claude 分析（v0.6 で実装）
   const monthlyHtml = `
     <div class="modal-sec">
-      <div class="modal-sec-title">🧠 月次 Claude 分析</div>
-      <div style="background:var(--s2);border-radius:6px;padding:12px;font-size:11px;color:var(--t3);text-align:center;">
-        v0.6 で実装予定<br>
-        <span style="font-size:10px;">判定データを Claude が分析し、傾向とアドバイスを生成します</span>
-      </div>
+      <div class="modal-sec-title">🧠 月次 Claude 分析（${currentYearMonth()}）</div>
+      <div id="monthlyAnalysisSection">${renderMonthlyAnalysisSection(stats)}</div>
     </div>
   `;
 
