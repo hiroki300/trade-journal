@@ -294,6 +294,139 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 .muted{color:var(--t3);}
 .error{color:var(--red);font-size:11px;padding:8px;background:#3a1818;border-radius:6px;line-height:1.4;}
 .error a{color:#fca5a5;}
+
+/* ─── 判断レビュー (v0.4) ─── */
+.period-tabs{
+  display:flex;gap:6px;margin-bottom:14px;
+}
+.ptab{
+  flex:1;background:var(--s2);border:1px solid var(--border);
+  color:var(--t2);padding:8px;border-radius:6px;font-size:11px;
+  font-weight:700;cursor:pointer;transition:all .15s;
+}
+.ptab.active{background:var(--acc);color:#fff;border-color:var(--acc);}
+
+.pattern-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+}
+@media(max-width:380px){
+  .pattern-grid{grid-template-columns:1fr;}
+}
+.pattern-card{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:8px;padding:10px;
+}
+.pattern-card.too-early{border-left:3px solid var(--yellow);}
+.pattern-card.held-wrong{border-left:3px solid var(--red);}
+.pat-hdr{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+.pat-icon{font-size:16px;line-height:1;}
+.pat-title{font-size:12px;font-weight:700;}
+.pat-stat{margin-bottom:8px;}
+.pat-num{font-size:22px;font-weight:700;font-family:var(--mono);line-height:1;color:var(--text);}
+.pat-num span{font-size:11px;font-weight:400;color:var(--t3);margin-left:2px;}
+.pat-avg{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:3px;}
+.pat-avg.up{color:var(--green);}
+.pat-avg.dn{color:var(--red);}
+.pat-empty{font-size:11px;color:var(--t3);text-align:center;padding:8px 0;}
+.pat-list{display:flex;flex-direction:column;gap:4px;}
+.pat-row{
+  display:flex;align-items:center;gap:6px;font-size:10px;
+  padding:5px 6px;background:var(--s1);border-radius:4px;
+}
+.pr-code{font-family:var(--mono);color:var(--t3);min-width:42px;flex-shrink:0;}
+.pr-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
+.pr-score{font-family:var(--mono);font-weight:700;flex-shrink:0;}
+.pr-score.up{color:var(--green);}
+.pr-score.dn{color:var(--red);}
+
+.summary-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+}
+.sum-item{
+  background:var(--s2);border-radius:6px;padding:10px 8px;text-align:center;
+}
+.sum-lbl{font-size:10px;color:var(--t3);margin-bottom:5px;}
+.sum-val{font-size:18px;font-weight:700;font-family:var(--mono);line-height:1;color:var(--text);}
+.sum-val span{font-size:10px;color:var(--t3);font-weight:400;margin-left:1px;}
+.sum-val.up{color:var(--green);}
+.sum-val.dn{color:var(--red);}
+
+.judg-list{display:flex;flex-direction:column;gap:3px;max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.judg-row{
+  display:grid;grid-template-columns:42px 50px 22px 22px 1fr;gap:6px;
+  align-items:center;font-size:11px;padding:7px 8px;background:var(--s2);border-radius:4px;
+}
+.jr-date{font-family:var(--mono);color:var(--t3);}
+.jr-code{font-family:var(--mono);color:var(--text);}
+.jr-judge,.jr-out{text-align:center;font-size:13px;line-height:1;}
+.jr-score{font-family:var(--mono);font-weight:700;text-align:right;}
+.jr-score.up{color:var(--green);}
+.jr-score.dn{color:var(--red);}
+.jr-score.muted{color:var(--t3);}
+
+.review-pending-note{
+  font-size:10px;color:var(--t3);margin-top:8px;text-align:right;font-family:var(--mono);
+}
+
+.review-hdr-actions{display:flex;gap:4px;align-items:center;}
+.review-hdr-actions .icon-btn{
+  background:transparent;border:none;color:var(--t2);font-size:16px;cursor:pointer;padding:4px 8px;
+}
+.review-hdr-actions .icon-btn:hover{color:var(--text);}
+
+/* ─── 指値ウォッチ (v0.5) ─── */
+.w-card{
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;margin-bottom:8px;
+}
+.w-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;}
+.w-name-row{flex:1;min-width:0;}
+.w-rank{
+  display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;
+  font-family:var(--mono);margin-right:6px;vertical-align:middle;
+}
+.w-rank.s{background:var(--purple);color:#fff;}
+.w-rank.a{background:var(--acc);color:#fff;}
+.w-code{font-family:var(--mono);color:var(--t3);font-size:11px;}
+.w-name{font-size:13px;font-weight:700;line-height:1.2;margin-top:2px;color:var(--text);}
+.w-cur{text-align:right;flex-shrink:0;}
+.w-cur-val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--text);}
+.w-cur-lbl{font-size:9px;color:var(--t3);}
+
+.w-level{
+  display:flex;align-items:center;gap:6px;
+  background:var(--s1);border-radius:6px;padding:6px 8px;font-size:11px;
+}
+.w-level-tag{flex-shrink:0;font-size:11px;}
+.w-level-price{font-family:var(--mono);font-weight:700;color:var(--text);}
+.w-level-dist{
+  margin-left:auto;font-family:var(--mono);font-size:10px;
+  padding:2px 6px;border-radius:4px;background:var(--s2);
+}
+.w-level-dist.close{background:#1a3a2a;color:var(--green);}
+.w-level-dist.very-close{background:#2a3a1a;color:#bef264;font-weight:700;}
+
+.w-meta{
+  display:flex;gap:10px;font-size:10px;color:var(--t3);margin-top:6px;
+  font-family:var(--mono);
+}
+.w-empty{
+  text-align:center;padding:20px 12px;color:var(--t3);font-size:12px;
+}
+
+.watch-settings-row{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;
+}
+.watch-settings-row label{font-size:10px;color:var(--t3);display:block;margin-bottom:3px;}
+.watch-settings-row input,.watch-settings-row select{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  color:var(--text);padding:6px 8px;border-radius:4px;font-size:12px;font-family:var(--mono);
+}
+.watch-toggle{
+  display:flex;align-items:center;gap:8px;padding:8px;background:var(--s2);
+  border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;
+}
+.watch-toggle input{width:auto;}
 </style>
 </head>
 <body>
@@ -303,7 +436,10 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="h-title">🌅 <span>朝会</span></div>
     <div class="h-date" id="hDate"></div>
   </div>
-  <button class="h-btn" id="settingsBtn" title="設定">⚙️</button>
+  <div style="display:flex;gap:0;align-items:center;">
+    <button class="h-btn" id="reviewBtn" title="判断レビュー">📊</button>
+    <button class="h-btn" id="settingsBtn" title="設定">⚙️</button>
+  </div>
 </header>
 
 <main>
@@ -341,6 +477,22 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     </div>
     <div class="sec-preview" id="previewHoldings">①完了後に展開</div>
     <div class="sec-body" id="bodyHoldings"></div>
+  </div>
+
+  <!-- ④ 指値ウォッチ (v0.5) -->
+  <div class="sec" id="secWatch" style="display:none;">
+    <div class="sec-hdr" onclick="toggleSec('secWatch')">
+      <div class="sec-hdr-l">
+        <div class="sec-num">💎</div>
+        <div class="sec-title">指値ウォッチ</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="sec-badge" id="badgeWatch">-</div>
+        <div class="sec-arrow">▼</div>
+      </div>
+    </div>
+    <div class="sec-preview" id="previewWatch">押し目候補なし</div>
+    <div class="sec-body" id="bodyWatch"></div>
   </div>
 
   <!-- ③ 今日の計画 -->
@@ -413,7 +565,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.2</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.5</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -423,18 +575,35 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 <div class="toast" id="toast"></div>
 
+<!-- ─── 判断レビューモーダル (v0.4) ─── -->
+<div class="modal-bg" id="reviewModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">📊 判断レビュー</div>
+      <div class="review-hdr-actions">
+        <button class="icon-btn" onclick="refreshReviewModal()" title="再評価">🔄</button>
+        <button class="modal-close" onclick="closeReviewModal()">×</button>
+      </div>
+    </div>
+    <div id="reviewBody">
+      <div class="loading" style="padding:24px;justify-content:center;">読込中...</div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.2 (Phase1 Step2)
+//  trade-journal morning.html  v0.5 (Phase2 Step4 - 指値ウォッチ連携)
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
 const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-data/main";
 const URLS = {
-  macro_state:    `${DATA_BASE}/macro_state.json`,
-  macro_history:  `${DATA_BASE}/macro_history.json`,
-  latest_prices:  `${DATA_BASE}/latest_prices.json`,
-  weekly_results: `${DATA_BASE}/weekly_results.json`,
+  macro_state:     `${DATA_BASE}/macro_state.json`,
+  macro_history:   `${DATA_BASE}/macro_history.json`,
+  latest_prices:   `${DATA_BASE}/latest_prices.json`,
+  weekly_results:  `${DATA_BASE}/weekly_results.json`,
+  limit_watchlist: `${DATA_BASE}/limit_watchlist.json`,
 };
 
 // ── Anthropic API ──
@@ -467,6 +636,16 @@ const K = {
   api_claude:       "tj_ck",
   api_gemini:       "tj_gk",
   last_plan:        "tjm_last_plan",
+  watch_settings:   "tjm_watch_settings",  // v0.5: 指値ウォッチの設定
+};
+
+// v0.5: 指値ウォッチのデフォルト設定
+const WATCH_DEFAULTS = {
+  enabled: true,
+  max_distance_pct: 5,    // 指値±N%以内なら接近とみなす
+  max_price: 6000,        // 6,000円以下のみ表示
+  min_rank: "A",          // "S" | "A"
+  max_items: 10,          // 表示件数上限
 };
 
 // ── 日付 ──
@@ -505,6 +684,17 @@ async function dbAdd(storeName, value){
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
     const req = tx.objectStore(storeName).add(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// v0.4: 既存レコードの更新用（autoIncrement keyPath "id" を保持して put）
+async function dbPut(storeName, value){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).put(value);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -599,6 +789,8 @@ let MACRO = null;
 let JUDGMENTS = LS.get(K.judgments, {_date: TODAY});
 let PLAN_TEXT = "";
 let SESSION_COMPLETED = false;
+let WATCH_ITEMS = [];        // v0.5: 表示対象の接近銘柄リスト
+let WATCH_RAW = [];          // v0.5: limit_watchlist.json の生データ
 
 // 日跨ぎでリセット
 if (JUDGMENTS._date !== TODAY) {
@@ -1121,6 +1313,13 @@ function buildPlanPrompt(){
     reasons: MACRO.reasons,
   } : null;
 
+  // v0.5: 指値接近銘柄（押し目候補）
+  const watchSettings = getWatchSettings();
+  const watchList = watchlistForPrompt();
+  const watchSection = watchList
+    ? `\n## 💎 指値接近銘柄（押し目候補・¥${fmt(watchSettings.max_price, 0)}以下・${watchSettings.min_rank}+）\n\`\`\`json\n${JSON.stringify(watchList, null, 2)}\n\`\`\`\n`
+    : "";
+
   return `あなたはひろき様の専属トレーディング・コーチです。
 スイングトレーダーであるひろき様が朝会で記録した本日の判断を踏まえ、
 **今日一日の具体的な行動計画**を簡潔にアドバイスしてください。
@@ -1130,7 +1329,7 @@ ${macroSummary ? "```json\n" + JSON.stringify(macroSummary, null, 2) + "\n```" :
 
 ## 💼 保有銘柄と本日の判断
 ${judgmentsList.length > 0 ? "```json\n" + JSON.stringify(judgmentsList, null, 2) + "\n```" : "(保有なし)"}
-
+${watchSection}
 ## 📅 日付
 ${TODAY} (${WD})
 
@@ -1149,7 +1348,11 @@ ${TODAY} (${WD})
 (各保有銘柄について、判断を踏まえた具体的アクション)
 - **[銘柄名]**: ...
 
-## ⚠️ 注意点
+${watchList ? `## 💎 押し目候補へのアプローチ
+(指値接近銘柄の中から本日エントリー検討すべきものを1〜2銘柄、具体的な指値水準で)
+- ...
+
+` : ""}## ⚠️ 注意点
 (マクロ・個別銘柄から見て特に気をつけること)
 - ...
 
@@ -1160,10 +1363,10 @@ ${TODAY} (${WD})
 ---
 
 【執筆ルール】
-- 全体で 400〜600 字程度に収める
+- 全体で ${watchList ? '500〜700' : '400〜600'} 字程度に収める
 - マクロ "${macroSummary?.regime}" を必ず考慮（特に STORM/HALT 時はサイズ縮小強調）
 - 「損切検討」「利確検討」と判断した銘柄には、具体的な価格水準で行動指示
-- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
+${watchList ? '- 押し目候補は、現在の地合いと既存ポジションのリスクを踏まえて慎重に評価\n' : ''}- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
 - 不確実性を避けず、リスクは率直に明示`;
 }
 
@@ -1251,7 +1454,6 @@ document.getElementById("settingsBtn").onclick = openSettings;
 async function openSettings(){
   // API キー欄に既存値をマスク表示
   const ck = LS.raw(K.api_claude) || "";
-  const gk = LS.raw(K.api_claude) || "";
   document.getElementById("inpClaudeKey").value = ck;
   document.getElementById("inpGeminiKey").value = LS.raw(K.api_gemini) || "";
 
@@ -1365,6 +1567,533 @@ function resetTodaySession(){
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  指値ウォッチ機能 (v0.5 - Phase2 Step4)
+// ════════════════════════════════════════════════════════════════════
+
+function getWatchSettings(){
+  const stored = LS.get(K.watch_settings, {});
+  return {...WATCH_DEFAULTS, ...stored};
+}
+
+function saveWatchSettings(settings){
+  LS.set(K.watch_settings, settings);
+}
+
+async function loadWatchlist(){
+  const settings = getWatchSettings();
+  if (!settings.enabled) {
+    document.getElementById("secWatch").style.display = "none";
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await fetchJSON(URLS.limit_watchlist);
+  } catch(e) {
+    console.warn("[watch] limit_watchlist fetch failed:", e);
+    document.getElementById("secWatch").style.display = "none";
+    return;
+  }
+
+  WATCH_RAW = Array.isArray(raw) ? raw : [];
+  WATCH_ITEMS = filterWatchlist(WATCH_RAW, settings);
+
+  if (WATCH_ITEMS.length === 0) {
+    // 該当なしの時はセクションごと非表示（朝会の流れを邪魔しない）
+    document.getElementById("secWatch").style.display = "none";
+    return;
+  }
+
+  document.getElementById("secWatch").style.display = "block";
+  // デフォルト開（朝会で必ず目に入るように）
+  document.getElementById("secWatch").classList.add("open");
+  renderWatchlist();
+}
+
+// 表示対象を絞り込み: 当日の最新価格基準で再計算する
+function filterWatchlist(raw, settings){
+  const ranks = settings.min_rank === "S" ? ["S"] : ["S", "A"];
+  const result = [];
+
+  for (const item of raw) {
+    if (!ranks.includes(item.rank)) continue;
+    if (!item.levels || item.levels.length === 0) continue;
+
+    // 当日の最新価格を latest_prices.json から取得（なければ生成時価格でフォールバック）
+    const latest = getPrice(item.code);
+    const curPrice = (latest && latest.close) || item.current_price;
+    if (!curPrice || curPrice <= 0) continue;
+    if (settings.max_price && curPrice > settings.max_price) continue;
+
+    // 各 level について現在値からの距離を計算（接近 = 現在値が level の +N% 以内）
+    let nearest = null;
+    for (const lv of item.levels) {
+      if (lv.notified) continue;  // 既に到達済みはスキップ
+      if (!lv.price || lv.price <= 0) continue;
+      // 現在値が指値より上でないと「下落して接近」の意味がない
+      if (curPrice < lv.price) continue;
+      const distancePct = ((curPrice - lv.price) / lv.price) * 100;
+      if (distancePct > settings.max_distance_pct) continue;
+      if (!nearest || distancePct < nearest.distance_pct) {
+        nearest = {
+          price: lv.price,
+          tag: lv.tag,
+          distance_pct: Math.round(distancePct * 10) / 10,
+        };
+      }
+    }
+    if (!nearest) continue;
+
+    result.push({
+      code: item.code,
+      name: item.name,
+      rank: item.rank,
+      total_score: item.total_score,
+      atr: item.atr,
+      current_price: curPrice,
+      generated_price: item.current_price,
+      nearest,
+      generated_at: item.generated_at,
+    });
+  }
+
+  // 距離の近い順に並べ、上限件数で打ち切り
+  result.sort((a,b) => a.nearest.distance_pct - b.nearest.distance_pct);
+  return result.slice(0, settings.max_items);
+}
+
+function renderWatchlist(){
+  const body = document.getElementById("bodyWatch");
+  const badge = document.getElementById("badgeWatch");
+  const preview = document.getElementById("previewWatch");
+
+  badge.className = "sec-badge active";
+  badge.textContent = `${WATCH_ITEMS.length}件接近`;
+  preview.textContent = `${WATCH_ITEMS.length}銘柄が指値接近中`;
+
+  if (WATCH_ITEMS.length === 0) {
+    body.innerHTML = `<div class="w-empty">押し目候補なし</div>`;
+    return;
+  }
+
+  const settings = getWatchSettings();
+  const cardsHtml = WATCH_ITEMS.map(it => {
+    const c5 = code4to5(it.code);
+    const distClass = it.nearest.distance_pct <= 1 ? "very-close" :
+                      it.nearest.distance_pct <= 3 ? "close" : "";
+    return `
+      <div class="w-card">
+        <div class="w-card-top">
+          <div class="w-name-row">
+            <div>
+              <span class="w-rank ${it.rank.toLowerCase()}">${it.rank}</span>
+              <span class="w-code">${c5}</span>
+            </div>
+            <div class="w-name">${escapeHtml(it.name)}</div>
+          </div>
+          <div class="w-cur">
+            <div class="w-cur-val">¥${fmt(it.current_price, 0)}</div>
+            <div class="w-cur-lbl">現在値</div>
+          </div>
+        </div>
+        <div class="w-level">
+          <span class="w-level-tag">${escapeHtml(it.nearest.tag)}</span>
+          <span class="w-level-price">¥${fmt(it.nearest.price, 0)}</span>
+          <span class="w-level-dist ${distClass}">+${fmt(it.nearest.distance_pct, 1)}%</span>
+        </div>
+        <div class="w-meta">
+          <span>スコア ${it.total_score}</span>
+          ${it.atr ? `<span>ATR ${fmt(it.atr, 0)}</span>` : ""}
+          ${it.generated_at ? `<span>生成 ${escapeHtml(it.generated_at)}</span>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const settingsHint = `
+    <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:right;">
+      ${settings.min_rank}+ / ¥${fmt(settings.max_price, 0)}以下 / ±${settings.max_distance_pct}%以内
+      <button onclick="openWatchSettings()" style="background:var(--s2);border:1px solid var(--border);color:var(--t2);padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px;">設定</button>
+    </div>
+  `;
+
+  body.innerHTML = cardsHtml + settingsHint;
+}
+
+// ウォッチリストの計画プロンプト用テキスト化
+function watchlistForPrompt(){
+  if (!WATCH_ITEMS || WATCH_ITEMS.length === 0) return null;
+  return WATCH_ITEMS.slice(0, 5).map(it => ({
+    code: code4to5(it.code),
+    name: it.name,
+    rank: it.rank,
+    score: it.total_score,
+    current: it.current_price,
+    target: it.nearest.price,
+    target_tag: it.nearest.tag,
+    distance_pct: it.nearest.distance_pct,
+  }));
+}
+
+// 簡易設定モーダル（既存の設定モーダル枠を使わず、prompt連発で代用）
+function openWatchSettings(){
+  const s = getWatchSettings();
+  const newPrice = prompt("最大価格（円、空白で無制限）", s.max_price || "");
+  if (newPrice === null) return;
+  const newDist = prompt("距離閾値（%）", s.max_distance_pct);
+  if (newDist === null) return;
+  const newRank = prompt('最低ランク ("S" or "A")', s.min_rank);
+  if (newRank === null) return;
+
+  const updated = {
+    ...s,
+    max_price: newPrice ? Number(newPrice) : null,
+    max_distance_pct: Number(newDist) || 5,
+    min_rank: (newRank === "S" || newRank === "A") ? newRank : "A",
+  };
+  saveWatchSettings(updated);
+  toast("✅ 設定を保存");
+  loadWatchlist();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  判断レビュー機能 (v0.4 - Phase2 Step3)
+// ════════════════════════════════════════════════════════════════════
+
+// 評価閾値（将来的に設定モーダルから変更可能にする）
+const REVIEW_THRESHOLDS = {
+  hold_up:           3,   // hold で +3% 以上 → correct
+  hold_down_caution: -3,  // hold で -3% 以下 → caution（軽い誤り）
+  hold_down_wrong:   -5,  // hold で -5% 以下 → wrong（明確な誤り）
+  sell_too_early:    5,   // 利確検討で +5% 以上上昇 → too_early
+  sell_correct:      -3,  // 利確検討で -3% 以下下落 → correct
+  cut_correct:       -3,  // 損切検討で -3% 以下下落 → correct
+  cut_too_early:     5,   // 損切検討で +5% 以上上昇 → too_early
+};
+const EVAL_DAYS = 12;  // 暦日（≒8営業日）経過したら評価対象
+
+const OUTCOME_INFO = {
+  correct:   {icon: "✅", label: "正解",     color: "var(--green)"},
+  wrong:     {icon: "❌", label: "誤り",     color: "var(--red)"},
+  too_early: {icon: "⚠️", label: "手放した", color: "var(--yellow)"},
+  caution:   {icon: "🟡", label: "注意",     color: "var(--yellow)"},
+  neutral:   {icon: "➖", label: "中立",     color: "var(--t3)"},
+  pending:   {icon: "⏳", label: "評価待ち", color: "var(--t3)"},
+};
+
+const JUDGE_LABELS = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
+const JUDGE_ICONS  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰"};
+
+function classifyOutcome(judgment, changePercent){
+  const t = REVIEW_THRESHOLDS;
+  if (judgment === 'hold') {
+    if (changePercent >= t.hold_up) return 'correct';
+    if (changePercent <= t.hold_down_wrong) return 'wrong';
+    if (changePercent <= t.hold_down_caution) return 'caution';
+    return 'neutral';
+  }
+  if (judgment === 'consider_sell') {
+    if (changePercent >= t.sell_too_early) return 'too_early';
+    if (changePercent <= t.sell_correct) return 'correct';
+    return 'neutral';
+  }
+  if (judgment === 'consider_cut') {
+    if (changePercent <= t.cut_correct) return 'correct';
+    if (changePercent >= t.cut_too_early) return 'too_early';
+    return 'neutral';
+  }
+  return 'neutral';
+}
+
+// 過去判定をバックグラウンド評価。outcome 未設定の judgment を更新
+async function evaluatePastJudgments(){
+  let prices;
+  try {
+    prices = await fetchJSON(URLS.latest_prices);
+  } catch(e) {
+    console.warn("[review] prices fetch failed:", e);
+    return 0;
+  }
+
+  let sessions;
+  try {
+    sessions = await dbAll("daily_sessions");
+  } catch(e) {
+    console.warn("[review] dbAll failed:", e);
+    return 0;
+  }
+
+  const now = Date.now();
+  let updated = 0;
+
+  for (const session of sessions) {
+    if (!session.judgments || session.judgments.length === 0) continue;
+    const sessionTime = new Date(session.date).getTime();
+    if (isNaN(sessionTime)) continue;
+    const daysPassed = (now - sessionTime) / (1000 * 60 * 60 * 24);
+    if (daysPassed < EVAL_DAYS) continue;
+
+    let dirty = false;
+    for (const j of session.judgments) {
+      if (j.outcome) continue;  // 評価済みスキップ
+      if (j.price_at_judgment == null) continue;
+      const c5 = code4to5(j.code);
+      const cur = prices[c5] || prices[j.code];
+      if (!cur || cur.close == null) continue;
+
+      const change = ((cur.close - j.price_at_judgment) / j.price_at_judgment) * 100;
+      j.outcome = classifyOutcome(j.judgment, change);
+      j.outcome_score = Math.round(change * 10) / 10;
+      j.evaluated_at = new Date().toISOString();
+      j.evaluated_price = cur.close;
+      dirty = true;
+      updated++;
+    }
+    if (dirty) {
+      try {
+        await dbPut("daily_sessions", session);
+      } catch(e) {
+        console.warn("[review] dbPut failed for session", session.id, e);
+      }
+    }
+  }
+
+  if (updated > 0) console.log(`[review] evaluated ${updated} judgments`);
+  return updated;
+}
+
+// 期間内の判定を集計
+function aggregateReview(sessions, periodDays){
+  const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  const filtered = sessions.filter(s => {
+    const t = new Date(s.date).getTime();
+    return !isNaN(t) && t >= cutoff;
+  });
+
+  const all = [];
+  for (const s of filtered) {
+    if (!s.judgments) continue;
+    for (const j of s.judgments) {
+      all.push({...j, _date: s.date});
+    }
+  }
+
+  const evaluated = all.filter(j => j.outcome);
+  const counts = {correct: 0, wrong: 0, too_early: 0, caution: 0, neutral: 0};
+  let scoreSum = 0;
+  evaluated.forEach(j => {
+    counts[j.outcome] = (counts[j.outcome] || 0) + 1;
+    scoreSum += (j.outcome_score || 0);
+  });
+
+  // 「手放した」= too_early（利確/損切検討が +5% 以上上昇）
+  const tooEarly = evaluated
+    .filter(j => j.outcome === 'too_early')
+    .sort((a,b) => Math.abs(b.outcome_score||0) - Math.abs(a.outcome_score||0));
+
+  // 「抱えた」= hold で wrong または caution（持ち続けて下落）
+  const heldWrong = evaluated
+    .filter(j => (j.outcome === 'wrong' || j.outcome === 'caution') && j.judgment === 'hold')
+    .sort((a,b) => (a.outcome_score||0) - (b.outcome_score||0));
+
+  const pending = all.filter(j => !j.outcome);
+
+  return {
+    total: all.length,
+    evaluated: evaluated.length,
+    pending: pending.length,
+    counts,
+    correct_rate: evaluated.length > 0 ? counts.correct / evaluated.length : 0,
+    avg_score: evaluated.length > 0 ? scoreSum / evaluated.length : 0,
+    too_early: tooEarly,
+    held_wrong: heldWrong,
+    all: all.sort((a,b) => (b._date || '').localeCompare(a._date || '')),
+  };
+}
+
+// レビューモーダル制御
+let _reviewCurrentPeriod = 30;
+
+async function openReviewModal(){
+  document.getElementById("reviewModal").classList.add("on");
+  await refreshReviewModal();
+}
+
+function closeReviewModal(){
+  document.getElementById("reviewModal").classList.remove("on");
+}
+
+async function refreshReviewModal(){
+  const wrap = document.getElementById("reviewBody");
+  wrap.innerHTML = `<div class="loading" style="padding:24px;justify-content:center;">集計中...</div>`;
+
+  try {
+    // モーダル開いたタイミングでも再評価（即時反映）
+    await evaluatePastJudgments();
+    const sessions = await dbAll("daily_sessions");
+    const stats = aggregateReview(sessions, _reviewCurrentPeriod);
+    wrap.innerHTML = renderReviewBody(stats);
+  } catch(e) {
+    console.error("[review] refresh failed:", e);
+    wrap.innerHTML = `<div class="error">レビュー取得エラー: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function changeReviewPeriod(days){
+  _reviewCurrentPeriod = days;
+  refreshReviewModal();
+}
+
+function renderReviewBody(stats){
+  if (stats.total === 0) {
+    return `<div class="empty">
+      <div class="ei">📊</div>
+      まだ判定履歴がありません<br>
+      <span style="font-size:11px;color:var(--t3);">朝会を完了すると判定が記録されます</span>
+    </div>`;
+  }
+
+  // 期間切り替えタブ
+  const periodHtml = `
+    <div class="period-tabs">
+      ${[7, 30, 90].map(d => `
+        <button class="ptab ${d === _reviewCurrentPeriod ? 'active' : ''}"
+                onclick="changeReviewPeriod(${d})">過去${d}日</button>
+      `).join("")}
+    </div>
+  `;
+
+  // 注目パターン（並列表示）
+  const tooEarlyAvg = stats.too_early.length > 0
+    ? stats.too_early.reduce((s,j) => s + (j.outcome_score||0), 0) / stats.too_early.length
+    : 0;
+  const heldWrongAvg = stats.held_wrong.length > 0
+    ? stats.held_wrong.reduce((s,j) => s + (j.outcome_score||0), 0) / stats.held_wrong.length
+    : 0;
+
+  const renderPatRow = (j, scoreClass) => `
+    <div class="pat-row">
+      <span class="pr-code">${escapeHtml(code4to5(j.code))}</span>
+      <span class="pr-name">${escapeHtml(j.name || '-')}</span>
+      <span class="pr-score ${scoreClass}">${j.outcome_score >= 0 ? '+' : ''}${fmt(j.outcome_score, 1)}%</span>
+    </div>
+  `;
+
+  const patternsHtml = `
+    <div class="modal-sec">
+      <div class="modal-sec-title">🎯 注目パターン</div>
+      <div class="pattern-grid">
+        <div class="pattern-card too-early">
+          <div class="pat-hdr">
+            <div class="pat-icon">⚠️</div>
+            <div class="pat-title">手放した</div>
+          </div>
+          <div class="pat-stat">
+            <div class="pat-num">${stats.too_early.length}<span>件</span></div>
+            <div class="pat-avg ${tooEarlyAvg >= 0 ? 'up' : 'dn'}">
+              平均 ${tooEarlyAvg >= 0 ? '+' : ''}${fmt(tooEarlyAvg, 1)}%
+            </div>
+          </div>
+          ${stats.too_early.length === 0
+            ? `<div class="pat-empty">該当なし 👍</div>`
+            : `<div class="pat-list">${stats.too_early.slice(0, 3).map(j => renderPatRow(j, 'up')).join("")}</div>`}
+        </div>
+        <div class="pattern-card held-wrong">
+          <div class="pat-hdr">
+            <div class="pat-icon">❌</div>
+            <div class="pat-title">抱えた</div>
+          </div>
+          <div class="pat-stat">
+            <div class="pat-num">${stats.held_wrong.length}<span>件</span></div>
+            <div class="pat-avg ${heldWrongAvg >= 0 ? 'up' : 'dn'}">
+              平均 ${heldWrongAvg >= 0 ? '+' : ''}${fmt(heldWrongAvg, 1)}%
+            </div>
+          </div>
+          ${stats.held_wrong.length === 0
+            ? `<div class="pat-empty">該当なし 👍</div>`
+            : `<div class="pat-list">${stats.held_wrong.slice(0, 3).map(j => renderPatRow(j, 'dn')).join("")}</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 全体集計
+  const correctPct = stats.evaluated > 0 ? Math.round(stats.correct_rate * 100) : 0;
+  const summaryHtml = `
+    <div class="modal-sec">
+      <div class="modal-sec-title">📈 全体集計</div>
+      <div class="summary-grid">
+        <div class="sum-item">
+          <div class="sum-lbl">評価済み</div>
+          <div class="sum-val">${stats.evaluated}<span>/${stats.total}</span></div>
+        </div>
+        <div class="sum-item">
+          <div class="sum-lbl">正解率</div>
+          <div class="sum-val ${correctPct >= 50 ? 'up' : 'dn'}">${correctPct}<span>%</span></div>
+        </div>
+        <div class="sum-item">
+          <div class="sum-lbl">平均成績</div>
+          <div class="sum-val ${stats.avg_score >= 0 ? 'up' : 'dn'}">
+            ${stats.avg_score >= 0 ? '+' : ''}${fmt(stats.avg_score, 1)}<span>%</span>
+          </div>
+        </div>
+      </div>
+      ${stats.pending > 0 ? `
+        <div class="review-pending-note">
+          ⏳ 評価待ち: ${stats.pending}件（判定後${EVAL_DAYS}日経過で評価）
+        </div>
+      ` : ""}
+    </div>
+  `;
+
+  // 月次 Claude 分析（v0.6 で追加予定のプレースホルダ）
+  const monthlyHtml = `
+    <div class="modal-sec">
+      <div class="modal-sec-title">🧠 月次 Claude 分析</div>
+      <div style="background:var(--s2);border-radius:6px;padding:12px;font-size:11px;color:var(--t3);text-align:center;">
+        v0.6 で実装予定<br>
+        <span style="font-size:10px;">判定データを Claude が分析し、傾向とアドバイスを生成します</span>
+      </div>
+    </div>
+  `;
+
+  // 個別判定一覧
+  const limit = 20;
+  const listHtml = `
+    <div class="modal-sec">
+      <div class="modal-sec-title">📋 個別判定（${Math.min(limit, stats.all.length)}件 / 全${stats.all.length}件）</div>
+      <div class="judg-list">
+        ${stats.all.slice(0, limit).map(j => {
+          const o = OUTCOME_INFO[j.outcome] || OUTCOME_INFO.pending;
+          const date = (j._date || "").slice(5);  // MM-DD
+          const scoreClass = j.outcome_score == null ? 'muted' : (j.outcome_score > 0 ? 'up' : (j.outcome_score < 0 ? 'dn' : ''));
+          const scoreText = j.outcome_score != null
+            ? (j.outcome_score >= 0 ? '+' : '') + fmt(j.outcome_score, 1) + '%'
+            : '⏳';
+          return `
+            <div class="judg-row" title="${escapeHtml(j.name || '')} / ${JUDGE_LABELS[j.judgment] || ''} / ${o.label}">
+              <span class="jr-date">${date}</span>
+              <span class="jr-code">${escapeHtml(code4to5(j.code))}</span>
+              <span class="jr-judge">${JUDGE_ICONS[j.judgment] || '?'}</span>
+              <span class="jr-out">${o.icon}</span>
+              <span class="jr-score ${scoreClass}">${scoreText}</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+
+  return periodHtml + patternsHtml + summaryHtml + monthlyHtml + listHtml;
+}
+
+// イベントバインド
+document.getElementById("reviewBtn").onclick = openReviewModal;
+document.getElementById("reviewModal").onclick = (e) => {
+  if (e.target.id === "reviewModal") closeReviewModal();
+};
+
+// ════════════════════════════════════════════════════════════════════
 //  起動
 // ════════════════════════════════════════════════════════════════════
 
@@ -1372,11 +2101,17 @@ function resetTodaySession(){
   await loadMacroAlert();
   await loadMacro();
   await loadHoldings();
+  await loadWatchlist();  // v0.5: 指値ウォッチをロード（保有銘柄取得後・PRICESが揃ってから）
 
   // 既に当日の全銘柄判定済みなら ③ も初期表示
   if (HOLDINGS.length > 0 && HOLDINGS.every(h => JUDGMENTS[h.code])) {
     renderPlanInitial();
   }
+
+  // v0.4: バックグラウンドで過去判定を評価
+  setTimeout(() => {
+    evaluatePastJudgments().catch(e => console.warn("[review] background eval failed:", e));
+  }, 2000);
 })();
 </script>
 
