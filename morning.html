@@ -2526,7 +2526,160 @@ const ACTION_LABELS = {
   acted_buy_more:  "買い増し",
   no_action:       "no_action",
 };
+// ════════════════════════════════════════════════════════════════════
+//  売買分析（機能B・Phase 3）Step 1: 集計レイヤー
+//  v1 tj_t5（売買履歴）+ v2 daily_sessions + tj_h5（保有）を統合
+//  Sonnet 分析に渡すデータを生成（UIは Step 2 以降）
+// ════════════════════════════════════════════════════════════════════
 
+// 期間（日数）内の売買を v1 tj_t5 から抽出
+function loadTradesInPeriod(periodDays){
+  let raw;
+  try { raw = LS.raw("tj_t5"); } catch(e) { return []; }
+  if (!raw) return [];
+  let arr;
+  try { arr = JSON.parse(raw) || []; } catch(e) {
+    console.warn("[journal] tj_t5 parse error:", e);
+    return [];
+  }
+  const cutoffMs = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  return arr.filter(t => {
+    if (!t || !t.dt) return false;
+    const ts = new Date(t.dt + "T00:00:00+09:00").getTime();
+    return !isNaN(ts) && ts >= cutoffMs;
+  }).sort((a,b) => (a.dt || "").localeCompare(b.dt || ""));
+}
+
+// 売買リストから統計を計算（実現損益ベース）
+function aggregateTradeStats(trades){
+  const sells = trades.filter(t => t.a === "sell" && typeof t.pnl === "number");
+  const buys  = trades.filter(t => t.a === "buy");
+
+  const pnls = sells.map(t => t.pnl);
+  const wins = pnls.filter(p => p > 0);
+  const losses = pnls.filter(p => p < 0);
+  const totalPnl = pnls.reduce((s,p) => s+p, 0);
+  const sumWin = wins.reduce((s,p) => s+p, 0);
+  const sumLoss = Math.abs(losses.reduce((s,p) => s+p, 0));
+
+  // 最大益 / 最大損
+  let biggestWin = null, biggestLoss = null;
+  for (const t of sells) {
+    if (biggestWin === null || t.pnl > biggestWin.pnl) biggestWin = t;
+    if (biggestLoss === null || t.pnl < biggestLoss.pnl) biggestLoss = t;
+  }
+
+  const uniqueCodes = new Set(trades.map(t => t.cd).filter(Boolean));
+
+  return {
+    total_trades: trades.length,
+    buy_count: buys.length,
+    sell_count: sells.length,
+    unique_codes: uniqueCodes.size,
+    realized_pnl: Math.round(totalPnl),
+    wins: wins.length,
+    losses: losses.length,
+    win_rate: sells.length > 0 ? +(wins.length / sells.length).toFixed(3) : 0,
+    avg_win: wins.length > 0 ? Math.round(sumWin / wins.length) : 0,
+    avg_loss: losses.length > 0 ? Math.round(-sumLoss / losses.length) : 0,
+    profit_factor: sumLoss > 0 ? +(sumWin / sumLoss).toFixed(2)
+                   : (sumWin > 0 ? null : 0),  // 全勝時は null（= ∞扱い）
+    biggest_win: biggestWin ? {
+      code: biggestWin.cd, name: biggestWin.nm,
+      pnl: biggestWin.pnl, date: biggestWin.dt
+    } : null,
+    biggest_loss: biggestLoss ? {
+      code: biggestLoss.cd, name: biggestLoss.nm,
+      pnl: biggestLoss.pnl, date: biggestLoss.dt
+    } : null,
+  };
+}
+
+// 現状の保有ポジションサマリー（論点2②: 件数・合計含み損益のみ）
+// HOLDINGS + PRICES を前提（モーダル開く時点で loadHoldings 済み）
+function aggregateHoldingsSummary(){
+  const total = Array.isArray(HOLDINGS) ? HOLDINGS.length : 0;
+  if (total === 0) return {count: 0, priced_count: 0, total_unrealized_pnl: null};
+
+  let totalUnrealized = 0;
+  let priced = 0;
+  for (const h of HOLDINGS) {
+    const p = getPrice(h.code);
+    if (p && typeof h.buy_price === "number" && typeof h.shares === "number") {
+      totalUnrealized += (p.close - h.buy_price) * h.shares;
+      priced++;
+    }
+  }
+  return {
+    count: total,
+    priced_count: priced,
+    total_unrealized_pnl: priced > 0 ? Math.round(totalUnrealized) : null,
+  };
+}
+
+// 期間内の朝会判定 & 夕会マッチングを daily_sessions から集約
+async function aggregateSessionDataForJournal(periodDays){
+  let sessions;
+  try { sessions = await dbAll("daily_sessions"); } catch(e) {
+    console.warn("[journal] dbAll failed:", e);
+    return {judgments: [], matches: []};
+  }
+  const cutoffMs = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  const filtered = sessions.filter(s => {
+    const t = new Date(s.date + "T00:00:00+09:00").getTime();
+    return !isNaN(t) && t >= cutoffMs;
+  });
+
+  const judgments = [];
+  const matches = [];
+  for (const s of filtered) {
+    if (Array.isArray(s.judgments)) {
+      for (const j of s.judgments) {
+        judgments.push({
+          date: s.date,
+          code: j.code,
+          name: j.name,
+          judgment: j.judgment,
+          outcome: j.outcome || null,
+          outcome_score: j.outcome_score != null ? +j.outcome_score.toFixed(2) : null,
+        });
+      }
+    }
+    if (s.evening && Array.isArray(s.evening.matches)) {
+      for (const m of s.evening.matches) {
+        matches.push({
+          date: s.date,
+          code: m.code4 || m.code,
+          name: m.name,
+          judgment: m.judgment || null,
+          action: m.action,
+          match_type: m.match_type,
+          pnl: m.executed_pnl != null ? Math.round(m.executed_pnl) : null,
+          memo: m.memo || "",
+        });
+      }
+    }
+  }
+  return {judgments, matches};
+}
+
+// 統合: Sonnet 分析プロンプトに渡すデータセット（Step 3 で使う）
+async function aggregateAllForJournal(periodDays){
+  const trades = loadTradesInPeriod(periodDays);
+  const stats = aggregateTradeStats(trades);
+  const holdings_summary = aggregateHoldingsSummary();
+  const {judgments, matches} = await aggregateSessionDataForJournal(periodDays);
+
+  return {
+    period_days: periodDays,
+    generated_at: new Date().toISOString(),
+    trades,
+    stats,
+    holdings_summary,
+    morning_judgments: judgments,
+    evening_matches: matches,
+  };
+}
 // v1 localStorage["tj_t5"] から指定日の売買を抽出
 function loadV1Trades(date){
   let raw;
