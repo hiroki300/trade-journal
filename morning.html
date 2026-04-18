@@ -580,6 +580,40 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 .ev-saved-info{
   font-size:10px;color:var(--t3);text-align:center;margin-top:6px;line-height:1.4;
 }
+
+/* ─── 夕会 Step3: Claude 振り返り ─── */
+.ev-claude-wrap{margin-top:10px;}
+.ev-claude-btn{
+  width:100%;padding:8px 10px;background:var(--s1);color:#c4b5fd;
+  border:1px solid #4c1d95;border-radius:6px;
+  font-size:11px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.ev-claude-btn:hover{background:#1e1b4b;}
+.ev-claude-btn:disabled{opacity:.5;cursor:not-allowed;}
+.ev-claude-result{
+  margin-top:8px;background:var(--s1);border:1px solid #4c1d95;border-radius:6px;
+  padding:8px 10px;font-size:11px;line-height:1.55;color:var(--text);
+  white-space:pre-wrap;word-break:break-word;
+}
+.ev-claude-meta{
+  font-size:9px;color:var(--t3);margin-top:6px;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.ev-claude-meta .regen-link{
+  background:transparent;border:none;color:var(--t3);font-size:9px;
+  cursor:pointer;text-decoration:underline;padding:0;
+}
+.ev-claude-meta .regen-link:hover{color:#c4b5fd;}
+.ev-claude-error{
+  margin-top:8px;background:#3a1818;border:1px solid var(--red);border-radius:6px;
+  padding:8px 10px;color:#fca5a5;font-size:11px;line-height:1.4;
+}
+.ev-claude-loading{
+  margin-top:8px;padding:8px 10px;background:var(--s1);border:1px dashed var(--border);
+  border-radius:6px;font-size:11px;color:var(--t2);
+  display:flex;align-items:center;gap:8px;
+}
 </style>
 </head>
 <body>
@@ -2702,6 +2736,8 @@ function renderEveningBody(session, trades, matches){
   // Step2: 下書き or 保存済みからメモを取り出す
   // 優先: session.evening.matches（保存済み）> tjm_evening_draft（下書き）
   const memos = loadEveningMemos(session);
+  // Step3: 保存済みのClaudeレビューを取り出す
+  const claudeReviews = loadClaudeReviews(session);
 
   // サマリー
   const s = summarizeMatches(matches);
@@ -2738,7 +2774,7 @@ function renderEveningBody(session, trades, matches){
     order.indexOf(a.match_type) - order.indexOf(b.match_type)
   );
 
-  const cards = sorted.map(m => renderMatchCard(m, memos[m.code4])).join("");
+  const cards = sorted.map(m => renderMatchCard(m, memos[m.code4], claudeReviews[m.code4])).join("");
 
   // Step2: 保存ボタン（朝会済みのときのみ表示）
   let saveBar = "";
@@ -2763,7 +2799,7 @@ function renderEveningBody(session, trades, matches){
   `;
 }
 
-function renderMatchCard(m, memoVal){
+function renderMatchCard(m, memoVal, claudeReview){
   const judgeLabel = m.judgment ? (JUDGE_ICONS[m.judgment] + " " + JUDGE_LABELS[m.judgment]) : "(朝会判定なし)";
   const actionLabel = ACTION_LABELS[m.action] || m.action;
   const isOpen = m.match_type !== "consistent"; // 一致は折りたたみ
@@ -2786,6 +2822,7 @@ function renderMatchCard(m, memoVal){
 
   // Step2: ズレ銘柄（一致以外）にメモ欄
   let memoBlock = "";
+  let claudeBlock = "";
   if (m.match_type !== "consistent") {
     const placeholder = m.match_type === "postponed"
       ? "なぜ実行しなかった？"
@@ -2803,6 +2840,9 @@ function renderMatchCard(m, memoVal){
           oninput="onEvMemoInput('${m.code4}')"
         >${escapeHtml(memoVal || '')}</textarea>
       </div>`;
+
+    // Step3: Claude 振り返りブロック
+    claudeBlock = renderClaudeBlock(m.code4, claudeReview);
   }
 
   return `
@@ -2818,7 +2858,30 @@ function renderMatchCard(m, memoVal){
       <div class="ev-card-body">
         ${rows.join('')}
         ${memoBlock}
+        ${claudeBlock}
       </div>
+    </div>`;
+}
+
+// Step3: Claude 振り返りブロックの描画
+function renderClaudeBlock(code4, claudeReview){
+  const wrapId = `evclaude-${code4}`;
+  if (claudeReview && claudeReview.text) {
+    const meta = claudeReview.generated_at ? formatJpDateTime(claudeReview.generated_at) : "";
+    return `
+      <div class="ev-claude-wrap" id="${wrapId}">
+        <div class="ev-claude-result">${escapeHtml(claudeReview.text)}</div>
+        <div class="ev-claude-meta">
+          <span>🧠 Claude / ${meta}</span>
+          <button class="regen-link" onclick="requestClaudeReview('${code4}', true)">🔄 再生成</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="ev-claude-wrap" id="${wrapId}">
+      <button class="ev-claude-btn" onclick="requestClaudeReview('${code4}', false)">
+        🧠 Claudeに振り返ってもらう
+      </button>
     </div>`;
 }
 
@@ -2921,6 +2984,16 @@ async function saveEveningSession(){
 
     // メモを取り込む
     const memos = collectAllMemos();
+
+    // 既存セッションのclaude_reviewを引き継ぐためのマップ
+    const prevReviews = {};
+    if (session.evening && Array.isArray(session.evening.matches)) {
+      for (const em of session.evening.matches) {
+        const c4 = em.code4 || em.code;
+        if (c4 && em.claude_review) prevReviews[c4] = em.claude_review;
+      }
+    }
+
     const matchesWithMemo = matches.map(m => ({
       code: m.code,
       code4: m.code4,
@@ -2931,7 +3004,7 @@ async function saveEveningSession(){
       executed_pnl: m.executed_pnl,
       match_type: m.match_type,
       memo: memos[m.code4] || "",
-      claude_review: null, // Step3で埋まる
+      claude_review: prevReviews[m.code4] || null, // Step3: 既存があれば引き継ぐ
     }));
 
     // 当日売買履歴のスナップショット
@@ -2967,6 +3040,206 @@ async function saveEveningSession(){
     console.error("[evening] save failed:", e);
     toast("⚠️ 保存失敗: " + e.message);
     if (btn) { btn.disabled = false; btn.textContent = "💾 夕会を保存"; }
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+
+// ── Step3: Claude 振り返り ────────────────────────────────
+
+// session.evening.matches から claude_review を {code4: {text, generated_at}} で取り出す
+function loadClaudeReviews(session){
+  const result = {};
+  if (session && session.evening && Array.isArray(session.evening.matches)) {
+    for (const m of session.evening.matches) {
+      const c4 = m.code4 || m.code;
+      if (c4 && m.claude_review && m.claude_review.text) {
+        result[c4] = m.claude_review;
+      }
+    }
+  }
+  return result;
+}
+
+// マクロ要約（プロンプト用、短く）
+function summarizeMacroForPrompt(macro){
+  if (!macro) return "（マクロ情報なし）";
+  const parts = [];
+  if (macro.regime) parts.push(`レジーム=${macro.regime}`);
+  if (macro.hv_20d != null) parts.push(`HV20=${macro.hv_20d.toFixed(1)}%`);
+  if (macro.ma25_dev != null) parts.push(`MA25乖離=${macro.ma25_dev>=0?'+':''}${macro.ma25_dev.toFixed(1)}%`);
+  if (macro.trend) parts.push(`trend=${macro.trend}`);
+  return parts.join(" / ") || "（マクロ情報なし）";
+}
+
+// プロンプト生成
+function buildClaudeReviewPrompt(match, memo, macroSummary){
+  const judgeText = match.judgment ? `${JUDGE_LABELS[match.judgment]}（${match.judgment}）` : "（朝会判定なし）";
+  const actionText = ACTION_LABELS[match.action] || match.action;
+  const matchText = EV_LABELS[match.match_type];
+
+  const ctx = [];
+  ctx.push(`【銘柄】${match.name || ''} (${match.code4})`);
+  ctx.push(`【今朝のマクロ】${macroSummary}`);
+  ctx.push(`【朝の判定】${judgeText}`);
+  ctx.push(`【実際の行動】${actionText}`);
+  if (match.executed_price != null) {
+    ctx.push(`【約定価格】¥${match.executed_price.toLocaleString()}`);
+  }
+  if (match.executed_pnl != null) {
+    const sign = match.executed_pnl >= 0 ? "+" : "";
+    ctx.push(`【確定損益】${sign}¥${match.executed_pnl.toLocaleString()}`);
+  }
+  if (match.change_pct != null && match.action === "no_action") {
+    const sign = match.change_pct >= 0 ? "+" : "";
+    ctx.push(`【朝→終値変化率】${sign}${match.change_pct.toFixed(2)}%`);
+  }
+  ctx.push(`【マッチング判定】${matchText}`);
+  if (memo && memo.trim()) {
+    ctx.push(`【ユーザーメモ】${memo.trim()}`);
+  } else {
+    ctx.push(`【ユーザーメモ】（記入なし）`);
+  }
+
+  return `あなたは運用歴25年の日本株シニアファンドマネージャーです。トレーダーの「朝の判定」と「実際の行動」のズレを冷静かつ建設的にレビューしてください。
+
+${ctx.join("\n")}
+
+以下の3点を、各1〜2行で簡潔に答えてください。前置き・自己紹介・お疲れ様の挨拶は不要です。
+
+① この行動の評価（妥当だったか / リスクをどう取ったか）
+② このパターンが繰り返されるとどんなリスクが累積するか
+③ 明日以降に取りたい具体的アクション（価格水準・条件を含めて）
+
+合計150〜250字程度。番号は ①②③ を使ってください。`;
+}
+
+// Claude APIを叩いて結果を IndexedDB に保存
+async function requestClaudeReview(code4, isRegen){
+  const apiKey = LS.raw(K.api_claude);
+  if (!apiKey) {
+    toast("⚠️ 設定でClaude APIキーを登録してください");
+    return;
+  }
+
+  // 現状のセッション・マッチを取得
+  const session = await getTodaySession();
+  if (!session) {
+    toast("⚠️ 当日の朝会セッションが見つかりません");
+    return;
+  }
+  const trades = loadV1Trades(TODAY);
+  const judgments = session.judgments || [];
+  const matches = matchTradesToJudgments(judgments, trades);
+  const target = matches.find(m => m.code4 === code4);
+  if (!target) {
+    toast("⚠️ 対象銘柄が見つかりません");
+    return;
+  }
+
+  // 現在のメモを集める（input中のtextareaから）
+  const memos = collectAllMemos();
+  const memo = memos[code4] || "";
+
+  // UI: ローディング表示に差し替え
+  const wrap = document.getElementById(`evclaude-${code4}`);
+  if (wrap) {
+    wrap.innerHTML = `
+      <div class="ev-claude-loading">
+        <span class="loading"></span>Claude が振り返り中...
+      </div>`;
+  }
+
+  try {
+    const macroSummary = summarizeMacroForPrompt(session.macro);
+    const prompt = buildClaudeReviewPrompt(target, memo, macroSummary);
+    const text = await callClaude(apiKey, prompt);
+
+    const review = {
+      text: text.trim(),
+      generated_at: new Date().toISOString(),
+      memo_at_request: memo,
+      regenerated: !!isRegen,
+    };
+
+    // session.evening を初期化（未保存ならその場で作る）
+    if (!session.evening) {
+      const summary = summarizeMatches(matches);
+      const tradesSnapshot = trades.map(t => ({
+        code: t.cd, name: t.nm, action: t.a,
+        shares: t.sh, price: t.p, pnl: t.pnl ?? null,
+        type: t.type || "spot",
+      }));
+      session.evening = {
+        completed_at: new Date().toISOString(),
+        trades_today: tradesSnapshot,
+        matches: matches.map(m => ({
+          code: m.code, code4: m.code4, name: m.name,
+          judgment: m.judgment, action: m.action,
+          executed_price: m.executed_price, executed_pnl: m.executed_pnl,
+          match_type: m.match_type,
+          memo: memos[m.code4] || "",
+          claude_review: null,
+        })),
+        summary,
+      };
+    } else {
+      // 既存 session.evening のメモを最新の入力で同期
+      session.evening.matches = session.evening.matches.map(em => {
+        const c4 = em.code4 || em.code;
+        return {...em, memo: (memos[c4] !== undefined ? memos[c4] : (em.memo || ""))};
+      });
+      // matchesに無い銘柄が新たに発生した場合の追加（売買が後から増えた等）
+      const existingCodes = new Set(session.evening.matches.map(em => em.code4 || em.code));
+      for (const m of matches) {
+        if (!existingCodes.has(m.code4)) {
+          session.evening.matches.push({
+            code: m.code, code4: m.code4, name: m.name,
+            judgment: m.judgment, action: m.action,
+            executed_price: m.executed_price, executed_pnl: m.executed_pnl,
+            match_type: m.match_type,
+            memo: memos[m.code4] || "",
+            claude_review: null,
+          });
+        }
+      }
+    }
+
+    // 当該銘柄の review を埋める
+    let updated = false;
+    for (const em of session.evening.matches) {
+      const c4 = em.code4 || em.code;
+      if (c4 === code4) { em.claude_review = review; updated = true; break; }
+    }
+    if (!updated) {
+      // 念のためフォールバック
+      session.evening.matches.push({
+        ...target, memo, claude_review: review,
+      });
+    }
+
+    await dbPut("daily_sessions", session);
+
+    // UI: 結果に差し替え
+    if (wrap) {
+      wrap.innerHTML = `
+        <div class="ev-claude-result">${escapeHtml(review.text)}</div>
+        <div class="ev-claude-meta">
+          <span>🧠 Claude / ${formatJpDateTime(review.generated_at)}</span>
+          <button class="regen-link" onclick="requestClaudeReview('${code4}', true)">🔄 再生成</button>
+        </div>`;
+    }
+    toast(`🧠 ${target.name || code4} の振り返り完了`);
+
+  } catch(e) {
+    console.error("[evening] claude review failed:", e);
+    if (wrap) {
+      wrap.innerHTML = `
+        <div class="ev-claude-error">⚠️ ${escapeHtml(e.message || String(e))}</div>
+        <button class="ev-claude-btn" style="margin-top:6px;" onclick="requestClaudeReview('${code4}', false)">
+          🔄 もう一度試す
+        </button>`;
+    }
   }
 }
 
