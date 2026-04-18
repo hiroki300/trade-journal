@@ -506,6 +506,42 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   font-size:10px;color:var(--t3);margin-top:10px;text-align:center;line-height:1.6;
 }
 
+/* B-4: Step カード（Gemini 市場文脈・数値解釈、B-5 で Claude Sonnet 戦略も追加） */
+.ja-result{
+  margin-top:14px;
+}
+.ja-result:empty{display:none;}
+.ja-step-card{
+  background:var(--s1);border-radius:8px;padding:12px 14px;margin-top:10px;
+  border-left:3px solid var(--acc);
+}
+.ja-step-card.loading{border-left-color:var(--yellow);opacity:.7;}
+.ja-step-card.error{border-left-color:var(--red);}
+.ja-step-card.strategy{border-left-color:var(--green);}
+.ja-step-hdr{
+  font-size:12px;font-weight:700;color:var(--text);
+  margin-bottom:8px;letter-spacing:.02em;
+}
+.ja-step-body{
+  font-size:11px;line-height:1.75;color:var(--t2);
+  white-space:pre-wrap;word-wrap:break-word;
+}
+.ja-step-meta{
+  font-size:9px;color:var(--t3);font-family:var(--mono);
+  margin-top:8px;padding-top:6px;border-top:1px solid var(--border);
+  text-align:right;
+}
+.ja-step-error{
+  background:#3a1818;border-radius:6px;padding:8px 10px;
+  color:#fca5a5;font-size:11px;line-height:1.5;
+}
+.ja-step-placeholder{
+  margin-top:10px;padding:10px 14px;
+  background:var(--s2);border:1px dashed var(--border);
+  border-radius:6px;text-align:center;
+  font-size:10px;color:var(--t3);
+}
+
 /* ─── 夕会 (v0.7) ─── */
 .ev-summary{
   background:linear-gradient(135deg,#1e293b,#0f172a);
@@ -2520,23 +2556,205 @@ async function renderJournalTab(periodDays){
           : ''}
       </div>
 
-      <button class="ja-gen-btn" onclick="generateJournalAnalysis(${periodDays})" disabled>
-        💼 ${periodDays}日の売買分析を生成（準備中）
+      <button class="ja-gen-btn" onclick="generateJournalAnalysis(${periodDays})"${hasGeminiKey ? '' : ' disabled'}>
+        💼 ${periodDays}日の売買分析を生成${hasGeminiKey ? '' : '（Gemini APIキー未設定）'}
       </button>
 
       <div class="ja-note">
-        🛠 次のステップ（B-3〜B-5）で Gemini + Claude Sonnet の3段分業分析を実装します。<br>
         ${hasClaudeKey && hasGeminiKey
-          ? '✅ Claude / Gemini APIキー 設定済'
+          ? '✅ Claude / Gemini APIキー 設定済 ・ B-4: Gemini 2段実装（B-5 で Claude Sonnet 戦略統合追加予定）'
           : `⚠️ ${!hasClaudeKey ? 'Claude' : ''}${!hasClaudeKey && !hasGeminiKey ? ' / ' : ''}${!hasGeminiKey ? 'Gemini' : ''} APIキー未設定（⚙️から登録）`}
       </div>
+
+      <div id="journalAnalysisResult" class="ja-result"></div>
     </div>
   `;
 }
 
-// B-5 で本実装するプレースホルダー
-function generateJournalAnalysis(periodDays){
-  toast("🛠 まだ準備中です（B-3〜B-5で実装予定）");
+// ════════════════════════════════════════════════════════════════════
+//  機能B B-4: Gemini Step1（市場文脈）+ Step2（数値解釈）実装
+//  B-5 で Claude Sonnet Step3（統合戦略）が加わる
+// ════════════════════════════════════════════════════════════════════
+
+// 期間の開始日〜終了日を "YYYY-MM-DD 〜 YYYY-MM-DD" で返す
+function formatPeriodRange(periodDays){
+  const now = new Date();
+  const start = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+  const fmt = d => d.toISOString().slice(0, 10);
+  return `${fmt(start)} 〜 ${fmt(now)}`;
+}
+
+// 取引銘柄の一覧を「コード 名前」形式で抽出（重複排除）
+function extractUniqueCodeNames(trades){
+  const seen = new Map();
+  for (const t of trades) {
+    if (!t.cd) continue;
+    if (!seen.has(t.cd)) seen.set(t.cd, t.nm || "");
+  }
+  return Array.from(seen.entries()).map(([cd, nm]) => `${cd} ${nm}`.trim());
+}
+
+// Step1 Gemini: 市場文脈プロンプト（Google検索 ON）
+function buildGeminiMarketContextPrompt(data){
+  const {period_days, trades, stats} = data;
+  const range = formatPeriodRange(period_days);
+  const codeNames = extractUniqueCodeNames(trades);
+  const topCodes = codeNames.slice(0, 15);  // 検索負荷を考えて上位15銘柄まで
+
+  return `あなたは日本株市場のシニアアナリストです。
+以下のトレード履歴の期間について、Google検索で簡潔にまとめてください。
+
+【期間】${range}
+
+【検索対象】
+1. 期間内の主要相場イベント（FOMC・日銀政策・主要経済指標・地政学イベント）
+2. 取引銘柄の当時の固有材料（以下の銘柄について、この期間に該当するもの）
+${topCodes.length > 0 ? topCodes.map(c => "   - " + c).join("\n") : "   （なし）"}
+3. 期間中の日経平均・グロース指数の概況
+
+【出力形式】
+各項目を簡潔に3〜5行、全体で合計500字以内で。
+マークダウン見出し（##）を使ってセクション分け。`;
+}
+
+// Step2 Gemini: 数値解釈プロンプト（Google検索 OFF）
+function buildGeminiStatsInterpretationPrompt(data){
+  const {stats, holdings_summary} = data;
+  const pf = stats.profit_factor != null ? stats.profit_factor : "∞（全勝）";
+  const avgHold = "—"; // 保有日数計算は将来追加、今回は省略
+
+  return `あなたは日本株のクオンツアナリストです。以下のトレード統計を解釈してください。
+
+【期間統計】
+- 取引回数: ${stats.total_trades}回（買 ${stats.buy_count} / 売 ${stats.sell_count}）
+- 対象銘柄数: ${stats.unique_codes}
+- 確定損益: ¥${fmt(stats.realized_pnl)}
+- 勝率: ${Math.round(stats.win_rate * 100)}% (${stats.wins}勝${stats.losses}敗)
+- 平均利益: ¥${fmt(stats.avg_win)} / 平均損失: ¥${fmt(stats.avg_loss)}
+- プロフィットファクター(PF): ${pf}
+- 最大利益: ${stats.biggest_win ? `¥${fmt(stats.biggest_win.pnl)} (${stats.biggest_win.code} ${stats.biggest_win.name})` : "—"}
+- 最大損失: ${stats.biggest_loss ? `¥${fmt(stats.biggest_loss.pnl)} (${stats.biggest_loss.code} ${stats.biggest_loss.name})` : "—"}
+
+【現状ポジション】
+- 保有銘柄数: ${holdings_summary.count}
+- 合計含み損益: ${holdings_summary.total_unrealized_pnl != null ? `¥${fmt(holdings_summary.total_unrealized_pnl)}` : "不明"}
+
+【分析項目（各2〜3行、全体で500字以内）】
+## ① トレードスタイルの特徴
+（これらの数値が示すスタイル）
+
+## ② 強み
+（数値的に優れている点）
+
+## ③ 弱み
+（改善余地のある数値）
+
+## ④ 統計的持続可能性
+（このまま続けて期待値プラスか、PFと勝率から評価）`;
+}
+
+// 結果カードを構築（Step別）
+function renderStepCard(step, title, icon, content, meta){
+  if (content.error) {
+    return `
+      <div class="ja-step-card error">
+        <div class="ja-step-hdr">${icon} ${title}</div>
+        <div class="ja-step-error">⚠️ ${escapeHtml(content.error)}</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="ja-step-card">
+      <div class="ja-step-hdr">${icon} ${title}</div>
+      <div class="ja-step-body">${escapeHtml(content.text)}</div>
+      <div class="ja-step-meta">${meta}</div>
+    </div>
+  `;
+}
+
+// 売買分析メイン実行（B-4: Gemini 2回、B-5 で Claude Sonnet を追加予定）
+async function generateJournalAnalysis(periodDays){
+  const sec = document.getElementById("journalAnalysisResult");
+  if (!sec) return;
+
+  // APIキー確認
+  const geminiKey = LS.raw(K.api_gemini);
+  if (!geminiKey || !geminiKey.trim()) {
+    sec.innerHTML = `<div class="ja-step-card error">
+      <div class="ja-step-error">⚠️ Gemini APIキーが未設定です。⚙️から登録してください。</div>
+    </div>`;
+    return;
+  }
+
+  // 集計データ取得
+  let data;
+  try {
+    data = await aggregateAllForJournal(periodDays);
+  } catch(e) {
+    sec.innerHTML = `<div class="ja-step-card error">
+      <div class="ja-step-error">⚠️ 集計エラー: ${escapeHtml(e.message)}</div>
+    </div>`;
+    return;
+  }
+
+  if (data.stats.total_trades === 0) {
+    sec.innerHTML = `<div class="ja-step-card error">
+      <div class="ja-step-error">⚠️ 売買記録なし。分析対象がありません。</div>
+    </div>`;
+    return;
+  }
+
+  // 実行開始
+  sec.innerHTML = `<div class="ja-step-card loading">
+    <div class="ja-step-hdr">🌍 市場文脈</div>
+    <div class="ja-step-body"><span class="loading">Gemini + Google検索で情報取得中...</span></div>
+  </div>`;
+
+  // ── Step1: 市場文脈（Gemini + Google検索） ──
+  let step1Result;
+  try {
+    const prompt1 = buildGeminiMarketContextPrompt(data);
+    const text1 = await callGemini(geminiKey, prompt1, {
+      useSearch: true,
+      maxTokens: 1500,
+    });
+    step1Result = {text: text1, generated_at: new Date().toISOString()};
+  } catch(e) {
+    console.error("[journal] Step1 failed:", e);
+    step1Result = {error: `市場文脈取得失敗: ${e.message}`};
+  }
+
+  // Step1 結果表示 + Step2 ローディング
+  sec.innerHTML = `
+    ${renderStepCard(1, "市場文脈", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)}
+    <div class="ja-step-card loading">
+      <div class="ja-step-hdr">📊 数値解釈</div>
+      <div class="ja-step-body"><span class="loading">Gemini が統計数値を解釈中...</span></div>
+    </div>
+  `;
+
+  // ── Step2: 数値解釈（Gemini 検索なし） ──
+  let step2Result;
+  try {
+    const prompt2 = buildGeminiStatsInterpretationPrompt(data);
+    const text2 = await callGemini(geminiKey, prompt2, {
+      useSearch: false,
+      maxTokens: 1500,
+    });
+    step2Result = {text: text2, generated_at: new Date().toISOString()};
+  } catch(e) {
+    console.error("[journal] Step2 failed:", e);
+    step2Result = {error: `数値解釈失敗: ${e.message}`};
+  }
+
+  // 最終結果表示（B-5 で Step3 Claude Sonnet の枠を追加予定）
+  sec.innerHTML = `
+    ${renderStepCard(1, "市場文脈", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)}
+    ${renderStepCard(2, "数値解釈", "📊", step2Result, `🤖 ${GEMINI_MODEL}`)}
+    <div class="ja-step-placeholder">
+      🛠 B-5 で Claude Sonnet による統合戦略（🎯 戦略提案）が追加されます
+    </div>
+  `;
 }
 
 async function renderReviewBody(stats){
