@@ -464,6 +464,48 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 .ma-gen-btn:hover{opacity:.9;}
 .ma-gen-btn:disabled{opacity:.5;cursor:not-allowed;}
 
+/* ─── サブタブ (v0.8 機能B - 売買分析タブ) ─── */
+.sub-tabs{
+  display:flex;gap:4px;margin-bottom:14px;
+  border-bottom:2px solid var(--border);
+}
+.stab{
+  flex:1;background:transparent;border:none;
+  color:var(--t3);padding:10px 8px;
+  font-size:12px;font-weight:700;cursor:pointer;
+  border-bottom:3px solid transparent;margin-bottom:-2px;
+  transition:color .15s, border-color .15s;
+}
+.stab:hover{color:var(--t2);}
+.stab.active{color:var(--acc);border-bottom-color:var(--acc);}
+
+/* 売買分析タブ: カード */
+.ja-card{
+  background:var(--s2);border-radius:8px;padding:14px;
+  border-left:3px solid var(--purple);
+}
+.ja-empty{
+  text-align:center;padding:20px 12px;color:var(--t3);
+  font-size:12px;line-height:1.6;
+}
+.ja-empty b{color:var(--t2);}
+.ja-preview{
+  font-size:12px;color:var(--t2);line-height:1.7;
+  padding:10px 12px;background:var(--s1);border-radius:6px;
+}
+.ja-preview b{color:var(--text);font-size:11px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px;}
+.ja-preview .up{color:var(--green);font-weight:700;font-family:var(--mono);}
+.ja-preview .dn{color:var(--red);font-weight:700;font-family:var(--mono);}
+.ja-gen-btn{
+  width:100%;padding:12px;background:var(--purple);color:#fff;border:none;
+  border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-top:12px;
+}
+.ja-gen-btn:hover{opacity:.9;}
+.ja-gen-btn:disabled{opacity:.4;cursor:not-allowed;background:var(--s3);color:var(--t3);}
+.ja-note{
+  font-size:10px;color:var(--t3);margin-top:10px;text-align:center;line-height:1.6;
+}
+
 /* ─── 夕会 (v0.7) ─── */
 .ev-summary{
   background:linear-gradient(135deg,#1e293b,#0f172a);
@@ -2355,7 +2397,7 @@ async function refreshReviewModal(){
     await evaluatePastJudgments();
     const sessions = await dbAll("daily_sessions");
     const stats = aggregateReview(sessions, _reviewCurrentPeriod);
-    wrap.innerHTML = renderReviewBody(stats);
+    wrap.innerHTML = await renderReviewBody(stats);
   } catch(e) {
     console.error("[review] refresh failed:", e);
     wrap.innerHTML = `<div class="error">レビュー取得エラー: ${escapeHtml(e.message)}</div>`;
@@ -2367,7 +2409,83 @@ function changeReviewPeriod(days){
   refreshReviewModal();
 }
 
-function renderReviewBody(stats){
+// ════════════════════════════════════════════════════════════════════
+//  機能B サブタブ (v0.8 Phase 3 B-2) - タブUI + 売買分析タブ描画
+// ════════════════════════════════════════════════════════════════════
+
+let _reviewCurrentTab = "judgment";  // "judgment" | "journal"
+
+function changeReviewTab(tab){
+  _reviewCurrentTab = tab;
+  refreshReviewModal();
+}
+
+// 売買分析タブの描画（B-2: UIと集計プレビューのみ、API呼出は B-3 以降）
+async function renderJournalTab(periodDays){
+  let data;
+  try {
+    data = await aggregateAllForJournal(periodDays);
+  } catch(e) {
+    return `<div class="ja-card"><div class="ja-empty">⚠️ 集計エラー: ${escapeHtml(e.message)}</div></div>`;
+  }
+  const {stats, holdings_summary} = data;
+
+  // 売買ゼロ時
+  if (stats.total_trades === 0) {
+    return `
+      <div class="ja-card">
+        <div class="ja-empty">
+          過去${periodDays}日間に <b>売買記録</b> がありません。<br>
+          <span style="font-size:10px;color:var(--t3);">
+            ※ v1 で記録した売買は、同じデバイス（localStorage）から読まれます。<br>
+            スマホで売買記録している場合、PC側では売買データが見えません。
+          </span>
+        </div>
+      </div>
+    `;
+  }
+
+  // API キーの事前チェック（B-5 で実際の呼出時に改めてチェック）
+  const claudeKey = LS.raw(K.api_claude);
+  const geminiKey = LS.raw(K.api_gemini);
+  const hasClaudeKey = claudeKey && claudeKey.trim();
+  const hasGeminiKey = geminiKey && geminiKey.trim();
+
+  const pnlClass = stats.realized_pnl > 0 ? 'up' : (stats.realized_pnl < 0 ? 'dn' : '');
+  const pnlSign  = stats.realized_pnl > 0 ? '+' : '';
+
+  return `
+    <div class="ja-card">
+      <div class="ja-preview">
+        <b>過去${periodDays}日間のサマリー</b>
+        取引 ${stats.total_trades}回（買 ${stats.buy_count} / 売 ${stats.sell_count}）・
+        確定損益 <span class="${pnlClass}">${pnlSign}¥${fmt(stats.realized_pnl)}</span><br>
+        勝率 ${Math.round(stats.win_rate * 100)}% ・
+        保有中 ${holdings_summary.count}銘柄${holdings_summary.total_unrealized_pnl != null
+          ? `（含み ${holdings_summary.total_unrealized_pnl >= 0 ? '+' : ''}¥${fmt(holdings_summary.total_unrealized_pnl)}）`
+          : ''}
+      </div>
+
+      <button class="ja-gen-btn" onclick="generateJournalAnalysis(${periodDays})" disabled>
+        💼 ${periodDays}日の売買分析を生成（準備中）
+      </button>
+
+      <div class="ja-note">
+        🛠 次のステップ（B-3〜B-5）で Gemini + Claude Sonnet の3段分業分析を実装します。<br>
+        ${hasClaudeKey && hasGeminiKey
+          ? '✅ Claude / Gemini APIキー 設定済'
+          : `⚠️ ${!hasClaudeKey ? 'Claude' : ''}${!hasClaudeKey && !hasGeminiKey ? ' / ' : ''}${!hasGeminiKey ? 'Gemini' : ''} APIキー未設定（⚙️から登録）`}
+      </div>
+    </div>
+  `;
+}
+
+// B-5 で本実装するプレースホルダー
+function generateJournalAnalysis(periodDays){
+  toast("🛠 まだ準備中です（B-3〜B-5で実装予定）");
+}
+
+async function renderReviewBody(stats){
   if (stats.total === 0) {
     return `<div class="empty">
       <div class="ei">📊</div>
@@ -2504,7 +2622,21 @@ function renderReviewBody(stats){
     </div>
   `;
 
-  return periodHtml + patternsHtml + summaryHtml + monthlyHtml + listHtml;
+  // 機能B サブタブ + タブ内容（v0.8 Phase 3 B-2）
+  const subTabHtml = `
+    <div class="sub-tabs">
+      <button class="stab ${_reviewCurrentTab === 'judgment' ? 'active' : ''}"
+              onclick="changeReviewTab('judgment')">📊 判定分析</button>
+      <button class="stab ${_reviewCurrentTab === 'journal' ? 'active' : ''}"
+              onclick="changeReviewTab('journal')">💼 売買分析</button>
+    </div>
+  `;
+
+  const tabContent = _reviewCurrentTab === 'journal'
+    ? await renderJournalTab(_reviewCurrentPeriod)
+    : (patternsHtml + summaryHtml + monthlyHtml + listHtml);
+
+  return periodHtml + subTabHtml + tabContent;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2526,6 +2658,7 @@ const ACTION_LABELS = {
   acted_buy_more:  "買い増し",
   no_action:       "no_action",
 };
+
 // ════════════════════════════════════════════════════════════════════
 //  売買分析（機能B・Phase 3）Step 1: 集計レイヤー
 //  v1 tj_t5（売買履歴）+ v2 daily_sessions + tj_h5（保有）を統合
@@ -2680,6 +2813,7 @@ async function aggregateAllForJournal(periodDays){
     evening_matches: matches,
   };
 }
+
 // v1 localStorage["tj_t5"] から指定日の売買を抽出
 function loadV1Trades(date){
   let raw;
