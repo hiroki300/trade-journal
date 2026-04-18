@@ -502,6 +502,12 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 }
 .ja-gen-btn:hover{opacity:.9;}
 .ja-gen-btn:disabled{opacity:.4;cursor:not-allowed;background:var(--s3);color:var(--t3);}
+.ja-gen-btn.ja-regen{
+  background:var(--s2);color:var(--t2);
+  border:1px solid var(--border);
+  font-size:11px;padding:9px;
+}
+.ja-gen-btn.ja-regen:hover{background:var(--s1);color:var(--text);}
 .ja-note{
   font-size:10px;color:var(--t3);margin-top:10px;text-align:center;line-height:1.6;
 }
@@ -926,6 +932,7 @@ const K = {
   watch_settings:   "tjm_watch_settings",  // v0.5: 指値ウォッチの設定
   monthly_analysis: "tjm_monthly_analysis", // v0.6: 月次Claude分析キャッシュ
   evening_draft:    "tjm_evening_draft",    // v0.7: 夕会のメモ下書き（Step2以降で使用）
+  journal_analysis: "tjm_journal_analysis", // v0.8 B-6: 売買分析キャッシュ（期間別、LRU 3件）
 };
 
 // v0.5: 指値ウォッチのデフォルト設定
@@ -2541,6 +2548,9 @@ async function renderJournalTab(periodDays){
   const hasClaudeKey = claudeKey && claudeKey.trim();
   const hasGeminiKey = geminiKey && geminiKey.trim();
 
+  // B-6: キャッシュチェック（あれば結果をプリロード）
+  const cached = findJournalCacheForPeriod(periodDays);
+
   const pnlClass = stats.realized_pnl > 0 ? 'up' : (stats.realized_pnl < 0 ? 'dn' : '');
   const pnlSign  = stats.realized_pnl > 0 ? '+' : '';
 
@@ -2556,9 +2566,16 @@ async function renderJournalTab(periodDays){
           : ''}
       </div>
 
-      <button class="ja-gen-btn" onclick="generateJournalAnalysis(${periodDays})"${hasGeminiKey ? '' : ' disabled'}>
-        💼 ${periodDays}日の売買分析を生成${hasGeminiKey ? '' : '（Gemini APIキー未設定）'}
-      </button>
+      ${cached ? `
+        <button class="ja-gen-btn ja-regen"
+                onclick="generateJournalAnalysis(${periodDays}, true)"${hasGeminiKey ? '' : ' disabled'}>
+          🔄 再生成（${formatRelativeTime(cached.generated_at)}に生成）
+        </button>
+      ` : `
+        <button class="ja-gen-btn" onclick="generateJournalAnalysis(${periodDays})"${hasGeminiKey ? '' : ' disabled'}>
+          💼 ${periodDays}日の売買分析を生成${hasGeminiKey ? '' : '（Gemini APIキー未設定）'}
+        </button>
+      `}
 
       <div class="ja-note">
         ${hasClaudeKey && hasGeminiKey
@@ -2566,15 +2583,99 @@ async function renderJournalTab(periodDays){
           : `⚠️ ${!hasClaudeKey ? 'Claude' : ''}${!hasClaudeKey && !hasGeminiKey ? ' / ' : ''}${!hasGeminiKey ? 'Gemini' : ''} APIキー未設定（⚙️から登録）`}
       </div>
 
-      <div id="journalAnalysisResult" class="ja-result"></div>
+      <div id="journalAnalysisResult" class="ja-result">${
+        cached ? renderJournalFromCache(cached) : ''
+      }</div>
     </div>
   `;
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  機能B B-4: Gemini Step1（市場文脈）+ Step2（数値解釈）実装
-//  B-5 で Claude Sonnet Step3（統合戦略）が加わる
+//  機能B B-6: キャッシュ管理 + 期間切替 + 履歴
 // ════════════════════════════════════════════════════════════════════
+
+const JOURNAL_CACHE_MAX = 3;  // LRUで保持する最大エントリー数
+
+// キャッシュ全体を取得
+function getJournalCache(){
+  return LS.get(K.journal_analysis, {});
+}
+
+// キャッシュに保存（LRU、最新のJOURNAL_CACHE_MAX件のみ保持）
+function saveJournalCache(key, data){
+  const cache = getJournalCache();
+  cache[key] = data;
+
+  // generated_at で新しい順にソートして、古いものを削除
+  const entries = Object.entries(cache)
+    .filter(([k, v]) => v && v.generated_at)
+    .sort((a, b) => (b[1].generated_at || "").localeCompare(a[1].generated_at || ""));
+
+  const pruned = {};
+  for (const [k, v] of entries.slice(0, JOURNAL_CACHE_MAX)) {
+    pruned[k] = v;
+  }
+  LS.set(K.journal_analysis, pruned);
+}
+
+// 現在の期間に対応するキャッシュキーを生成
+function getJournalCacheKey(periodDays, generatedAt){
+  const dt = generatedAt ? new Date(generatedAt) : new Date();
+  const ymd = dt.toISOString().slice(0, 10);
+  return `${periodDays}d_${ymd}`;
+}
+
+// 指定期間のキャッシュエントリーを取得（当日生成済のものを優先）
+function findJournalCacheForPeriod(periodDays){
+  const cache = getJournalCache();
+  const entries = Object.entries(cache)
+    .filter(([k, v]) => k.startsWith(`${periodDays}d_`) && v && v.generated_at)
+    .sort((a, b) => (b[1].generated_at || "").localeCompare(a[1].generated_at || ""));
+  return entries.length > 0 ? {key: entries[0][0], ...entries[0][1]} : null;
+}
+
+// ISO日時 → 「X分前 / X時間前 / X日前」の相対表示
+function formatRelativeTime(iso){
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  const diffSec = Math.floor((Date.now() - then) / 1000);
+  if (diffSec < 60) return "たった今";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}分前`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}時間前`;
+  const days = Math.floor(diffSec / 86400);
+  if (days < 7) return `${days}日前`;
+  // 7日以上前は日付そのもの
+  const dt = new Date(iso);
+  return `${dt.getMonth()+1}/${dt.getDate()}`;
+}
+
+// キャッシュから結果カード群を描画
+function renderJournalFromCache(cached){
+  const step1Card = cached.step1
+    ? renderStepCard(1, "市場文脈", "🌍", cached.step1, `🤖 ${GEMINI_MODEL} + Google検索`)
+    : "";
+  const step2Card = cached.step2
+    ? renderStepCard(2, "数値解釈", "📊", cached.step2, `🤖 ${GEMINI_MODEL}`)
+    : "";
+
+  let step3Card = "";
+  if (cached.step3) {
+    if (cached.step3.error) {
+      step3Card = `<div class="ja-step-card error strategy">
+        <div class="ja-step-hdr">🎯 戦略提案</div>
+        <div class="ja-step-error">⚠️ ${escapeHtml(cached.step3.error)}</div>
+      </div>`;
+    } else {
+      step3Card = `<div class="ja-step-card strategy">
+        <div class="ja-step-hdr">🎯 戦略提案</div>
+        <div class="ja-step-body">${escapeHtml(cached.step3.text)}</div>
+        <div class="ja-step-meta">🧠 ${CLAUDE_SONNET_MODEL}</div>
+      </div>`;
+    }
+  }
+
+  return step1Card + step2Card + step3Card;
+}
 
 // 期間の開始日〜終了日を "YYYY-MM-DD 〜 YYYY-MM-DD" で返す
 function formatPeriodRange(periodDays){
@@ -2751,9 +2852,19 @@ ${geminiStats || "(取得失敗)"}
 }
 
 // 売買分析メイン実行（B-5: Gemini 2段 + Claude Sonnet 統合戦略の3段分業）
-async function generateJournalAnalysis(periodDays){
+// B-6: force=true でキャッシュ無視して強制再生成
+async function generateJournalAnalysis(periodDays, force=false){
   const sec = document.getElementById("journalAnalysisResult");
   if (!sec) return;
+
+  // B-6: force でなければキャッシュ確認（念のため、通常は renderJournalTab で既に表示済み）
+  if (!force) {
+    const cached = findJournalCacheForPeriod(periodDays);
+    if (cached) {
+      sec.innerHTML = renderJournalFromCache(cached);
+      return;
+    }
+  }
 
   // APIキー確認
   const geminiKey = LS.raw(K.api_gemini);
@@ -2883,6 +2994,22 @@ async function generateJournalAnalysis(periodDays){
     ${renderStepCard(2, "数値解釈", "📊", step2Result, `🤖 ${GEMINI_MODEL}`)}
     ${step3Card}
   `;
+
+  // B-6: キャッシュに保存（3段とも結果あれば）
+  const generatedAt = new Date().toISOString();
+  const cacheData = {
+    generated_at: generatedAt,
+    period_days: periodDays,
+    step1: step1Result,
+    step2: step2Result,
+    step3: step3Result,
+  };
+  const cacheKey = getJournalCacheKey(periodDays, generatedAt);
+  saveJournalCache(cacheKey, cacheData);
+
+  // 再生成ボタンに切り替えるため、タブ全体を再描画
+  // ただし、結果表示エリアはそのまま維持（すでに表示済み）
+  // → 次回モーダル開いたとき、または期間切替したときに反映される
 }
 
 async function renderReviewBody(stats){
