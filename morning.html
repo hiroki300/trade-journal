@@ -297,7 +297,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 /* ─── 判断レビュー (v0.4) ─── */
 .period-tabs{
-  display:flex;gap:6px;margin-bottom:14px;
+  display:flex;gap:6px;margin-bottom:10px;
 }
 .ptab{
   flex:1;background:var(--s2);border:1px solid var(--border);
@@ -466,12 +466,12 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 /* ─── サブタブ (v0.8 機能B - 売買分析タブ) ─── */
 .sub-tabs{
-  display:flex;gap:4px;margin-bottom:14px;
+  display:flex;gap:4px;margin-bottom:10px;
   border-bottom:2px solid var(--border);
 }
 .stab{
   flex:1;background:transparent;border:none;
-  color:var(--t3);padding:10px 8px;
+  color:var(--t3);padding:8px 6px;
   font-size:12px;font-weight:700;cursor:pointer;
   border-bottom:3px solid transparent;margin-bottom:-2px;
   transition:color .15s, border-color .15s;
@@ -763,7 +763,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
       <input type="password" id="inpClaudeKey" placeholder="sk-ant-...">
       <div class="api-status" id="statClaudeKey"></div>
 
-      <label style="margin-top:10px;">Gemini API Key (将来用)</label>
+      <label style="margin-top:10px;">Gemini API Key（売買分析・市場文脈用）</label>
       <input type="password" id="inpGeminiKey" placeholder="AIzaSy...">
       <div class="api-status" id="statGeminiKey"></div>
 
@@ -855,6 +855,11 @@ const URLS = {
 // ── Anthropic API ──
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_MODEL = "claude-haiku-4-5-20251001";  // 安価で十分な性能
+const CLAUDE_SONNET_MODEL = "claude-sonnet-4-6";   // v0.8 機能B 売買分析の統合戦略用
+
+// Gemini API (v0.8 機能B 売買分析の市場文脈・数値解釈用)
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 // ── キャッシュ ──
 const CACHE_TTL = 5 * 60 * 1000;
@@ -1618,7 +1623,8 @@ ${watchList ? '- 押し目候補は、現在の地合いと既存ポジション
 - 不確実性を避けず、リスクは率直に明示`;
 }
 
-async function callClaude(apiKey, prompt){
+async function callClaude(apiKey, prompt, options={}){
+  const {model = CLAUDE_MODEL, maxTokens = 1500} = options;
   const r = await fetch(CLAUDE_API_URL, {
     method: "POST",
     headers: {
@@ -1628,8 +1634,8 @@ async function callClaude(apiKey, prompt){
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 1500,
+      model: model,
+      max_tokens: maxTokens,
       messages: [{role: "user", content: prompt}],
     }),
   });
@@ -1646,6 +1652,54 @@ async function callClaude(apiKey, prompt){
   const data = await r.json();
   const text = data.content?.map(b => b.text || "").join("") || "";
   if (!text) throw new Error("Claude が空のレスポンスを返しました");
+  return text;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Gemini API 呼出 (v0.8 機能B Phase 3 B-3)
+//  v1 trading_journal.html のパターンを v2 流に整理
+//  options:
+//    - model:     gemini モデル名 (default: GEMINI_MODEL)
+//    - useSearch: Google検索ツールを有効化 (default: true)
+//    - maxTokens: 最大出力トークン (default: 2500)
+//    - system:    システムプロンプト相当 (default: "")
+// ════════════════════════════════════════════════════════════════════
+async function callGemini(apiKey, prompt, options={}){
+  const {
+    model = GEMINI_MODEL,
+    useSearch = true,
+    maxTokens = 2500,
+    system = "",
+  } = options;
+
+  const fullPrompt = system ? system + "\n\n" + prompt : prompt;
+  const body = {
+    contents: [{role: "user", parts: [{text: fullPrompt}]}],
+    generationConfig: {maxOutputTokens: maxTokens},
+  };
+  if (useSearch) body.tools = [{googleSearch: {}}];
+
+  const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+
+  if (!r.ok) {
+    let errMsg = `HTTP ${r.status}`;
+    try {
+      const err = await r.json();
+      errMsg = err.error?.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = await r.json();
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  // Google検索ツール使用時はparts内に複数ブロックが混在しうるため全textを結合
+  const text = parts.filter(p => p.text).map(p => p.text).join("\n").trim();
+  if (!text) throw new Error("Gemini が空のレスポンスを返しました");
   return text;
 }
 
