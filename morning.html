@@ -546,6 +546,40 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   background:#3a2a18;border:1px solid var(--yellow);border-radius:6px;
   padding:8px 10px;color:#fcd34d;font-size:11px;line-height:1.4;margin-bottom:12px;
 }
+
+/* ─── 夕会 Step2: メモ入力 + 保存 ─── */
+.ev-memo-wrap{margin-top:8px;}
+.ev-memo-lbl{
+  font-size:10px;color:var(--t3);margin-bottom:4px;display:flex;
+  align-items:center;justify-content:space-between;
+}
+.ev-memo-saved{
+  font-size:9px;color:var(--green);opacity:0;transition:opacity .25s;
+}
+.ev-memo-saved.show{opacity:1;}
+.ev-memo{
+  width:100%;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:6px 8px;border-radius:4px;
+  font-size:11px;line-height:1.4;font-family:var(--font);
+  resize:vertical;min-height:38px;
+}
+.ev-memo:focus{outline:none;border-color:var(--acc);}
+
+.ev-save-bar{
+  position:sticky;bottom:0;
+  background:linear-gradient(to top, var(--s1) 70%, transparent);
+  padding:14px 0 4px;margin-top:8px;
+}
+.ev-save-btn{
+  width:100%;padding:11px;background:var(--acc);color:#fff;border:none;
+  border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;
+}
+.ev-save-btn:hover{opacity:.9;}
+.ev-save-btn:disabled{opacity:.4;cursor:not-allowed;}
+.ev-save-btn.saved{background:var(--green);}
+.ev-saved-info{
+  font-size:10px;color:var(--t3);text-align:center;margin-top:6px;line-height:1.4;
+}
 </style>
 </head>
 <body>
@@ -2665,6 +2699,10 @@ function renderEveningBody(session, trades, matches){
       </div>`;
   }
 
+  // Step2: 下書き or 保存済みからメモを取り出す
+  // 優先: session.evening.matches（保存済み）> tjm_evening_draft（下書き）
+  const memos = loadEveningMemos(session);
+
   // サマリー
   const s = summarizeMatches(matches);
   const summary = `
@@ -2700,15 +2738,32 @@ function renderEveningBody(session, trades, matches){
     order.indexOf(a.match_type) - order.indexOf(b.match_type)
   );
 
-  const cards = sorted.map(m => renderMatchCard(m)).join("");
+  const cards = sorted.map(m => renderMatchCard(m, memos[m.code4])).join("");
+
+  // Step2: 保存ボタン（朝会済みのときのみ表示）
+  let saveBar = "";
+  if (session) {
+    const savedAt = session.evening && session.evening.completed_at;
+    const savedInfo = savedAt
+      ? `<div class="ev-saved-info">前回保存: ${formatJpDateTime(savedAt)}</div>`
+      : "";
+    saveBar = `
+      <div class="ev-save-bar">
+        <button class="ev-save-btn" id="evSaveBtn" onclick="saveEveningSession()">
+          💾 夕会を保存
+        </button>
+        ${savedInfo}
+      </div>`;
+  }
 
   return warn + summary + `
     <div class="ev-section-title">🔍 銘柄別マッチング (${matches.length}件)</div>
     ${cards}
+    ${saveBar}
   `;
 }
 
-function renderMatchCard(m){
+function renderMatchCard(m, memoVal){
   const judgeLabel = m.judgment ? (JUDGE_ICONS[m.judgment] + " " + JUDGE_LABELS[m.judgment]) : "(朝会判定なし)";
   const actionLabel = ACTION_LABELS[m.action] || m.action;
   const isOpen = m.match_type !== "consistent"; // 一致は折りたたみ
@@ -2729,6 +2784,27 @@ function renderMatchCard(m){
     rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">朝→終値変化率</span><span class="ev-row-val ${cls}">${sign}${m.change_pct.toFixed(2)}%</span></div>`);
   }
 
+  // Step2: ズレ銘柄（一致以外）にメモ欄
+  let memoBlock = "";
+  if (m.match_type !== "consistent") {
+    const placeholder = m.match_type === "postponed"
+      ? "なぜ実行しなかった？"
+      : (m.match_type === "changed" ? "なぜ判定を変えた？" : "売買の意図は？");
+    memoBlock = `
+      <div class="ev-memo-wrap">
+        <div class="ev-memo-lbl">
+          <span>📝 メモ</span>
+          <span class="ev-memo-saved" id="evmemo-saved-${m.code4}">下書き保存済</span>
+        </div>
+        <textarea
+          class="ev-memo"
+          id="evmemo-${m.code4}"
+          placeholder="${placeholder}"
+          oninput="onEvMemoInput('${m.code4}')"
+        >${escapeHtml(memoVal || '')}</textarea>
+      </div>`;
+  }
+
   return `
     <div class="ev-card ${m.match_type} ${isOpen ? 'open' : ''}" id="evcard-${m.code4}">
       <div class="ev-card-hdr" onclick="toggleEvCard('${m.code4}')">
@@ -2741,6 +2817,7 @@ function renderMatchCard(m){
       </div>
       <div class="ev-card-body">
         ${rows.join('')}
+        ${memoBlock}
       </div>
     </div>`;
 }
@@ -2749,6 +2826,151 @@ function toggleEvCard(code4){
   const el = document.getElementById(`evcard-${code4}`);
   if (el) el.classList.toggle("open");
 }
+
+// ── Step2: メモ下書き管理 ──────────────────────────────────
+
+// session.evening が保存済みなら matches[].memo を、なければ tjm_evening_draft を返す
+function loadEveningMemos(session){
+  // 1) 保存済みセッションのメモ優先
+  if (session && session.evening && Array.isArray(session.evening.matches)) {
+    const result = {};
+    for (const m of session.evening.matches) {
+      const c4 = m.code4 || m.code;
+      if (c4 && m.memo) result[c4] = m.memo;
+    }
+    if (Object.keys(result).length > 0) return result;
+  }
+  // 2) 当日下書き
+  const draft = LS.get(K.evening_draft, null);
+  if (draft && draft.date === TODAY && draft.memos) return draft.memos;
+  return {};
+}
+
+function saveEveningDraft(memos){
+  LS.set(K.evening_draft, {date: TODAY, memos, updated_at: new Date().toISOString()});
+}
+
+// 入力都度の自動下書き保存（debounce 600ms）
+let _evMemoTimer = null;
+function onEvMemoInput(code4){
+  // 即座に「保存中...」フラグ
+  const flag = document.getElementById(`evmemo-saved-${code4}`);
+  if (flag) flag.classList.remove("show");
+
+  clearTimeout(_evMemoTimer);
+  _evMemoTimer = setTimeout(() => {
+    // 全てのテキストエリアからメモを集める
+    const memos = collectAllMemos();
+    saveEveningDraft(memos);
+    if (flag) {
+      flag.classList.add("show");
+      setTimeout(() => flag.classList.remove("show"), 1500);
+    }
+    // 保存ボタンを「未保存」状態に戻す
+    const btn = document.getElementById("evSaveBtn");
+    if (btn && btn.classList.contains("saved")) {
+      btn.classList.remove("saved");
+      btn.textContent = "💾 夕会を保存";
+      btn.disabled = false;
+    }
+  }, 600);
+}
+
+function collectAllMemos(){
+  const memos = {};
+  document.querySelectorAll(".ev-memo").forEach(el => {
+    const id = el.id;
+    if (!id.startsWith("evmemo-")) return;
+    const code4 = id.replace("evmemo-", "");
+    const v = el.value.trim();
+    if (v) memos[code4] = v;
+  });
+  return memos;
+}
+
+// 日時表示ヘルパー
+function formatJpDateTime(iso){
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const m = d.getMonth()+1, day = d.getDate();
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    return `${m}/${day} ${hh}:${mm}`;
+  } catch { return iso; }
+}
+
+// ── Step2: 夕会セッションを IndexedDB に確定保存 ──────────
+async function saveEveningSession(){
+  const btn = document.getElementById("evSaveBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "保存中..."; }
+
+  try {
+    const session = await getTodaySession();
+    if (!session) {
+      toast("⚠️ 今日の朝会セッションが見つかりません");
+      if (btn) { btn.disabled = false; btn.textContent = "💾 夕会を保存"; }
+      return;
+    }
+
+    // 現状のマッチングを再計算（最新のtj_t5を反映）
+    const trades = loadV1Trades(TODAY);
+    const judgments = session.judgments || [];
+    const matches = matchTradesToJudgments(judgments, trades);
+    const summary = summarizeMatches(matches);
+
+    // メモを取り込む
+    const memos = collectAllMemos();
+    const matchesWithMemo = matches.map(m => ({
+      code: m.code,
+      code4: m.code4,
+      name: m.name,
+      judgment: m.judgment,
+      action: m.action,
+      executed_price: m.executed_price,
+      executed_pnl: m.executed_pnl,
+      match_type: m.match_type,
+      memo: memos[m.code4] || "",
+      claude_review: null, // Step3で埋まる
+    }));
+
+    // 当日売買履歴のスナップショット
+    const tradesSnapshot = trades.map(t => ({
+      code: t.cd, name: t.nm, action: t.a,
+      shares: t.sh, price: t.p, pnl: t.pnl ?? null,
+      type: t.type || "spot",
+    }));
+
+    session.evening = {
+      completed_at: new Date().toISOString(),
+      trades_today: tradesSnapshot,
+      matches: matchesWithMemo,
+      summary: summary,
+    };
+
+    await dbPut("daily_sessions", session);
+
+    // 下書きクリア（保存済みになったので不要）
+    LS.set(K.evening_draft, null);
+
+    if (btn) {
+      btn.classList.add("saved");
+      btn.textContent = "✅ 保存完了";
+      btn.disabled = false;
+    }
+    toast(`💾 夕会を保存しました (${matchesWithMemo.length}件)`);
+
+    // 「前回保存」表示を更新するため再描画（メモは復元される）
+    setTimeout(() => refreshEveningModal(), 800);
+
+  } catch(e) {
+    console.error("[evening] save failed:", e);
+    toast("⚠️ 保存失敗: " + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "💾 夕会を保存"; }
+  }
+}
+
+// ──────────────────────────────────────────────────────────
 
 async function openEveningModal(){
   document.getElementById("eveningModal").classList.add("on");
