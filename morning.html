@@ -463,6 +463,89 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 }
 .ma-gen-btn:hover{opacity:.9;}
 .ma-gen-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+/* ─── 夕会 (v0.7) ─── */
+.ev-summary{
+  background:linear-gradient(135deg,#1e293b,#0f172a);
+  border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;margin-bottom:14px;
+}
+.ev-summary-title{
+  font-size:11px;color:var(--t3);text-transform:uppercase;
+  letter-spacing:.05em;margin-bottom:8px;font-weight:700;
+}
+.ev-summary-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;
+}
+.ev-stat{
+  background:var(--s2);border-radius:6px;padding:6px 4px;text-align:center;
+}
+.ev-stat-num{font-size:18px;font-weight:700;color:var(--text);font-family:var(--mono);}
+.ev-stat-lbl{font-size:9px;color:var(--t3);margin-top:2px;line-height:1.1;}
+.ev-stat.consistent .ev-stat-num{color:var(--green);}
+.ev-stat.postponed .ev-stat-num{color:var(--yellow);}
+.ev-stat.changed .ev-stat-num{color:var(--purple);}
+.ev-stat.unjudged .ev-stat-num{color:var(--acc);}
+.ev-pnl-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding-top:8px;border-top:1px solid var(--border);font-size:11px;
+}
+.ev-pnl-lbl{color:var(--t2);}
+.ev-pnl-val{font-family:var(--mono);font-weight:700;font-size:13px;}
+.ev-pnl-val.pos{color:var(--green);}
+.ev-pnl-val.neg{color:var(--red);}
+.ev-pnl-val.zero{color:var(--t3);}
+
+.ev-section-title{
+  font-size:11px;color:var(--t3);text-transform:uppercase;
+  letter-spacing:.05em;margin:14px 0 8px;font-weight:700;
+}
+.ev-card{
+  background:var(--s2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 12px;margin-bottom:6px;
+}
+.ev-card.consistent{border-left:3px solid var(--green);}
+.ev-card.postponed{border-left:3px solid var(--yellow);}
+.ev-card.changed{border-left:3px solid var(--purple);}
+.ev-card.unjudged{border-left:3px solid var(--acc);}
+.ev-card-hdr{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  cursor:pointer;
+}
+.ev-card-l{display:flex;align-items:center;gap:6px;min-width:0;flex:1;}
+.ev-card-name{font-size:13px;font-weight:700;}
+.ev-card-code{font-size:10px;color:var(--t3);font-family:var(--mono);}
+.ev-badge{
+  font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;flex-shrink:0;
+  white-space:nowrap;
+}
+.ev-badge.consistent{background:#064e3b;color:#6ee7b7;}
+.ev-badge.postponed{background:#78350f;color:#fcd34d;}
+.ev-badge.changed{background:#4c1d95;color:#c4b5fd;}
+.ev-badge.unjudged{background:#1e3a8a;color:#93c5fd;}
+.ev-card-body{
+  margin-top:8px;font-size:11px;color:var(--t2);line-height:1.5;
+}
+.ev-card-body.collapsed{display:none;}
+.ev-card-row{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px;}
+.ev-card-row .ev-row-lbl{color:var(--t3);}
+.ev-card-row .ev-row-val{color:var(--text);font-family:var(--mono);}
+.ev-card-row .ev-row-val.pos{color:var(--green);}
+.ev-card-row .ev-row-val.neg{color:var(--red);}
+.ev-card-arrow{font-size:10px;color:var(--t3);transition:transform .15s;}
+.ev-card.open .ev-card-arrow{transform:rotate(180deg);}
+.ev-card.open .ev-card-body{display:block;}
+.ev-card-body.show{display:block;}
+
+.ev-empty{
+  text-align:center;padding:24px 16px;color:var(--t3);font-size:11px;line-height:1.6;
+}
+.ev-empty .ee-icon{font-size:32px;margin-bottom:8px;display:block;}
+
+.ev-warn{
+  background:#3a2a18;border:1px solid var(--yellow);border-radius:6px;
+  padding:8px 10px;color:#fcd34d;font-size:11px;line-height:1.4;margin-bottom:12px;
+}
 </style>
 </head>
 <body>
@@ -473,6 +556,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="h-date" id="hDate"></div>
   </div>
   <div style="display:flex;gap:0;align-items:center;">
+    <button class="h-btn" id="eveningBtn" title="夕会">🌆</button>
     <button class="h-btn" id="reviewBtn" title="判断レビュー">📊</button>
     <button class="h-btn" id="settingsBtn" title="設定">⚙️</button>
   </div>
@@ -627,6 +711,22 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   </div>
 </div>
 
+<!-- 夕会モーダル (v0.7) -->
+<div class="modal-bg" id="eveningModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">🌆 夕会</div>
+      <div class="review-hdr-actions">
+        <button class="icon-btn" onclick="refreshEveningModal()" title="再読込">🔄</button>
+        <button class="modal-close" onclick="closeEveningModal()">×</button>
+      </div>
+    </div>
+    <div id="eveningBody">
+      <div class="loading" style="padding:24px;justify-content:center;">集計中...</div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════════════════
 //  trade-journal morning.html  v0.6 (Phase2 Step5 - 月次Claude分析)
@@ -674,6 +774,7 @@ const K = {
   last_plan:        "tjm_last_plan",
   watch_settings:   "tjm_watch_settings",  // v0.5: 指値ウォッチの設定
   monthly_analysis: "tjm_monthly_analysis", // v0.6: 月次Claude分析キャッシュ
+  evening_draft:    "tjm_evening_draft",    // v0.7: 夕会のメモ下書き（Step2以降で使用）
 };
 
 // v0.5: 指値ウォッチのデフォルト設定
@@ -2337,6 +2438,348 @@ function renderReviewBody(stats){
 
   return periodHtml + patternsHtml + summaryHtml + monthlyHtml + listHtml;
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  夕会 (v0.7 Step 1: 読み取り専用ビュー)
+//  - v1 localStorage["tj_t5"] から当日売買を取得
+//  - 当日 daily_sessions と突合して match_type を判定
+//  - サマリー + 銘柄別マッチング表示（メモ・Claude振り返りはStep2/3で追加）
+// ════════════════════════════════════════════════════════════════════
+
+const EV_LABELS = {
+  consistent: "✅ 一致",
+  postponed:  "⚠️ 先送り",
+  changed:    "⚡ 方針変更",
+  unjudged:   "🆕 判定外",
+};
+
+const ACTION_LABELS = {
+  acted_sell:      "売却",
+  acted_buy_more:  "買い増し",
+  no_action:       "no_action",
+};
+
+// v1 localStorage["tj_t5"] から指定日の売買を抽出
+function loadV1Trades(date){
+  let raw;
+  try { raw = LS.raw("tj_t5"); } catch(e) { return []; }
+  if (!raw) return [];
+  let arr;
+  try { arr = JSON.parse(raw) || []; } catch(e) {
+    console.warn("[evening] tj_t5 parse error:", e);
+    return [];
+  }
+  return arr.filter(t => t && t.dt === date);
+}
+
+// 当日の daily_sessions を取得（最新 1 件）
+async function getTodaySession(){
+  let sessions;
+  try { sessions = await dbAll("daily_sessions"); } catch(e) {
+    console.warn("[evening] dbAll failed:", e);
+    return null;
+  }
+  // 同日複数あれば completed_at が最新のものを採用
+  const today = sessions
+    .filter(s => s.date === TODAY)
+    .sort((a,b) => (b.completed_at||"").localeCompare(a.completed_at||""));
+  return today[0] || null;
+}
+
+// 朝会判定 × 当日売買 → match 配列を生成
+// judgments: session.judgments（5桁code）、 trades: tj_t5の当日分（4桁cd）
+function matchTradesToJudgments(judgments, trades){
+  // judgmentコードを4桁化したマップを作る（突合キーは4桁ベース）
+  const judgeMap = new Map();
+  for (const j of judgments) {
+    const c4 = String(j.code || "").replace(/0$/, "").length === 4
+      ? String(j.code).slice(0, 4)
+      : String(j.code);
+    // 4桁正規化: 末尾0付き5桁なら頭4桁を採用、それ以外はそのまま
+    const code4 = String(j.code).length === 5 && /^\d{4}0$/.test(j.code)
+      ? j.code.slice(0,4)
+      : (String(j.code).length === 5 && /^\d{3}[A-Za-z]0$/.test(j.code))
+        ? j.code.slice(0,4)
+        : String(j.code);
+    judgeMap.set(code4, j);
+  }
+
+  // 当日売買を銘柄ごとに集約（売り優先、複数なら金額合算）
+  const tradeMap = new Map();
+  for (const t of trades) {
+    const cd = String(t.cd);
+    const cur = tradeMap.get(cd);
+    if (!cur) {
+      tradeMap.set(cd, {
+        cd,
+        nm: t.nm,
+        type: t.type || "spot",
+        sells: t.a === "sell" ? [t] : [],
+        buys:  t.a === "buy"  ? [t] : [],
+      });
+    } else {
+      if (t.a === "sell") cur.sells.push(t);
+      else cur.buys.push(t);
+    }
+  }
+
+  const matches = [];
+  const usedTradeCodes = new Set();
+
+  // 朝会判定ベースでマッチング
+  for (const [code4, j] of judgeMap) {
+    const tinfo = tradeMap.get(code4);
+    let action = "no_action";
+    let executed_price = null;
+    let executed_pnl = null;
+
+    if (tinfo) {
+      usedTradeCodes.add(code4);
+      if (tinfo.sells.length > 0) {
+        action = "acted_sell";
+        // 加重平均価格と pnl 合算
+        const totalSh = tinfo.sells.reduce((s,x) => s + (x.sh||0), 0);
+        const totalAmt = tinfo.sells.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
+        executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
+        executed_pnl = tinfo.sells.reduce((s,x) => s + (x.pnl||0), 0);
+      } else if (tinfo.buys.length > 0) {
+        action = "acted_buy_more";
+        const totalSh = tinfo.buys.reduce((s,x) => s + (x.sh||0), 0);
+        const totalAmt = tinfo.buys.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
+        executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
+      }
+    }
+
+    // match_type 判定
+    let match_type;
+    const jKind = j.judgment;
+    if (jKind === "consider_cut") {
+      match_type = (action === "acted_sell") ? "consistent" : "postponed";
+    } else if (jKind === "consider_sell") {
+      match_type = (action === "acted_sell") ? "consistent" : "postponed";
+    } else if (jKind === "hold") {
+      match_type = (action === "no_action") ? "consistent" : "changed";
+    } else {
+      match_type = "unjudged";
+    }
+
+    matches.push({
+      code: j.code,
+      code4,
+      name: j.name,
+      judgment: jKind,
+      action,
+      executed_price,
+      executed_pnl,
+      match_type,
+      // 参考情報
+      change_pct: j.change_pct,
+      price_at_judgment: j.price_at_judgment,
+    });
+  }
+
+  // 朝会判定外の売買（unjudged）
+  for (const [code4, tinfo] of tradeMap) {
+    if (usedTradeCodes.has(code4)) continue;
+    let action, executed_price, executed_pnl;
+    if (tinfo.sells.length > 0) {
+      action = "acted_sell";
+      const totalSh = tinfo.sells.reduce((s,x) => s + (x.sh||0), 0);
+      const totalAmt = tinfo.sells.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
+      executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
+      executed_pnl = tinfo.sells.reduce((s,x) => s + (x.pnl||0), 0);
+    } else {
+      action = "acted_buy_more";
+      const totalSh = tinfo.buys.reduce((s,x) => s + (x.sh||0), 0);
+      const totalAmt = tinfo.buys.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
+      executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
+      executed_pnl = null;
+    }
+    matches.push({
+      code: code4to5(code4),
+      code4,
+      name: tinfo.nm,
+      judgment: null,
+      action,
+      executed_price,
+      executed_pnl,
+      match_type: "unjudged",
+      change_pct: null,
+      price_at_judgment: null,
+    });
+  }
+
+  return matches;
+}
+
+// サマリー集計
+function summarizeMatches(matches){
+  const s = {
+    judged_count: 0,
+    consistent: 0, postponed: 0, changed: 0, unjudged_actions: 0,
+    realized_pnl_today: 0,
+  };
+  for (const m of matches) {
+    if (m.match_type === "unjudged") s.unjudged_actions++;
+    else s.judged_count++;
+    if (m.match_type === "consistent") s.consistent++;
+    if (m.match_type === "postponed")  s.postponed++;
+    if (m.match_type === "changed")    s.changed++;
+    if (m.executed_pnl != null) s.realized_pnl_today += m.executed_pnl;
+  }
+  return s;
+}
+
+// 損益数値のフォーマット（円・符号付き）
+function fmtPnl(n){
+  if (n == null || isNaN(n)) return "-";
+  const sign = n > 0 ? "+" : (n < 0 ? "-" : "±");
+  return `${sign}¥${Math.abs(Math.round(n)).toLocaleString()}`;
+}
+
+function pnlClass(n){
+  if (n == null || isNaN(n) || n === 0) return "zero";
+  return n > 0 ? "pos" : "neg";
+}
+
+// モーダル本体のレンダリング
+function renderEveningBody(session, trades, matches){
+  const noSession = !session;
+  const noJudgments = session && (!session.judgments || session.judgments.length === 0);
+
+  // 警告バナー
+  let warn = "";
+  if (noSession) {
+    warn = `<div class="ev-warn">⚠️ 今日の朝会記録がありません。先に朝会を完了すると、判定 vs 行動のマッチングが表示されます。</div>`;
+  } else if (noJudgments) {
+    warn = `<div class="ev-warn">⚠️ 今日の朝会で判定済み銘柄がありません。</div>`;
+  }
+
+  // 何もない場合（朝会なし＆売買なし）
+  if (matches.length === 0) {
+    return warn + `
+      <div class="ev-empty">
+        <span class="ee-icon">🌙</span>
+        今日は朝会判定も売買もありません。<br>
+        お疲れ様でした。
+      </div>`;
+  }
+
+  // サマリー
+  const s = summarizeMatches(matches);
+  const summary = `
+    <div class="ev-summary">
+      <div class="ev-summary-title">📊 サマリー</div>
+      <div class="ev-summary-grid">
+        <div class="ev-stat consistent">
+          <div class="ev-stat-num">${s.consistent}</div>
+          <div class="ev-stat-lbl">✅ 一致</div>
+        </div>
+        <div class="ev-stat postponed">
+          <div class="ev-stat-num">${s.postponed}</div>
+          <div class="ev-stat-lbl">⚠️ 先送り</div>
+        </div>
+        <div class="ev-stat changed">
+          <div class="ev-stat-num">${s.changed}</div>
+          <div class="ev-stat-lbl">⚡ 方針変更</div>
+        </div>
+        <div class="ev-stat unjudged">
+          <div class="ev-stat-num">${s.unjudged_actions}</div>
+          <div class="ev-stat-lbl">🆕 判定外</div>
+        </div>
+      </div>
+      <div class="ev-pnl-row">
+        <span class="ev-pnl-lbl">当日確定損益</span>
+        <span class="ev-pnl-val ${pnlClass(s.realized_pnl_today)}">${fmtPnl(s.realized_pnl_today)}</span>
+      </div>
+    </div>`;
+
+  // 銘柄別カード（一致以外を上、一致は折りたたみで下）
+  const order = ["postponed", "changed", "unjudged", "consistent"];
+  const sorted = [...matches].sort((a,b) =>
+    order.indexOf(a.match_type) - order.indexOf(b.match_type)
+  );
+
+  const cards = sorted.map(m => renderMatchCard(m)).join("");
+
+  return warn + summary + `
+    <div class="ev-section-title">🔍 銘柄別マッチング (${matches.length}件)</div>
+    ${cards}
+  `;
+}
+
+function renderMatchCard(m){
+  const judgeLabel = m.judgment ? (JUDGE_ICONS[m.judgment] + " " + JUDGE_LABELS[m.judgment]) : "(朝会判定なし)";
+  const actionLabel = ACTION_LABELS[m.action] || m.action;
+  const isOpen = m.match_type !== "consistent"; // 一致は折りたたみ
+
+  // 行詳細
+  const rows = [];
+  rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">朝の判定</span><span class="ev-row-val">${escapeHtml(judgeLabel)}</span></div>`);
+  rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">実際の行動</span><span class="ev-row-val">${escapeHtml(actionLabel)}</span></div>`);
+  if (m.executed_price != null) {
+    rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">約定価格</span><span class="ev-row-val">¥${m.executed_price.toLocaleString()}</span></div>`);
+  }
+  if (m.executed_pnl != null) {
+    rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">確定損益</span><span class="ev-row-val ${pnlClass(m.executed_pnl)}">${fmtPnl(m.executed_pnl)}</span></div>`);
+  }
+  if (m.change_pct != null && m.action === "no_action") {
+    const cls = m.change_pct >= 0 ? "pos" : "neg";
+    const sign = m.change_pct >= 0 ? "+" : "";
+    rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">朝→終値変化率</span><span class="ev-row-val ${cls}">${sign}${m.change_pct.toFixed(2)}%</span></div>`);
+  }
+
+  return `
+    <div class="ev-card ${m.match_type} ${isOpen ? 'open' : ''}" id="evcard-${m.code4}">
+      <div class="ev-card-hdr" onclick="toggleEvCard('${m.code4}')">
+        <div class="ev-card-l">
+          <span class="ev-card-name">${escapeHtml(m.name || '(名称不明)')}</span>
+          <span class="ev-card-code">${escapeHtml(m.code4)}</span>
+        </div>
+        <span class="ev-badge ${m.match_type}">${EV_LABELS[m.match_type]}</span>
+        <span class="ev-card-arrow">▼</span>
+      </div>
+      <div class="ev-card-body">
+        ${rows.join('')}
+      </div>
+    </div>`;
+}
+
+function toggleEvCard(code4){
+  const el = document.getElementById(`evcard-${code4}`);
+  if (el) el.classList.toggle("open");
+}
+
+async function openEveningModal(){
+  document.getElementById("eveningModal").classList.add("on");
+  await refreshEveningModal();
+}
+
+function closeEveningModal(){
+  document.getElementById("eveningModal").classList.remove("on");
+}
+
+async function refreshEveningModal(){
+  const wrap = document.getElementById("eveningBody");
+  wrap.innerHTML = `<div class="loading" style="padding:24px;justify-content:center;">集計中...</div>`;
+
+  try {
+    const session = await getTodaySession();
+    const trades = loadV1Trades(TODAY);
+    const judgments = (session && session.judgments) || [];
+    const matches = matchTradesToJudgments(judgments, trades);
+    wrap.innerHTML = renderEveningBody(session, trades, matches);
+  } catch(e) {
+    console.error("[evening] refresh failed:", e);
+    wrap.innerHTML = `<div class="error">夕会データ取得エラー: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// イベントバインド
+document.getElementById("eveningBtn").onclick = openEveningModal;
+document.getElementById("eveningModal").onclick = (e) => {
+  if (e.target.id === "eveningModal") closeEveningModal();
+};
 
 // イベントバインド
 document.getElementById("reviewBtn").onclick = openReviewModal;
