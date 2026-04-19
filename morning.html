@@ -548,6 +548,93 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   font-size:10px;color:var(--t3);
 }
 
+/* v0.10: 分析履歴パネル */
+.ja-hist-btn{
+  background:var(--s1);color:var(--t2);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font-size:11px;font-weight:600;
+  cursor:pointer;margin-top:10px;width:100%;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.ja-hist-btn:hover{background:var(--s3);color:var(--text);}
+.ja-hist-btn .ja-hist-count{
+  font-size:10px;color:var(--t3);font-family:var(--mono);
+}
+.ja-hist-panel{
+  margin-top:12px;background:var(--s1);border-radius:8px;
+  border-left:3px solid var(--acc);padding:12px;
+}
+.ja-hist-panel-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:10px;
+}
+.ja-hist-panel-title{font-size:12px;font-weight:700;color:var(--text);}
+.ja-hist-panel-close{
+  background:transparent;border:none;color:var(--t3);
+  font-size:16px;cursor:pointer;padding:2px 6px;
+}
+.ja-hist-panel-close:hover{color:var(--text);}
+.ja-hist-filter{
+  display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;
+}
+.ja-hist-filter button{
+  background:var(--s2);color:var(--t3);border:1px solid var(--border);
+  border-radius:14px;padding:4px 10px;font-size:10px;font-weight:600;
+  cursor:pointer;
+}
+.ja-hist-filter button.active{
+  background:var(--acc);color:#fff;border-color:var(--acc);
+}
+.ja-hist-list{
+  display:flex;flex-direction:column;gap:6px;
+  max-height:60vh;overflow-y:auto;
+}
+.ja-hist-empty{
+  text-align:center;padding:24px 12px;color:var(--t3);
+  font-size:11px;line-height:1.6;
+}
+.ja-hist-item{
+  background:var(--s2);border-radius:6px;border:1px solid var(--border);
+  overflow:hidden;
+}
+.ja-hist-head{
+  padding:10px 12px;cursor:pointer;
+  display:flex;align-items:center;gap:8px;
+  transition:background .15s;
+}
+.ja-hist-head:hover{background:var(--s3);}
+.ja-hist-date{
+  font-size:11px;font-weight:700;color:var(--text);
+  font-family:var(--mono);min-width:70px;
+}
+.ja-hist-period{
+  font-size:9px;color:var(--t3);background:var(--s3);
+  padding:2px 6px;border-radius:10px;font-weight:600;
+}
+.ja-hist-meta{
+  flex:1;font-size:10px;color:var(--t2);line-height:1.4;
+}
+.ja-hist-meta .up{color:var(--green);font-weight:700;font-family:var(--mono);}
+.ja-hist-meta .dn{color:var(--red);font-weight:700;font-family:var(--mono);}
+.ja-hist-chev{font-size:10px;color:var(--t3);transition:transform .15s;}
+.ja-hist-item.open .ja-hist-chev{transform:rotate(180deg);}
+.ja-hist-detail{
+  padding:10px 12px;border-top:1px solid var(--border);background:var(--s1);
+}
+.ja-hist-actions{
+  display:flex;gap:6px;margin-top:10px;
+  padding-top:10px;border-top:1px dashed var(--border);
+}
+.ja-hist-actions button{
+  flex:1;background:var(--s2);color:var(--t2);border:1px solid var(--border);
+  border-radius:6px;padding:7px 10px;font-size:10px;font-weight:600;
+  cursor:pointer;
+}
+.ja-hist-actions button:hover{background:var(--s3);color:var(--text);}
+.ja-hist-actions .ja-hist-del:hover{color:#fca5a5;border-color:#7f1d1d;}
+.ja-hist-legacy{
+  font-size:9px;color:var(--t3);font-style:italic;
+}
+
 /* ─── 夕会 (v0.7) ─── */
 .ev-summary{
   background:linear-gradient(135deg,#1e293b,#0f172a);
@@ -866,7 +953,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.6</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.10</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -910,7 +997,11 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.6 (Phase2 Step5 - 月次Claude分析)
+//  trade-journal morning.html  v0.10 (Phase 3.5+: 分析履歴 IndexedDB + Markdown エクスポート)
+//  - Phase 2 までの全機能
+//  - Phase 3 機能A（夕会）/ 機能B（売買分析 3段分業）
+//  - Phase 3.5 B-β（計画生成の Gemini 補完）/ A-α（夕会の Gemini 補完）
+//  - v0.10 NEW: 機能B の分析結果を IndexedDB に無制限アーカイブ、履歴閲覧UI、Markdownエクスポート
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
@@ -962,6 +1053,7 @@ const K = {
   monthly_analysis: "tjm_monthly_analysis", // v0.6: 月次Claude分析キャッシュ
   evening_draft:    "tjm_evening_draft",    // v0.7: 夕会のメモ下書き（Step2以降で使用）
   journal_analysis: "tjm_journal_analysis", // v0.8 B-6: 売買分析キャッシュ（期間別、LRU 3件）
+  journal_migrated: "tjm_journal_migrated_v010", // v0.10: LRU→IndexedDB 一度限りの移行フラグ
 };
 
 // v0.5: 指値ウォッチのデフォルト設定
@@ -984,7 +1076,7 @@ document.getElementById("hDate").textContent = `${TODAY} (${WD})`;
 // ════════════════════════════════════════════════════════════════════
 
 const DB_NAME = "trade-journal-morning";
-const DB_VERSION = 1;
+const DB_VERSION = 2;  // v0.10: 1 → 2 (journal_analyses store 追加)
 let _dbPromise = null;
 
 function openDB(){
@@ -995,9 +1087,16 @@ function openDB(){
     req.onsuccess = () => resolve(req.result);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+      // daily_sessions (v0.4〜): 朝会・夕会セッション
       if (!db.objectStoreNames.contains("daily_sessions")) {
         const store = db.createObjectStore("daily_sessions", {keyPath: "id", autoIncrement: true});
         store.createIndex("date", "date", {unique: false});
+      }
+      // journal_analyses (v0.10): 売買分析の永続アーカイブ（無制限）
+      if (!db.objectStoreNames.contains("journal_analyses")) {
+        const store = db.createObjectStore("journal_analyses", {keyPath: "id", autoIncrement: true});
+        store.createIndex("generated_at", "generated_at", {unique: false});
+        store.createIndex("period_days", "period_days", {unique: false});
       }
     };
   });
@@ -1040,6 +1139,28 @@ async function dbDeleteAll(storeName){
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
     const req = tx.objectStore(storeName).clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// v0.10: 単一レコード取得（履歴詳細展開用）
+async function dbGet(storeName, id){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readonly");
+    const req = tx.objectStore(storeName).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// v0.10: 単一レコード削除（履歴削除用）
+async function dbDelete(storeName, id){
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    const req = tx.objectStore(storeName).delete(id);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -2707,6 +2828,15 @@ async function renderJournalTab(periodDays){
   // B-6: キャッシュチェック（あれば結果をプリロード）
   const cached = findJournalCacheForPeriod(periodDays);
 
+  // v0.10: アーカイブ件数を取得（履歴ボタンのバッジ用）
+  let archiveCount = 0;
+  try {
+    const all = await dbAll("journal_analyses");
+    archiveCount = all.length;
+  } catch(e) {
+    console.warn("[journal] archive count failed:", e);
+  }
+
   const pnlClass = stats.realized_pnl > 0 ? 'up' : (stats.realized_pnl < 0 ? 'dn' : '');
   const pnlSign  = stats.realized_pnl > 0 ? '+' : '';
 
@@ -2733,6 +2863,12 @@ async function renderJournalTab(periodDays){
         </button>
       `}
 
+      ${archiveCount > 0 ? `
+        <button class="ja-hist-btn" onclick="toggleJournalHistory()">
+          📚 過去の分析 <span class="ja-hist-count">(${archiveCount}件)</span>
+        </button>
+      ` : ''}
+
       <div class="ja-note">
         ${hasClaudeKey && hasGeminiKey
           ? '✅ Claude / Gemini APIキー 設定済 ・ 3段分業（市場文脈 → 数値解釈 → 戦略提案）'
@@ -2742,6 +2878,23 @@ async function renderJournalTab(periodDays){
       <div id="journalAnalysisResult" class="ja-result">${
         cached ? renderJournalFromCache(cached) : ''
       }</div>
+    </div>
+
+    <!-- v0.10: 履歴パネル（初期非表示、toggleJournalHistory でトグル） -->
+    <div id="journalHistoryPanel" class="ja-hist-panel" style="display:none;">
+      <div class="ja-hist-panel-hdr">
+        <div class="ja-hist-panel-title">📚 過去の分析</div>
+        <button class="ja-hist-panel-close" onclick="toggleJournalHistory()" title="閉じる">×</button>
+      </div>
+      <div class="ja-hist-filter" id="journalHistoryFilter">
+        <button data-period="all" class="active" onclick="filterJournalHistory('all')">すべて</button>
+        <button data-period="7"  onclick="filterJournalHistory(7)">7日</button>
+        <button data-period="30" onclick="filterJournalHistory(30)">30日</button>
+        <button data-period="90" onclick="filterJournalHistory(90)">90日</button>
+      </div>
+      <div id="journalHistoryList" class="ja-hist-list">
+        <div class="ja-hist-empty">読込中...</div>
+      </div>
     </div>
   `;
 }
@@ -2831,6 +2984,296 @@ function renderJournalFromCache(cached){
   }
 
   return step1Card + step2Card + step3Card;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  v0.10: 分析履歴（IndexedDB 永続アーカイブ、無制限保存、Markdown エクスポート）
+// ════════════════════════════════════════════════════════════════════
+
+// モジュールスコープの状態（履歴パネル用）
+let _journalHistoryAll = [];      // IndexedDB から取得した全件（generated_at 降順）
+let _journalHistoryFilter = "all"; // "all" | 7 | 30 | 90
+
+// 履歴パネルのトグル（📚ボタンから呼ばれる）
+async function toggleJournalHistory(){
+  const panel = document.getElementById("journalHistoryPanel");
+  if (!panel) return;
+  const isOpen = panel.style.display !== "none";
+  if (isOpen) {
+    panel.style.display = "none";
+  } else {
+    panel.style.display = "block";
+    await loadJournalHistoryList();
+  }
+}
+
+// IndexedDB から全件取得してレンダリング
+async function loadJournalHistoryList(){
+  const listEl = document.getElementById("journalHistoryList");
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="ja-hist-empty">読込中...</div>`;
+  try {
+    const all = await dbAll("journal_analyses");
+    // generated_at 降順（新しい順）
+    all.sort((a, b) => (b.generated_at || "").localeCompare(a.generated_at || ""));
+    _journalHistoryAll = all;
+    renderJournalHistoryList();
+  } catch(e) {
+    console.error("[v0.10] 履歴読込失敗:", e);
+    listEl.innerHTML = `<div class="ja-hist-empty">⚠️ 読込失敗: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// 期間フィルタ切替
+function filterJournalHistory(period){
+  _journalHistoryFilter = period;
+  // フィルタボタンの active 切替
+  const filterBar = document.getElementById("journalHistoryFilter");
+  if (filterBar) {
+    filterBar.querySelectorAll("button").forEach(btn => {
+      const p = btn.dataset.period;
+      const isActive = (p === "all" && period === "all") || (Number(p) === Number(period));
+      btn.classList.toggle("active", isActive);
+    });
+  }
+  renderJournalHistoryList();
+}
+
+// フィルタ適用後の一覧を描画
+function renderJournalHistoryList(){
+  const listEl = document.getElementById("journalHistoryList");
+  if (!listEl) return;
+
+  let items = _journalHistoryAll;
+  if (_journalHistoryFilter !== "all") {
+    const n = Number(_journalHistoryFilter);
+    items = items.filter(it => Number(it.period_days) === n);
+  }
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<div class="ja-hist-empty">
+      ${_journalHistoryFilter === "all"
+        ? "まだ保存された分析はありません"
+        : `「${_journalHistoryFilter}日」の分析はありません`}
+    </div>`;
+    return;
+  }
+
+  listEl.innerHTML = items.map(it => renderJournalHistoryRow(it)).join("");
+}
+
+// 一覧の 1 行（折りたたみ式）
+function renderJournalHistoryRow(entry){
+  const dt = new Date(entry.generated_at);
+  const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  const timeStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+
+  const s = entry.stats_snapshot;
+  let metaHtml;
+  if (s) {
+    const pnlClass = s.realized_pnl > 0 ? 'up' : (s.realized_pnl < 0 ? 'dn' : '');
+    const pnlSign = s.realized_pnl > 0 ? '+' : '';
+    metaHtml = `${s.total_trades}取引 ・ <span class="${pnlClass}">${pnlSign}¥${fmt(s.realized_pnl)}</span> ・ 勝率${Math.round((s.win_rate || 0) * 100)}%`;
+  } else {
+    // v0.8 から移行してきた旧データは stats_snapshot なし
+    metaHtml = `<span class="ja-hist-legacy">（v0.8 から移行・統計なし）</span>`;
+  }
+
+  return `
+    <div class="ja-hist-item" id="histItem_${entry.id}">
+      <div class="ja-hist-head" onclick="toggleJournalHistoryDetail(${entry.id})">
+        <div class="ja-hist-date">${dateStr}<br><span style="font-size:9px;color:var(--t3);font-weight:400;">${timeStr}</span></div>
+        <div class="ja-hist-period">${entry.period_days}日</div>
+        <div class="ja-hist-meta">${metaHtml}</div>
+        <div class="ja-hist-chev">▼</div>
+      </div>
+      <div class="ja-hist-detail" id="histDetail_${entry.id}" style="display:none;">
+        <div class="ja-hist-empty" style="padding:8px;">タップして展開...</div>
+      </div>
+    </div>
+  `;
+}
+
+// 行タップ: 詳細の折りたたみ/展開
+async function toggleJournalHistoryDetail(id){
+  const item = document.getElementById(`histItem_${id}`);
+  const detail = document.getElementById(`histDetail_${id}`);
+  if (!item || !detail) return;
+
+  const isOpen = item.classList.contains("open");
+  if (isOpen) {
+    item.classList.remove("open");
+    detail.style.display = "none";
+    return;
+  }
+
+  // 初回展開時に IndexedDB から詳細を取得（本体は重いので遅延ロード）
+  item.classList.add("open");
+  detail.style.display = "block";
+
+  if (detail.dataset.loaded === "1") return;  // 再展開では再描画不要
+  try {
+    const entry = await dbGet("journal_analyses", id);
+    if (!entry) {
+      detail.innerHTML = `<div class="ja-hist-empty">⚠️ データが見つかりません</div>`;
+      return;
+    }
+    const cardsHtml = renderJournalFromCache(entry);
+    detail.innerHTML = `
+      ${cardsHtml || '<div class="ja-hist-empty">分析データが空です</div>'}
+      <div class="ja-hist-actions">
+        <button onclick="copyJournalAsMarkdown(${id})">📋 Markdown コピー</button>
+        <button class="ja-hist-del" onclick="deleteJournalHistoryEntry(${id})">🗑 削除</button>
+      </div>
+    `;
+    detail.dataset.loaded = "1";
+  } catch(e) {
+    console.error("[v0.10] 詳細取得失敗:", e);
+    detail.innerHTML = `<div class="ja-hist-empty">⚠️ 取得失敗: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// レコード削除
+async function deleteJournalHistoryEntry(id){
+  if (!confirm("この分析結果を削除しますか？\n（この操作は取り消せません）")) return;
+  try {
+    await dbDelete("journal_analyses", id);
+    toast("🗑 削除しました");
+    // リロード
+    await loadJournalHistoryList();
+    // タブ全体の件数バッジも更新したいので、親タブを再描画
+    if (typeof refreshReviewModal === "function") {
+      refreshReviewModal();
+    }
+  } catch(e) {
+    console.error("[v0.10] 削除失敗:", e);
+    toast("⚠️ 削除失敗: " + e.message);
+  }
+}
+
+// Markdown 生成（エクスポート用）
+function buildJournalMarkdown(entry){
+  const dt = new Date(entry.generated_at);
+  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  const label = entry.period_label || formatPeriodRange(entry.period_days);
+
+  const lines = [];
+  lines.push(`# 売買分析: ${label} (${entry.period_days}日)`);
+  lines.push(``);
+  lines.push(`- 生成日時: ${dtStr}`);
+  lines.push(`- 生成モデル: Gemini 2.5 Flash (Step1/2) + Claude Sonnet 4.6 (Step3)`);
+  lines.push(``);
+
+  const s = entry.stats_snapshot;
+  if (s) {
+    const pnlSign = s.realized_pnl > 0 ? '+' : '';
+    lines.push(`## 📊 サマリー`);
+    lines.push(``);
+    lines.push(`- 取引: ${s.total_trades}回（買 ${s.buy_count} / 売 ${s.sell_count}）`);
+    lines.push(`- 確定損益: ${pnlSign}¥${fmt(s.realized_pnl)}`);
+    lines.push(`- 勝率: ${Math.round((s.win_rate || 0) * 100)}%`);
+    if (s.profit_factor != null) {
+      lines.push(`- プロフィットファクター: ${s.profit_factor}`);
+    }
+    lines.push(`- 保有中: ${s.holdings_count}銘柄${s.total_unrealized_pnl != null
+      ? `（含み ${s.total_unrealized_pnl >= 0 ? '+' : ''}¥${fmt(s.total_unrealized_pnl)}）` : ''}`);
+    lines.push(``);
+  }
+
+  if (entry.step1) {
+    lines.push(`## 🌍 Step1: 市場文脈 (Gemini + Google検索)`);
+    lines.push(``);
+    lines.push(entry.step1.error ? `⚠️ ${entry.step1.error}` : (entry.step1.text || ""));
+    lines.push(``);
+  }
+  if (entry.step2) {
+    lines.push(`## 📊 Step2: 数値解釈 (Gemini)`);
+    lines.push(``);
+    lines.push(entry.step2.error ? `⚠️ ${entry.step2.error}` : (entry.step2.text || ""));
+    lines.push(``);
+  }
+  if (entry.step3) {
+    lines.push(`## 🎯 Step3: 戦略提案 (Claude Sonnet 4.6)`);
+    lines.push(``);
+    lines.push(entry.step3.error ? `⚠️ ${entry.step3.error}` : (entry.step3.text || ""));
+    lines.push(``);
+  }
+
+  lines.push(`---`);
+  lines.push(`_trade-journal morning.html v0.10 で生成_`);
+  return lines.join("\n");
+}
+
+// クリップボードコピー
+async function copyJournalAsMarkdown(id){
+  try {
+    const entry = await dbGet("journal_analyses", id);
+    if (!entry) {
+      toast("⚠️ データが見つかりません");
+      return;
+    }
+    const md = buildJournalMarkdown(entry);
+    // Clipboard API（モバイル含めて最近のブラウザで利用可能）
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(md);
+      toast(`📋 Markdownをコピーしました (${md.length.toLocaleString()}文字)`);
+    } else {
+      // フォールバック: 旧来の execCommand
+      const ta = document.createElement("textarea");
+      ta.value = md;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      toast(ok ? `📋 Markdownをコピーしました` : "⚠️ コピー失敗（手動で選択してください）");
+    }
+  } catch(e) {
+    console.error("[v0.10] コピー失敗:", e);
+    toast("⚠️ コピー失敗: " + e.message);
+  }
+}
+
+// localStorage LRU → IndexedDB ワンショット移行（起動時に 1 回だけ実行）
+async function migrateJournalCacheToIndexedDB(){
+  if (LS.get(K.journal_migrated, false)) return;
+
+  try {
+    const cache = LS.get(K.journal_analysis, {});
+    const entries = Object.values(cache).filter(v => v && v.generated_at);
+    if (entries.length === 0) {
+      LS.set(K.journal_migrated, true);
+      return;
+    }
+
+    // 既存 IndexedDB の generated_at で重複排除
+    const existing = await dbAll("journal_analyses");
+    const existingTimes = new Set(existing.map(e => e.generated_at));
+
+    let migrated = 0;
+    for (const entry of entries) {
+      if (existingTimes.has(entry.generated_at)) continue;
+      await dbAdd("journal_analyses", {
+        generated_at: entry.generated_at,
+        period_days: entry.period_days,
+        period_label: formatPeriodRange(entry.period_days),
+        stats_snapshot: null,  // 旧データには snapshot がないので null
+        step1: entry.step1 || null,
+        step2: entry.step2 || null,
+        step3: entry.step3 || null,
+        migrated_from_localStorage: true,
+      });
+      migrated++;
+    }
+    LS.set(K.journal_migrated, true);
+    if (migrated > 0) {
+      console.log(`[v0.10] ${migrated}件の分析を localStorage から IndexedDB に移行しました`);
+    }
+  } catch(e) {
+    console.warn("[v0.10] journal_analysis 移行エラー:", e);
+    // 失敗時はフラグを立てない → 次回起動時に再試行
+  }
 }
 
 // 期間の開始日〜終了日を "YYYY-MM-DD 〜 YYYY-MM-DD" で返す
@@ -3162,6 +3605,33 @@ async function generateJournalAnalysis(periodDays, force=false){
   };
   const cacheKey = getJournalCacheKey(periodDays, generatedAt);
   saveJournalCache(cacheKey, cacheData);
+
+  // v0.10: IndexedDB にもアーカイブ保存（永続、無制限）
+  // localStorage は当日キャッシュとしての役割を維持（モーダル再オープンの即時復元用）
+  try {
+    await dbAdd("journal_analyses", {
+      generated_at: generatedAt,
+      period_days: periodDays,
+      period_label: formatPeriodRange(periodDays),
+      stats_snapshot: {
+        total_trades:         data.stats.total_trades,
+        buy_count:            data.stats.buy_count,
+        sell_count:           data.stats.sell_count,
+        realized_pnl:         data.stats.realized_pnl,
+        win_rate:             data.stats.win_rate,
+        profit_factor:        data.stats.profit_factor,
+        holdings_count:       data.holdings_summary.count,
+        total_unrealized_pnl: data.holdings_summary.total_unrealized_pnl,
+      },
+      step1: step1Result,
+      step2: step2Result,
+      step3: step3Result,
+    });
+    console.log("[v0.10] journal_analyses にアーカイブ保存しました");
+  } catch(e) {
+    // localStorage には保存済なので致命的ではない。UIは正常表示のまま
+    console.warn("[v0.10] journal_analyses 保存失敗（localStorage は保存済）:", e);
+  }
 
   // 再生成ボタンに切り替えるため、タブ全体を再描画
   // ただし、結果表示エリアはそのまま維持（すでに表示済み）
@@ -4426,6 +4896,12 @@ document.getElementById("reviewModal").onclick = (e) => {
   setTimeout(() => {
     evaluatePastJudgments().catch(e => console.warn("[review] background eval failed:", e));
   }, 2000);
+
+  // v0.10: localStorage LRU → IndexedDB のワンショット移行（初回起動時のみ）
+  setTimeout(() => {
+    migrateJournalCacheToIndexedDB().catch(e =>
+      console.warn("[v0.10] migrate failed:", e));
+  }, 3000);
 })();
 </script>
 
