@@ -1489,25 +1489,45 @@ function syncFromV1(){
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  ③ 計画生成 (Claude API)
+//  ③ 計画生成 (v0.9 B-β: Gemini市場速報 + Claude計画 の2段分業)
+//    Step1: Gemini 2.5 Flash + Google検索
+//           → 今朝のNY市況・為替・関連セクター・ヘッドライン (オプショナル)
+//    Step2: Claude Haiku 4.5
+//           → Step1結果を踏まえた今日の行動計画 (必須)
+//    Gemini が未設定/失敗でも Claude 単独で続行（無劣化フォールバック）
+//    キャッシュ schema: {date, step1:{text|error}|null, step2:{text,generated_at}, generated_at}
+//    後方互換: v0.8 schema {date,text,generated_at} も読み込み可
 // ════════════════════════════════════════════════════════════════════
 
 function renderPlanInitial(){
-  // 既に生成済みの計画があれば表示
+  // 既に生成済みの計画があれば表示（新schema優先、legacy schema対応）
   const cached = LS.get(K.last_plan, null);
-  if (cached && cached.date === TODAY && cached.text) {
-    PLAN_TEXT = cached.text;
-    showPlan(cached.text, cached.generated_at);
-    return;
+  if (cached && cached.date === TODAY) {
+    // v0.9 新schema
+    if (cached.step2 && cached.step2.text) {
+      PLAN_TEXT = cached.step2.text;
+      renderPlanCards(cached.step1 || null, cached.step2);
+      return;
+    }
+    // v0.8 legacy schema (同日のキャッシュはクラッシュさせず Claude-only として表示)
+    if (cached.text) {
+      PLAN_TEXT = cached.text;
+      renderPlanCards(null, {text: cached.text, generated_at: cached.generated_at});
+      return;
+    }
   }
 
+  // 未生成: 生成ボタン
+  const geminiAvailable = !!((LS.raw(K.api_gemini) || "").trim());
   document.getElementById("bodyPlan").innerHTML = `
     <button class="plan-gen-btn" onclick="generatePlan()">
-      🧠 Claude で今日の計画を生成
+      🌅 今日の計画を生成
     </button>
-    <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:center;">
-      モデル: ${CLAUDE_MODEL}<br>
-      コスト目安: 1回あたり 約1〜2円
+    <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:center;line-height:1.6;">
+      ${geminiAvailable
+        ? `🌍 ${GEMINI_MODEL} + 🧠 ${CLAUDE_MODEL}<br>コスト目安: 約¥2〜3/回`
+        : `🧠 ${CLAUDE_MODEL} のみ<br><span style="color:var(--yellow);">💡 Gemini キー設定で今朝の市場速報も自動取得</span><br>コスト目安: 約¥1〜2/回`
+      }
     </div>
   `;
   document.getElementById("badgePlan").textContent = "未生成";
@@ -1516,8 +1536,8 @@ function renderPlanInitial(){
 }
 
 async function generatePlan(){
-  const apiKey = LS.raw(K.api_claude);
-  if (!apiKey || !apiKey.trim()) {
+  const claudeKey = LS.raw(K.api_claude);
+  if (!claudeKey || !claudeKey.trim()) {
     document.getElementById("bodyPlan").innerHTML = `
       <div class="plan-error">
         ⚠️ Claude API キーが未設定です<br>
@@ -1530,30 +1550,68 @@ async function generatePlan(){
     return;
   }
 
-  // ローディング
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  const useGemini = !!geminiKey;
+
+  // ── Step1: Gemini 市場速報 (optional) ──
+  let step1Result = null;
+  if (useGemini) {
+    document.getElementById("bodyPlan").innerHTML = `
+      <div class="ja-step-card loading">
+        <div class="ja-step-hdr">🌍 今朝の市場を調査中...</div>
+        <div class="ja-step-body" style="color:var(--t3);">Gemini が Google検索で NY市況・為替・セクター動向を取得しています（15〜30秒）</div>
+      </div>
+    `;
+    try {
+      const giPrompt = buildGeminiMarketBriefPrompt();
+      const giText = await callGemini(geminiKey, giPrompt, {useSearch: true, maxTokens: 2000});
+      step1Result = {text: giText, generated_at: new Date().toISOString()};
+    } catch(e) {
+      console.warn("Gemini market brief failed:", e);
+      step1Result = {error: e.message || String(e)};
+    }
+  }
+
+  // ── Step1 結果を表示しつつ Step2 ローディング ──
+  const step1Html = step1Result
+    ? renderStepCard(1, "今朝の市場速報", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)
+    : "";
+  const hasGeminiText = !!(step1Result && step1Result.text);
   document.getElementById("bodyPlan").innerHTML = `
-    <div class="loading" style="padding:24px 12px;justify-content:center;">
-      Claude が今日の方針を考えています...
+    ${step1Html}
+    <div class="ja-step-card loading">
+      <div class="ja-step-hdr">🧠 今日の計画を考案中...</div>
+      <div class="ja-step-body" style="color:var(--t3);">Claude が保有銘柄・マクロ${hasGeminiText ? "・市場速報" : ""}を統合しています</div>
     </div>
   `;
 
+  // ── Step2: Claude 計画 ──
   try {
-    const prompt = buildPlanPrompt();
-    const text = await callClaude(apiKey, prompt);
+    const geminiText = hasGeminiText ? step1Result.text : null;
+    const prompt = buildPlanPrompt(geminiText);
+    const text = await callClaude(claudeKey, prompt);
     PLAN_TEXT = text;
 
-    // localStorage キャッシュ
+    const nowIso = new Date().toISOString();
+    const step2 = {text, generated_at: nowIso};
+
+    // localStorage キャッシュ (v0.9 新schema)
     LS.set(K.last_plan, {
       date: TODAY,
-      text,
-      generated_at: new Date().toISOString(),
+      step1: step1Result,
+      step2,
+      generated_at: nowIso,
     });
 
-    showPlan(text, new Date().toISOString());
+    renderPlanCards(step1Result, step2);
   } catch(e) {
     console.error("plan generation failed:", e);
+    const step1HtmlRetry = step1Result
+      ? renderStepCard(1, "今朝の市場速報", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)
+      : "";
     document.getElementById("bodyPlan").innerHTML = `
-      <div class="plan-error">
+      ${step1HtmlRetry}
+      <div class="plan-error" style="margin-top:10px;">
         ⚠️ 計画生成に失敗しました<br>
         ${escapeHtml(e.message)}
       </div>
@@ -1566,26 +1624,88 @@ async function generatePlan(){
   }
 }
 
-function showPlan(text, generatedAt){
-  const dt = new Date(generatedAt);
+// 2カード描画（Step1 Gemini 市場速報 + Step2 Claude 計画）
+// step1 は null / {text,generated_at} / {error} のいずれか
+// step2 は {text,generated_at}（必須）
+function renderPlanCards(step1, step2){
+  const step1Html = step1
+    ? renderStepCard(1, "今朝の市場速報", "🌍", step1, `🤖 ${GEMINI_MODEL} + Google検索`)
+    : "";
+
+  // Step2 (Claude計画) はメインコンテンツなので strategy クラスで強調
+  const dt = new Date(step2.generated_at || new Date().toISOString());
   const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  const step2Html = `
+    <div class="ja-step-card strategy">
+      <div class="ja-step-hdr">🧠 今日の計画</div>
+      <div class="plan-text" style="margin-top:4px;">${escapeHtml(step2.text)}</div>
+      <div class="ja-step-meta">🤖 ${CLAUDE_MODEL} · ${dtStr}</div>
+    </div>
+  `;
+
   document.getElementById("bodyPlan").innerHTML = `
-    <div class="plan-text">${escapeHtml(text)}</div>
-    <div class="plan-meta">🧠 ${CLAUDE_MODEL} · ${dtStr}</div>
-    <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:10px;background:var(--s2);color:var(--t2);">
+    ${step1Html}
+    ${step2Html}
+    <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:12px;background:var(--s2);color:var(--t2);">
       🔄 再生成
     </button>
   `;
+
   document.getElementById("badgePlan").textContent = "✓ 生成済";
   document.getElementById("badgePlan").className = "sec-badge done";
   document.getElementById("numPlan").classList.remove("active");
   document.getElementById("numPlan").classList.add("done");
   document.getElementById("numPlan").textContent = "✓";
-  document.getElementById("previewPlan").textContent = text.slice(0, 60) + (text.length > 60 ? "..." : "");
+  document.getElementById("previewPlan").textContent = step2.text.slice(0, 60) + (step2.text.length > 60 ? "..." : "");
   document.getElementById("doneBtn").disabled = false;
 }
 
-function buildPlanPrompt(){
+// ── Gemini Step1: 今朝の市場速報プロンプト ──
+function buildGeminiMarketBriefPrompt(){
+  // ユーザー（ひろき様）の注目テーマ（watchlist のテーマから抽出、固定）
+  const themes = "ドローン / AI / 防衛 / 半導体 / 電池 / レアメタル / SaaS";
+
+  // 保有銘柄の名前リスト（Geminiがセクター関連性を判断する助けに）
+  const holdingNames = HOLDINGS.length > 0
+    ? HOLDINGS.slice(0, 10).map(h => `${h.name}(${h.code})`).join("、")
+    : "（なし）";
+
+  return `あなたは日本株トレーダー向けの市場アナリストです。
+本日 ${TODAY} (${WD}) の東京市場が始まる直前の**今朝の市場ブリーフ**を、Google検索で直近24時間のデータを基に作成してください。
+
+## 読者の文脈
+- 日本株スイングトレーダー（1ポジション10〜30万円、6,000円以下中心）
+- 注目テーマ: ${themes}
+- 本日の保有銘柄: ${holdingNames}
+
+## 出力項目（各1〜2行、箇条書き中心）
+
+### 🇺🇸 NY主要指数（前日終値）
+S&P500 / NASDAQ / ダウ / SOX / Russell2000 の終値と前日比%、流れのコメント
+
+### 💱 為替
+USD/JPY の直近水準と方向感、必要なら EUR/JPY や人民元も
+
+### 🏭 関連セクター・個別銘柄
+上記テーマ（半導体・防衛・ドローン・AI・電池）に関連する米株の直近24hの大きな動き
+（例: NVIDIA, AMD, Palantir, Lockheed Martin, Albemarle, RTX, BA など）
+
+### 📰 注目ヘッドライン
+日本株に波及しうるニュース（FOMC・日銀・地政学・大型決算・規制）を最大3件、1行ずつ
+
+### 🎯 今日の東京市場への含意
+上記を踏まえ、今日の東京市場で特に注意/注目すべきポイントを2〜3行
+
+## 執筆ルール
+- 全体で 400〜600字、箇条書き中心でスキャナブルに
+- 数字は具体的に（「大きく下落」ではなく「-2.3%」）
+- 検索結果で裏取りした事実のみ。推測・一般論は避ける
+- 日本時間で「今朝」= ${TODAY} の朝の視点で書く
+- 最後まで書き切ること（途中で切らない）`;
+}
+
+// ── Claude Step2: 計画プロンプト（geminiResult があれば冒頭に挿入） ──
+function buildPlanPrompt(geminiResult = null){
   const judgmentsList = HOLDINGS.map(h => {
     const j = JUDGMENTS[h.code];
     if (!j) return null;
@@ -1616,10 +1736,17 @@ function buildPlanPrompt(){
     ? `\n## 💎 指値接近銘柄（押し目候補・¥${fmt(watchSettings.max_price, 0)}以下・${watchSettings.min_rank}+）\n\`\`\`json\n${JSON.stringify(watchList, null, 2)}\n\`\`\`\n`
     : "";
 
+  // v0.9 B-β: 今朝の市場速報（Gemini調べ、あれば冒頭に挿入）
+  const marketBriefSection = geminiResult
+    ? `\n## 🌍 今朝の市場速報（Gemini + Google検索）
+${geminiResult}
+`
+    : "";
+
   return `あなたはひろき様の専属トレーディング・コーチです。
 スイングトレーダーであるひろき様が朝会で記録した本日の判断を踏まえ、
 **今日一日の具体的な行動計画**を簡潔にアドバイスしてください。
-
+${marketBriefSection}
 ## 📊 マクロ状態
 ${macroSummary ? "```json\n" + JSON.stringify(macroSummary, null, 2) + "\n```" : "(データなし)"}
 
@@ -1662,7 +1789,7 @@ ${watchList ? `## 💎 押し目候補へのアプローチ
 - 全体で ${watchList ? '500〜700' : '400〜600'} 字程度に収める
 - マクロ "${macroSummary?.regime}" を必ず考慮（特に STORM/HALT 時はサイズ縮小強調）
 - 「損切検討」「利確検討」と判断した銘柄には、具体的な価格水準で行動指示
-${watchList ? '- 押し目候補は、現在の地合いと既存ポジションのリスクを踏まえて慎重に評価\n' : ''}- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
+${geminiResult ? '- 今朝の市場速報（NY市況・為替・海外セクター）が日本株や保有銘柄にどう波及するかを、計画に必ず織り込む\n' : ''}${watchList ? '- 押し目候補は、現在の地合いと既存ポジションのリスクを踏まえて慎重に評価\n' : ''}- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
 - 不確実性を避けず、リスクは率直に明示`;
 }
 
