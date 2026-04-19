@@ -635,6 +635,66 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   font-size:9px;color:var(--t3);font-style:italic;
 }
 
+/* v0.11: 汎用コピーボタン（橙色で控えめ） */
+.copy-btn-sm{
+  background:transparent;
+  border:1px solid rgba(245, 158, 11, 0.35);
+  color:#f59e0b;
+  border-radius:4px;padding:2px 7px;
+  font-size:10px;font-weight:600;cursor:pointer;
+  line-height:1.3;
+  transition:background .15s, border-color .15s;
+}
+.copy-btn-sm:hover{
+  background:rgba(245, 158, 11, 0.10);
+  border-color:rgba(245, 158, 11, 0.6);
+}
+.copy-btn-sm:active{
+  background:rgba(245, 158, 11, 0.20);
+}
+/* カードヘッダー右端に配置するためのラッパー */
+.card-hdr-with-copy{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;margin-bottom:8px;
+}
+.card-hdr-with-copy .ja-step-hdr,
+.card-hdr-with-copy .ev-gemini-hdr{
+  margin-bottom:0;
+}
+
+/* v0.11: セクション単位コピーボタン（ズレ銘柄ごと・朝会③全体） */
+.copy-section-btn{
+  background:rgba(245, 158, 11, 0.08);
+  color:#f59e0b;
+  border:1px solid rgba(245, 158, 11, 0.3);
+  border-radius:6px;padding:6px 10px;
+  font-size:11px;font-weight:600;cursor:pointer;
+  margin-top:8px;width:100%;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.copy-section-btn:hover{
+  background:rgba(245, 158, 11, 0.15);
+  border-color:rgba(245, 158, 11, 0.5);
+}
+
+/* v0.11: 夕会モーダルヘッダの日次まとめボタン */
+.ev-digest-btn{
+  background:rgba(245, 158, 11, 0.10);
+  color:#f59e0b;
+  border:1px solid rgba(245, 158, 11, 0.35);
+  border-radius:6px;padding:5px 10px;
+  font-size:11px;font-weight:600;cursor:pointer;
+  margin-right:6px;
+  display:inline-flex;align-items:center;gap:4px;
+  transition:background .15s;
+}
+.ev-digest-btn:hover{
+  background:rgba(245, 158, 11, 0.18);
+}
+.ev-digest-btn:disabled{
+  opacity:.4;cursor:not-allowed;
+}
+
 /* ─── 夕会 (v0.7) ─── */
 .ev-summary{
   background:linear-gradient(135deg,#1e293b,#0f172a);
@@ -953,7 +1013,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.10</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.11</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -985,6 +1045,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-hdr">
       <div class="modal-title">🌆 夕会</div>
       <div class="review-hdr-actions">
+        <button class="ev-digest-btn" id="evDigestBtn" onclick="copyDailyDigest()" title="朝会計画＋夕会まとめをMarkdownコピー">📋 今日のまとめ</button>
         <button class="icon-btn" onclick="refreshEveningModal()" title="再読込">🔄</button>
         <button class="modal-close" onclick="closeEveningModal()">×</button>
       </div>
@@ -997,11 +1058,12 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.10 (Phase 3.5+: 分析履歴 IndexedDB + Markdown エクスポート)
+//  trade-journal morning.html  v0.11 (Phase 3.6: エクスポート横展開)
 //  - Phase 2 までの全機能
 //  - Phase 3 機能A（夕会）/ 機能B（売買分析 3段分業）
 //  - Phase 3.5 B-β（計画生成の Gemini 補完）/ A-α（夕会の Gemini 補完）
-//  - v0.10 NEW: 機能B の分析結果を IndexedDB に無制限アーカイブ、履歴閲覧UI、Markdownエクスポート
+//  - Phase 3.5+ (v0.10): 機能B の IndexedDB 永続アーカイブ、履歴閲覧UI、Markdownエクスポート
+//  - Phase 3.6 (v0.11) NEW: エクスポートを朝会計画・夕会にも展開、日次まとめボタン追加
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
@@ -1778,24 +1840,47 @@ async function generatePlan(){
 // step1 は null / {text,generated_at} / {error} のいずれか
 // step2 は {text,generated_at}（必須）
 function renderPlanCards(step1, step2){
-  const step1Html = step1
-    ? renderStepCard(1, "今朝の市場速報", "🌍", step1, `🤖 ${GEMINI_MODEL} + Google検索`)
-    : "";
+  // v0.11: 各カード右上に 📋 コピーボタンを添える
+  let step1Html = "";
+  if (step1) {
+    // renderStepCard はヘッダ固定なので、外側ラッパで並置する方式に変更
+    const inner = renderStepCard(1, "今朝の市場速報", "🌍", step1, `🤖 ${GEMINI_MODEL} + Google検索`);
+    step1Html = `
+      <div style="position:relative;">
+        ${inner}
+        ${(!step1.error && step1.text) ? `
+          <button class="copy-btn-sm" onclick="copyPlanStep1()"
+                  style="position:absolute;top:10px;right:12px;" title="市場速報をMarkdownコピー">📋 コピー</button>
+        ` : ''}
+      </div>`;
+  }
 
   // Step2 (Claude計画) はメインコンテンツなので strategy クラスで強調
   const dt = new Date(step2.generated_at || new Date().toISOString());
   const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
   const step2Html = `
-    <div class="ja-step-card strategy">
+    <div class="ja-step-card strategy" style="position:relative;">
       <div class="ja-step-hdr">🧠 今日の計画</div>
+      ${step2.text ? `
+        <button class="copy-btn-sm" onclick="copyPlanStep2()"
+                style="position:absolute;top:10px;right:12px;" title="Claude計画をMarkdownコピー">📋 コピー</button>
+      ` : ''}
       <div class="plan-text" style="margin-top:4px;">${escapeHtml(step2.text)}</div>
       <div class="ja-step-meta">🤖 ${CLAUDE_MODEL} · ${dtStr}</div>
     </div>
   `;
 
+  // v0.11: セクション単位のコピー（市場速報 + 計画を1つの Markdown に）
+  const sectionCopyBtn = step2.text ? `
+    <button class="copy-section-btn" onclick="copyPlanAll()" title="今朝の市場速報＋計画を一括コピー">
+      📋 今朝の計画まるごとコピー
+    </button>
+  ` : '';
+
   document.getElementById("bodyPlan").innerHTML = `
     ${step1Html}
     ${step2Html}
+    ${sectionCopyBtn}
     <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:12px;background:var(--s2);color:var(--t2);">
       🔄 再生成
     </button>
@@ -1808,6 +1893,98 @@ function renderPlanCards(step1, step2){
   document.getElementById("numPlan").textContent = "✓";
   document.getElementById("previewPlan").textContent = step2.text.slice(0, 60) + (step2.text.length > 60 ? "..." : "");
   document.getElementById("doneBtn").disabled = false;
+}
+
+// v0.11: 朝会計画のコピーハンドラ（tjm_last_plan から生成）
+function getPlanCacheForExport(){
+  const cached = LS.get(K.last_plan, null);
+  if (!cached || cached.date !== TODAY) return null;
+  return cached;
+}
+
+function buildPlanStep1Markdown(cached){
+  if (!cached || !cached.step1 || !cached.step1.text) return "";
+  const dt = new Date(cached.step1.generated_at || cached.generated_at || new Date().toISOString());
+  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  return [
+    `# 🌍 今朝の市場速報 (${cached.date})`,
+    ``,
+    `- 生成日時: ${dtStr}`,
+    `- 生成モデル: ${GEMINI_MODEL} + Google検索`,
+    ``,
+    cached.step1.text.trim(),
+    ``,
+    `---`,
+    `_trade-journal morning.html v0.11 で生成_`,
+  ].join("\n");
+}
+
+function buildPlanStep2Markdown(cached){
+  // v0.9 schema: cached.step2.text / cached.step2.generated_at
+  // v0.8 legacy: cached.text / cached.generated_at
+  const step2 = cached.step2 || {text: cached.text, generated_at: cached.generated_at};
+  if (!step2 || !step2.text) return "";
+  const dt = new Date(step2.generated_at || new Date().toISOString());
+  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  return [
+    `# 🧠 今日の計画 (${cached.date || TODAY})`,
+    ``,
+    `- 生成日時: ${dtStr}`,
+    `- 生成モデル: ${CLAUDE_MODEL}`,
+    ``,
+    step2.text.trim(),
+    ``,
+    `---`,
+    `_trade-journal morning.html v0.11 で生成_`,
+  ].join("\n");
+}
+
+function buildPlanAllMarkdown(cached){
+  const step2 = cached.step2 || {text: cached.text, generated_at: cached.generated_at};
+  if (!step2 || !step2.text) return "";
+  const lines = [];
+  lines.push(`# 📅 ${cached.date || TODAY} 朝会の計画`);
+  lines.push(``);
+  lines.push(`_trade-journal morning.html v0.11 で生成_`);
+  lines.push(``);
+  if (cached.step1 && cached.step1.text) {
+    lines.push(`## 🌍 今朝の市場速報`);
+    lines.push(`_🤖 ${GEMINI_MODEL} + Google検索_`);
+    lines.push(``);
+    lines.push(cached.step1.text.trim());
+    lines.push(``);
+  }
+  lines.push(`## 🧠 今日の計画`);
+  lines.push(`_🤖 ${CLAUDE_MODEL}_`);
+  lines.push(``);
+  lines.push(step2.text.trim());
+  lines.push(``);
+  lines.push(`---`);
+  return lines.join("\n");
+}
+
+async function copyPlanStep1(){
+  const cached = getPlanCacheForExport();
+  if (!cached) { toast("⚠️ 今日の計画がまだ生成されていません"); return; }
+  const md = buildPlanStep1Markdown(cached);
+  if (!md) { toast("⚠️ 市場速報データなし"); return; }
+  await copyMarkdown(md, "市場速報");
+}
+
+async function copyPlanStep2(){
+  const cached = getPlanCacheForExport();
+  if (!cached) { toast("⚠️ 今日の計画がまだ生成されていません"); return; }
+  const md = buildPlanStep2Markdown(cached);
+  if (!md) { toast("⚠️ 計画データなし"); return; }
+  await copyMarkdown(md, "計画");
+}
+
+async function copyPlanAll(){
+  const cached = getPlanCacheForExport();
+  if (!cached) { toast("⚠️ 今日の計画がまだ生成されていません"); return; }
+  const md = buildPlanAllMarkdown(cached);
+  if (!md) { toast("⚠️ 計画データなし"); return; }
+  await copyMarkdown(md, "今朝の計画まるごと");
 }
 
 // ── Gemini Step1: 今朝の市場速報プロンプト ──
@@ -2990,6 +3167,38 @@ function renderJournalFromCache(cached){
 //  v0.10: 分析履歴（IndexedDB 永続アーカイブ、無制限保存、Markdown エクスポート）
 // ════════════════════════════════════════════════════════════════════
 
+// v0.11: 汎用 Markdown コピー関数（クリップボードAPI + フォールバック）
+//   md: コピーするテキスト
+//   label: トーストに表示する対象名（例: "朝会計画", "振り返り(7011)"）
+async function copyMarkdown(md, label="Markdown"){
+  if (!md || !md.trim()) {
+    toast("⚠️ コピー対象が空です");
+    return false;
+  }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(md);
+      toast(`📋 ${label}をコピーしました (${md.length.toLocaleString()}字)`);
+      return true;
+    }
+    // フォールバック: execCommand
+    const ta = document.createElement("textarea");
+    ta.value = md;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    toast(ok ? `📋 ${label}をコピーしました` : "⚠️ コピー失敗（手動で選択してください）");
+    return ok;
+  } catch(e) {
+    console.error("[copy] 失敗:", e);
+    toast("⚠️ コピー失敗: " + e.message);
+    return false;
+  }
+}
+
 // モジュールスコープの状態（履歴パネル用）
 let _journalHistoryAll = [];      // IndexedDB から取得した全件（generated_at 降順）
 let _journalHistoryFilter = "all"; // "all" | 7 | 30 | 90
@@ -3213,22 +3422,7 @@ async function copyJournalAsMarkdown(id){
       return;
     }
     const md = buildJournalMarkdown(entry);
-    // Clipboard API（モバイル含めて最近のブラウザで利用可能）
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(md);
-      toast(`📋 Markdownをコピーしました (${md.length.toLocaleString()}文字)`);
-    } else {
-      // フォールバック: 旧来の execCommand
-      const ta = document.createElement("textarea");
-      ta.value = md;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      toast(ok ? `📋 Markdownをコピーしました` : "⚠️ コピー失敗（手動で選択してください）");
-    }
+    await copyMarkdown(md, "売買分析");
   } catch(e) {
     console.error("[v0.10] コピー失敗:", e);
     toast("⚠️ コピー失敗: " + e.message);
@@ -4311,7 +4505,15 @@ function renderMatchCard(m, memoVal, geminiBrief, claudeReview){
 function renderEveningReviewBlock(code4, geminiBrief, claudeReview){
   const geminiHtml = renderGeminiBriefCard(code4, geminiBrief);
   const claudeHtml = renderClaudeReviewCard(code4, claudeReview);
-  return geminiHtml + claudeHtml;
+
+  // v0.11: セクション単位コピー（市場背景 + Claude振り返り を銘柄1つ分まとめて）
+  const hasGemini = geminiBrief && geminiBrief.text;
+  const hasClaude = claudeReview && claudeReview.text;
+  const sectionBtn = (hasGemini || hasClaude)
+    ? `<button class="copy-section-btn" onclick="copyEveningStockReview('${code4}')" title="この銘柄の振り返りを一括コピー">📋 この銘柄の振り返りをコピー</button>`
+    : '';
+
+  return geminiHtml + claudeHtml + sectionBtn;
 }
 
 // A-α: Gemini 市場背景カード
@@ -4331,8 +4533,10 @@ function renderGeminiBriefCard(code4, geminiBrief){
   if (geminiBrief.text) {
     const meta = geminiBrief.generated_at ? formatJpDateTime(geminiBrief.generated_at) : "";
     return `
-      <div class="ev-gemini-wrap" id="${wrapId}">
+      <div class="ev-gemini-wrap" id="${wrapId}" style="position:relative;">
         <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
+        <button class="copy-btn-sm" onclick="copyEveningGemini('${code4}')"
+                style="position:absolute;top:10px;right:12px;" title="市場背景をコピー">📋</button>
         <div class="ev-gemini-result">${escapeHtml(geminiBrief.text)}</div>
         <div class="ev-gemini-meta">🤖 ${GEMINI_MODEL} + Google検索 · ${meta}</div>
       </div>`;
@@ -4347,7 +4551,9 @@ function renderClaudeReviewCard(code4, claudeReview){
   if (claudeReview && claudeReview.text) {
     const meta = claudeReview.generated_at ? formatJpDateTime(claudeReview.generated_at) : "";
     return `
-      <div class="ev-claude-wrap" id="${wrapId}">
+      <div class="ev-claude-wrap" id="${wrapId}" style="position:relative;">
+        <button class="copy-btn-sm" onclick="copyEveningClaude('${code4}')"
+                style="position:absolute;top:10px;right:12px;" title="Claude振り返りをコピー">📋</button>
         <div class="ev-claude-result">${escapeHtml(claudeReview.text)}</div>
         <div class="ev-claude-meta">
           <span>🧠 ${CLAUDE_MODEL} / ${meta}</span>
@@ -4365,6 +4571,269 @@ function renderClaudeReviewCard(code4, claudeReview){
       </button>
       ${hint}
     </div>`;
+}
+
+// v0.11: 夕会の銘柄別データを現在のセッションから取り出すヘルパー
+// 夕会モーダルを開いている状態でのみ正しく動く（matches 情報が画面と同期）
+function getEveningMatchFromDOM(code4){
+  // 画面上の要素から再構築は難しいので、再集計して該当 match を返す
+  // matches を global に持たないため、DOM テキストから復元する簡易版
+  const wrapGemini = document.getElementById(`evgemini-${code4}`);
+  const wrapClaude = document.getElementById(`evclaude-${code4}`);
+  const card = document.getElementById(`evcard-${code4}`);
+
+  const nameEl = card ? card.querySelector(".ev-card-name") : null;
+  const badgeEl = card ? card.querySelector(".ev-badge") : null;
+  const name = nameEl ? nameEl.textContent.trim() : "";
+  const badgeText = badgeEl ? badgeEl.textContent.trim() : "";
+
+  const geminiResult = wrapGemini ? wrapGemini.querySelector(".ev-gemini-result") : null;
+  const claudeResult = wrapClaude ? wrapClaude.querySelector(".ev-claude-result") : null;
+
+  const geminiText = geminiResult ? geminiResult.textContent : "";
+  const claudeText = claudeResult ? claudeResult.textContent : "";
+
+  return {code4, name, badge: badgeText, geminiText, claudeText};
+}
+
+async function copyEveningGemini(code4){
+  const {name, geminiText} = getEveningMatchFromDOM(code4);
+  if (!geminiText) { toast("⚠️ 市場背景がまだありません"); return; }
+  const md = [
+    `# 🌍 市場背景: ${name || code4} (${code4})`,
+    ``,
+    `- 日付: ${TODAY} (${WD})`,
+    `- 生成モデル: ${GEMINI_MODEL} + Google検索`,
+    ``,
+    geminiText.trim(),
+    ``,
+    `---`,
+    `_trade-journal morning.html v0.11 で生成_`,
+  ].join("\n");
+  await copyMarkdown(md, `市場背景(${code4})`);
+}
+
+async function copyEveningClaude(code4){
+  const {name, claudeText} = getEveningMatchFromDOM(code4);
+  if (!claudeText) { toast("⚠️ Claude振り返りがまだありません"); return; }
+  const md = [
+    `# 🧠 Claude 振り返り: ${name || code4} (${code4})`,
+    ``,
+    `- 日付: ${TODAY} (${WD})`,
+    `- 生成モデル: ${CLAUDE_MODEL}`,
+    ``,
+    claudeText.trim(),
+    ``,
+    `---`,
+    `_trade-journal morning.html v0.11 で生成_`,
+  ].join("\n");
+  await copyMarkdown(md, `Claude振り返り(${code4})`);
+}
+
+async function copyEveningStockReview(code4){
+  const {name, badge, geminiText, claudeText} = getEveningMatchFromDOM(code4);
+  if (!geminiText && !claudeText) { toast("⚠️ コピー対象がありません"); return; }
+  const lines = [];
+  lines.push(`# 📌 ${TODAY} 振り返り: ${name || code4} (${code4})`);
+  lines.push(``);
+  if (badge) lines.push(`- 種別: ${badge}`);
+  lines.push(``);
+  if (geminiText) {
+    lines.push(`## 🌍 今日の市場背景`);
+    lines.push(`_🤖 ${GEMINI_MODEL} + Google検索_`);
+    lines.push(``);
+    lines.push(geminiText.trim());
+    lines.push(``);
+  }
+  if (claudeText) {
+    lines.push(`## 🧠 Claude 振り返り`);
+    lines.push(`_🤖 ${CLAUDE_MODEL}_`);
+    lines.push(``);
+    lines.push(claudeText.trim());
+    lines.push(``);
+  }
+  lines.push(`---`);
+  lines.push(`_trade-journal morning.html v0.11 で生成_`);
+  await copyMarkdown(lines.join("\n"), `振り返り(${code4})`);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  v0.11: 日次まとめ（朝会計画 + 夕会レビューを1枚のMarkdownに）
+// ════════════════════════════════════════════════════════════════════
+
+// 1マッチ分の Markdown セクションを生成（当日 matches 用）
+function buildDigestMatchSection(m, memo, geminiBrief, claudeReview){
+  const EV_LABEL_MD = {
+    consistent: "✅ 一致",
+    postponed:  "⚠️ 先送り",
+    changed:    "⚡ 方針変更",
+    unjudged:   "🆕 判定外",
+  };
+  const judgeLabel = m.judgment
+    ? `${JUDGE_ICONS[m.judgment] || ''} ${JUDGE_LABELS[m.judgment] || m.judgment}`
+    : "(朝会判定なし)";
+  const actionLabel = ACTION_LABELS[m.action] || m.action || "-";
+
+  const lines = [];
+  lines.push(`### ${m.name || '(名称不明)'} (${m.code4}) — ${EV_LABEL_MD[m.match_type] || m.match_type}`);
+  lines.push(``);
+  lines.push(`- 朝の判定: ${judgeLabel}`);
+  lines.push(`- 実際の行動: ${actionLabel}`);
+  if (m.executed_price != null) {
+    lines.push(`- 約定価格: ¥${m.executed_price.toLocaleString()}`);
+  }
+  if (m.executed_pnl != null) {
+    const sign = m.executed_pnl > 0 ? '+' : (m.executed_pnl < 0 ? '-' : '±');
+    lines.push(`- 確定損益: ${sign}¥${Math.abs(Math.round(m.executed_pnl)).toLocaleString()}`);
+  }
+  if (m.change_pct != null && m.action === "no_action") {
+    const sign = m.change_pct >= 0 ? "+" : "";
+    lines.push(`- 朝→終値変化率: ${sign}${m.change_pct.toFixed(2)}%`);
+  }
+  lines.push(``);
+
+  if (memo && memo.trim()) {
+    lines.push(`**📝 メモ**`);
+    lines.push(``);
+    lines.push(memo.trim());
+    lines.push(``);
+  }
+  if (geminiBrief && geminiBrief.text) {
+    lines.push(`**🌍 今日の市場背景** (${GEMINI_MODEL} + Google検索)`);
+    lines.push(``);
+    lines.push(geminiBrief.text.trim());
+    lines.push(``);
+  }
+  if (claudeReview && claudeReview.text) {
+    lines.push(`**🧠 Claude 振り返り** (${CLAUDE_MODEL})`);
+    lines.push(``);
+    lines.push(claudeReview.text.trim());
+    lines.push(``);
+  }
+  return lines.join("\n");
+}
+
+// 日次まとめの Markdown を生成
+// session: daily_sessions の当日レコード
+// matches: matchTradesToJudgments の結果
+// planCached: tjm_last_plan (当日分のみ)
+function buildDailyDigestMarkdown(session, matches, planCached){
+  const lines = [];
+  lines.push(`# 📅 ${TODAY} (${WD}) 日次まとめ`);
+  lines.push(``);
+  lines.push(`_trade-journal morning.html v0.11 で生成_`);
+  lines.push(``);
+
+  // マクロ状態
+  if (session && session.macro) {
+    const m = session.macro;
+    const regime = m.regime || "(不明)";
+    const score = (m.score != null) ? `${m.score}` : "-";
+    lines.push(`## 🌡️ マクロ状態`);
+    lines.push(``);
+    lines.push(`- レジーム: ${regime}`);
+    lines.push(`- スコア: ${score}`);
+    lines.push(``);
+  }
+
+  // 朝会判定
+  if (session && Array.isArray(session.judgments) && session.judgments.length > 0) {
+    lines.push(`## 🌅 朝会の判定 (${session.judgments.length}銘柄)`);
+    lines.push(``);
+    for (const j of session.judgments) {
+      const icon = JUDGE_ICONS[j.judgment] || '';
+      const label = JUDGE_LABELS[j.judgment] || j.judgment;
+      lines.push(`- ${j.name || j.code} (${j.code4 || j.code}): ${icon} ${label}`);
+    }
+    lines.push(``);
+  }
+
+  // 朝会計画（tjm_last_plan から）
+  if (planCached) {
+    const step2 = planCached.step2 || {text: planCached.text};
+    if (planCached.step1 && planCached.step1.text) {
+      lines.push(`## 🌍 今朝の市場速報 (${GEMINI_MODEL} + Google検索)`);
+      lines.push(``);
+      lines.push(planCached.step1.text.trim());
+      lines.push(``);
+    }
+    if (step2 && step2.text) {
+      lines.push(`## 🧠 今朝の計画 (${CLAUDE_MODEL})`);
+      lines.push(``);
+      lines.push(step2.text.trim());
+      lines.push(``);
+    }
+  }
+
+  // 夕会サマリー
+  if (matches && matches.length > 0) {
+    const s = summarizeMatches(matches);
+    const pnlSign = s.realized_pnl_today > 0 ? '+' : (s.realized_pnl_today < 0 ? '-' : '±');
+    const pnlYen = `${pnlSign}¥${Math.abs(Math.round(s.realized_pnl_today || 0)).toLocaleString()}`;
+    lines.push(`## 🌆 夕会サマリー`);
+    lines.push(``);
+    lines.push(`- ✅ 一致: ${s.consistent}銘柄`);
+    lines.push(`- ⚠️ 先送り: ${s.postponed}銘柄`);
+    lines.push(`- ⚡ 方針変更: ${s.changed}銘柄`);
+    lines.push(`- 🆕 判定外: ${s.unjudged_actions}銘柄`);
+    lines.push(`- 当日確定損益: ${pnlYen}`);
+    lines.push(``);
+
+    // 銘柄別（ズレ銘柄を上、一致を下）
+    const order = ["postponed", "changed", "unjudged", "consistent"];
+    const sorted = [...matches].sort((a,b) =>
+      order.indexOf(a.match_type) - order.indexOf(b.match_type)
+    );
+
+    // メモ・Gemini・Claude を取り出す
+    const memos = loadEveningMemos(session);
+    const geminiBriefs = loadGeminiBriefs(session);
+    const claudeReviews = loadClaudeReviews(session);
+
+    lines.push(`## 🔍 銘柄別マッチング`);
+    lines.push(``);
+    for (const m of sorted) {
+      lines.push(buildDigestMatchSection(
+        m,
+        memos[m.code4],
+        geminiBriefs[m.code4],
+        claudeReviews[m.code4]
+      ));
+    }
+  }
+
+  lines.push(`---`);
+  return lines.join("\n");
+}
+
+// 日次まとめコピー実行（夕会モーダルのヘッダボタンから）
+async function copyDailyDigest(){
+  const btn = document.getElementById("evDigestBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const session = await getTodaySession();
+    const trades = loadV1Trades(TODAY);
+    const judgments = session ? (session.judgments || []) : [];
+    const matches = matchTradesToJudgments(judgments, trades);
+
+    // 朝会計画は当日分のみ（日付違いなら null）
+    const planRaw = LS.get(K.last_plan, null);
+    const planCached = (planRaw && planRaw.date === TODAY) ? planRaw : null;
+
+    // 何もない場合
+    if (!session && matches.length === 0 && !planCached) {
+      toast("⚠️ 今日のデータがありません");
+      return;
+    }
+
+    const md = buildDailyDigestMarkdown(session, matches, planCached);
+    await copyMarkdown(md, "今日のまとめ");
+  } catch(e) {
+    console.error("[v0.11] 日次まとめコピー失敗:", e);
+    toast("⚠️ コピー失敗: " + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function toggleEvCard(code4){
