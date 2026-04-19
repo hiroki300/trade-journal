@@ -698,6 +698,35 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   border-radius:6px;font-size:11px;color:var(--t2);
   display:flex;align-items:center;gap:8px;
 }
+
+/* ─── 夕会 A-α: Gemini 市場背景 (v0.9) ─── */
+.ev-gemini-wrap{margin-top:10px;}
+.ev-gemini-hdr{
+  font-size:10px;color:#7dd3fc;font-weight:700;
+  margin-bottom:4px;letter-spacing:.02em;
+}
+.ev-gemini-result{
+  background:var(--s1);border:1px solid #0369a1;border-radius:6px;
+  padding:8px 10px;font-size:11px;line-height:1.55;color:var(--text);
+  white-space:pre-wrap;word-break:break-word;
+}
+.ev-gemini-meta{
+  font-size:9px;color:var(--t3);margin-top:6px;
+  text-align:right;font-family:var(--mono);
+}
+.ev-gemini-error{
+  background:#3a1818;border:1px solid var(--red);border-radius:6px;
+  padding:8px 10px;color:#fca5a5;font-size:11px;line-height:1.4;
+}
+.ev-gemini-loading{
+  padding:8px 10px;background:var(--s1);border:1px dashed #0369a1;
+  border-radius:6px;font-size:11px;color:#7dd3fc;
+  display:flex;align-items:center;gap:8px;
+}
+.ev-gemini-hint{
+  font-size:10px;color:#7dd3fc;margin-top:4px;text-align:center;
+  opacity:.8;
+}
 </style>
 </head>
 <body>
@@ -3679,6 +3708,8 @@ function renderEveningBody(session, trades, matches){
   const memos = loadEveningMemos(session);
   // Step3: 保存済みのClaudeレビューを取り出す
   const claudeReviews = loadClaudeReviews(session);
+  // A-α (v0.9): 保存済みの Gemini 市場背景を取り出す
+  const geminiBriefs = loadGeminiBriefs(session);
 
   // サマリー
   const s = summarizeMatches(matches);
@@ -3715,7 +3746,7 @@ function renderEveningBody(session, trades, matches){
     order.indexOf(a.match_type) - order.indexOf(b.match_type)
   );
 
-  const cards = sorted.map(m => renderMatchCard(m, memos[m.code4], claudeReviews[m.code4])).join("");
+  const cards = sorted.map(m => renderMatchCard(m, memos[m.code4], geminiBriefs[m.code4], claudeReviews[m.code4])).join("");
 
   // Step2: 保存ボタン（朝会済みのときのみ表示）
   let saveBar = "";
@@ -3740,7 +3771,7 @@ function renderEveningBody(session, trades, matches){
   `;
 }
 
-function renderMatchCard(m, memoVal, claudeReview){
+function renderMatchCard(m, memoVal, geminiBrief, claudeReview){
   const judgeLabel = m.judgment ? (JUDGE_ICONS[m.judgment] + " " + JUDGE_LABELS[m.judgment]) : "(朝会判定なし)";
   const actionLabel = ACTION_LABELS[m.action] || m.action;
   const isOpen = m.match_type !== "consistent"; // 一致は折りたたみ
@@ -3763,7 +3794,7 @@ function renderMatchCard(m, memoVal, claudeReview){
 
   // Step2: ズレ銘柄（一致以外）にメモ欄
   let memoBlock = "";
-  let claudeBlock = "";
+  let reviewBlock = "";
   if (m.match_type !== "consistent") {
     const placeholder = m.match_type === "postponed"
       ? "なぜ実行しなかった？"
@@ -3782,8 +3813,8 @@ function renderMatchCard(m, memoVal, claudeReview){
         >${escapeHtml(memoVal || '')}</textarea>
       </div>`;
 
-    // Step3: Claude 振り返りブロック
-    claudeBlock = renderClaudeBlock(m.code4, claudeReview);
+    // A-α (v0.9): Gemini 市場背景 + Claude 振り返り の 2ブロック
+    reviewBlock = renderEveningReviewBlock(m.code4, geminiBrief, claudeReview);
   }
 
   return `
@@ -3799,30 +3830,70 @@ function renderMatchCard(m, memoVal, claudeReview){
       <div class="ev-card-body">
         ${rows.join('')}
         ${memoBlock}
-        ${claudeBlock}
+        ${reviewBlock}
       </div>
     </div>`;
 }
 
-// Step3: Claude 振り返りブロックの描画
-function renderClaudeBlock(code4, claudeReview){
+// A-α (v0.9): Gemini 市場背景カード + Claude 振り返りカード を一括描画
+//   geminiBrief は {text,generated_at} | {error} | null
+//   claudeReview は {text,generated_at,...} | null
+function renderEveningReviewBlock(code4, geminiBrief, claudeReview){
+  const geminiHtml = renderGeminiBriefCard(code4, geminiBrief);
+  const claudeHtml = renderClaudeReviewCard(code4, claudeReview);
+  return geminiHtml + claudeHtml;
+}
+
+// A-α: Gemini 市場背景カード
+function renderGeminiBriefCard(code4, geminiBrief){
+  const wrapId = `evgemini-${code4}`;
+  if (!geminiBrief) {
+    // 未実行時は何も表示しない（Claude ボタンを押すと自動で Gemini も走る）
+    return `<div class="ev-gemini-wrap" id="${wrapId}"></div>`;
+  }
+  if (geminiBrief.error) {
+    return `
+      <div class="ev-gemini-wrap" id="${wrapId}">
+        <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
+        <div class="ev-gemini-error">⚠️ 取得失敗: ${escapeHtml(geminiBrief.error)}</div>
+      </div>`;
+  }
+  if (geminiBrief.text) {
+    const meta = geminiBrief.generated_at ? formatJpDateTime(geminiBrief.generated_at) : "";
+    return `
+      <div class="ev-gemini-wrap" id="${wrapId}">
+        <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
+        <div class="ev-gemini-result">${escapeHtml(geminiBrief.text)}</div>
+        <div class="ev-gemini-meta">🤖 ${GEMINI_MODEL} + Google検索 · ${meta}</div>
+      </div>`;
+  }
+  return `<div class="ev-gemini-wrap" id="${wrapId}"></div>`;
+}
+
+// Claude 振り返りカード（旧 renderClaudeBlock を改名、機能は同等）
+function renderClaudeReviewCard(code4, claudeReview){
   const wrapId = `evclaude-${code4}`;
+  const geminiAvailable = !!((LS.raw(K.api_gemini) || "").trim());
   if (claudeReview && claudeReview.text) {
     const meta = claudeReview.generated_at ? formatJpDateTime(claudeReview.generated_at) : "";
     return `
       <div class="ev-claude-wrap" id="${wrapId}">
         <div class="ev-claude-result">${escapeHtml(claudeReview.text)}</div>
         <div class="ev-claude-meta">
-          <span>🧠 Claude / ${meta}</span>
-          <button class="regen-link" onclick="requestClaudeReview('${code4}', true)">🔄 再生成</button>
+          <span>🧠 ${CLAUDE_MODEL} / ${meta}</span>
+          <button class="regen-link" onclick="requestEveningReview('${code4}', true)">🔄 再生成</button>
         </div>
       </div>`;
   }
+  const hint = geminiAvailable
+    ? `<div class="ev-gemini-hint">💡 Gemini で今日の市場背景も自動取得</div>`
+    : "";
   return `
     <div class="ev-claude-wrap" id="${wrapId}">
-      <button class="ev-claude-btn" onclick="requestClaudeReview('${code4}', false)">
+      <button class="ev-claude-btn" onclick="requestEveningReview('${code4}', false)">
         🧠 Claudeに振り返ってもらう
       </button>
+      ${hint}
     </div>`;
 }
 
@@ -3928,10 +3999,12 @@ async function saveEveningSession(){
 
     // 既存セッションのclaude_reviewを引き継ぐためのマップ
     const prevReviews = {};
+    const prevGeminiBriefs = {};  // A-α (v0.9)
     if (session.evening && Array.isArray(session.evening.matches)) {
       for (const em of session.evening.matches) {
         const c4 = em.code4 || em.code;
         if (c4 && em.claude_review) prevReviews[c4] = em.claude_review;
+        if (c4 && em.gemini_brief) prevGeminiBriefs[c4] = em.gemini_brief;
       }
     }
 
@@ -3945,6 +4018,7 @@ async function saveEveningSession(){
       executed_pnl: m.executed_pnl,
       match_type: m.match_type,
       memo: memos[m.code4] || "",
+      gemini_brief: prevGeminiBriefs[m.code4] || null,  // A-α (v0.9): 既存があれば引き継ぐ
       claude_review: prevReviews[m.code4] || null, // Step3: 既存があれば引き継ぐ
     }));
 
@@ -4002,6 +4076,20 @@ function loadClaudeReviews(session){
   return result;
 }
 
+// A-α (v0.9): session.evening.matches から gemini_brief を {code4: {text|error, generated_at}} で取り出す
+function loadGeminiBriefs(session){
+  const result = {};
+  if (session && session.evening && Array.isArray(session.evening.matches)) {
+    for (const m of session.evening.matches) {
+      const c4 = m.code4 || m.code;
+      if (c4 && m.gemini_brief && (m.gemini_brief.text || m.gemini_brief.error)) {
+        result[c4] = m.gemini_brief;
+      }
+    }
+  }
+  return result;
+}
+
 // マクロ要約（プロンプト用、短く）
 function summarizeMacroForPrompt(macro){
   if (!macro) return "（マクロ情報なし）";
@@ -4013,8 +4101,48 @@ function summarizeMacroForPrompt(macro){
   return parts.join(" / ") || "（マクロ情報なし）";
 }
 
-// プロンプト生成
-function buildClaudeReviewPrompt(match, memo, macroSummary){
+// A-α (v0.9): Gemini 個別銘柄の当日市場背景プロンプト
+function buildGeminiStockBriefPrompt(match, macroSummary){
+  const judgeText = match.judgment ? `${JUDGE_LABELS[match.judgment]}（${match.judgment}）` : "（朝会判定なし）";
+  const actionText = ACTION_LABELS[match.action] || match.action;
+  const changeLine = (match.change_pct != null)
+    ? `${match.change_pct >= 0 ? '+' : ''}${match.change_pct.toFixed(2)}%`
+    : (match.executed_pnl != null
+        ? `確定損益 ${match.executed_pnl >= 0 ? '+' : ''}¥${match.executed_pnl.toLocaleString()}`
+        : "（変化率不明）");
+
+  return `日本株「${match.name || ''} (${match.code4})」の ${TODAY} の株価変動理由を、
+Google検索で直近24時間のデータを基に簡潔に説明してください。
+
+## 文脈
+- 今日の朝→終値変化率: ${changeLine}
+- 今朝のマクロ: ${macroSummary}
+- トレーダーの朝の判定: ${judgeText}
+- 実際の行動: ${actionText}
+
+## 出力項目（各1〜2行、箇条書き中心）
+
+### 🏭 セクター要因
+同業他社の動き、業種全体で売られた/買われた?
+
+### 📰 個別要因
+決算・適時開示・ニュース・大口売買（確認できた範囲で）
+
+### 🌐 全体要因
+日経平均・為替・地政学など外部要因の影響度
+
+### 🎯 まとめ
+「なぜ今日こう動いたか」を1行で
+
+## 執筆ルール
+- 全体で 200〜400字
+- 検索で裏取りできないことは「確認できず」と明記
+- 推測・一般論は避け、${TODAY} 日中の動きに絞る
+- 最後まで書き切ること`;
+}
+
+// プロンプト生成（A-α: geminiContext 引数追加）
+function buildClaudeReviewPrompt(match, memo, macroSummary, geminiContext = null){
   const judgeText = match.judgment ? `${JUDGE_LABELS[match.judgment]}（${match.judgment}）` : "（朝会判定なし）";
   const actionText = ACTION_LABELS[match.action] || match.action;
   const matchText = EV_LABELS[match.match_type];
@@ -4042,23 +4170,32 @@ function buildClaudeReviewPrompt(match, memo, macroSummary){
     ctx.push(`【ユーザーメモ】（記入なし）`);
   }
 
+  // A-α: Gemini で取得した当日の市場背景（あれば最後に付加）
+  const marketContextSection = geminiContext
+    ? `\n【今日の市場背景（Gemini + Google検索）】
+${geminiContext}
+`
+    : "";
+
   return `あなたは運用歴25年の日本株シニアファンドマネージャーです。トレーダーの「朝の判定」と「実際の行動」のズレを冷静かつ建設的にレビューしてください。
 
 ${ctx.join("\n")}
-
+${marketContextSection}
 以下の3点を、各1〜2行で簡潔に答えてください。前置き・自己紹介・お疲れ様の挨拶は不要です。
 
-① この行動の評価（妥当だったか / リスクをどう取ったか）
+① この行動の評価（妥当だったか / リスクをどう取ったか${geminiContext ? "。セクター全体の動きか個別要因かを踏まえる" : ""}）
 ② このパターンが繰り返されるとどんなリスクが累積するか
 ③ 明日以降に取りたい具体的アクション（価格水準・条件を含めて）
 
 合計150〜250字程度。番号は ①②③ を使ってください。`;
 }
 
-// Claude APIを叩いて結果を IndexedDB に保存
-async function requestClaudeReview(code4, isRegen){
-  const apiKey = LS.raw(K.api_claude);
-  if (!apiKey) {
+// A-α (v0.9): Gemini 市場背景 → Claude 振り返り の 2段分業
+//   Gemini キー未設定なら Step1 をスキップして Claude のみで実行（無劣化フォールバック）
+//   IndexedDB の session.evening.matches[n] に gemini_brief と claude_review を保存
+async function requestEveningReview(code4, isRegen){
+  const claudeKey = LS.raw(K.api_claude);
+  if (!claudeKey) {
     toast("⚠️ 設定でClaude APIキーを登録してください");
     return;
   }
@@ -4082,19 +4219,59 @@ async function requestClaudeReview(code4, isRegen){
   const memos = collectAllMemos();
   const memo = memos[code4] || "";
 
-  // UI: ローディング表示に差し替え
-  const wrap = document.getElementById(`evclaude-${code4}`);
-  if (wrap) {
-    wrap.innerHTML = `
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  const useGemini = !!geminiKey;
+
+  const geminiWrap = document.getElementById(`evgemini-${code4}`);
+  const claudeWrap = document.getElementById(`evclaude-${code4}`);
+
+  // ── Step1: Gemini 市場背景 (optional) ──
+  let geminiBrief = null;
+  if (useGemini) {
+    if (geminiWrap) {
+      geminiWrap.innerHTML = `
+        <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
+        <div class="ev-gemini-loading">
+          <span class="loading"></span>${escapeHtml(target.name || code4)} の株価変動理由を Google検索で調査中...
+        </div>`;
+    }
+    try {
+      const macroSummary = summarizeMacroForPrompt(session.macro);
+      const giPrompt = buildGeminiStockBriefPrompt(target, macroSummary);
+      const giText = await callGemini(geminiKey, giPrompt, {useSearch: true, maxTokens: 1200});
+      geminiBrief = {text: giText.trim(), generated_at: new Date().toISOString()};
+
+      // Step1 結果を即座に表示
+      if (geminiWrap) {
+        geminiWrap.innerHTML = `
+          <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
+          <div class="ev-gemini-result">${escapeHtml(geminiBrief.text)}</div>
+          <div class="ev-gemini-meta">🤖 ${GEMINI_MODEL} + Google検索 · ${formatJpDateTime(geminiBrief.generated_at)}</div>`;
+      }
+    } catch(e) {
+      console.warn("[evening] gemini brief failed:", e);
+      geminiBrief = {error: e.message || String(e)};
+      if (geminiWrap) {
+        geminiWrap.innerHTML = `
+          <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
+          <div class="ev-gemini-error">⚠️ 取得失敗: ${escapeHtml(geminiBrief.error)}</div>`;
+      }
+    }
+  }
+
+  // ── Step2: Claude 振り返り ──
+  if (claudeWrap) {
+    claudeWrap.innerHTML = `
       <div class="ev-claude-loading">
-        <span class="loading"></span>Claude が振り返り中...
+        <span class="loading"></span>Claude が${geminiBrief && geminiBrief.text ? "市場背景を踏まえて" : ""}振り返り中...
       </div>`;
   }
 
   try {
     const macroSummary = summarizeMacroForPrompt(session.macro);
-    const prompt = buildClaudeReviewPrompt(target, memo, macroSummary);
-    const text = await callClaude(apiKey, prompt);
+    const geminiContext = (geminiBrief && geminiBrief.text) ? geminiBrief.text : null;
+    const prompt = buildClaudeReviewPrompt(target, memo, macroSummary, geminiContext);
+    const text = await callClaude(claudeKey, prompt);
 
     const review = {
       text: text.trim(),
@@ -4120,6 +4297,7 @@ async function requestClaudeReview(code4, isRegen){
           executed_price: m.executed_price, executed_pnl: m.executed_pnl,
           match_type: m.match_type,
           memo: memos[m.code4] || "",
+          gemini_brief: null,   // A-α (v0.9)
           claude_review: null,
         })),
         summary,
@@ -4140,44 +4318,50 @@ async function requestClaudeReview(code4, isRegen){
             executed_price: m.executed_price, executed_pnl: m.executed_pnl,
             match_type: m.match_type,
             memo: memos[m.code4] || "",
+            gemini_brief: null,   // A-α (v0.9)
             claude_review: null,
           });
         }
       }
     }
 
-    // 当該銘柄の review を埋める
+    // 当該銘柄の gemini_brief + review を埋める
     let updated = false;
     for (const em of session.evening.matches) {
       const c4 = em.code4 || em.code;
-      if (c4 === code4) { em.claude_review = review; updated = true; break; }
+      if (c4 === code4) {
+        em.gemini_brief = geminiBrief;  // A-α (v0.9): null / {text,...} / {error} すべてそのまま保存
+        em.claude_review = review;
+        updated = true;
+        break;
+      }
     }
     if (!updated) {
       // 念のためフォールバック
       session.evening.matches.push({
-        ...target, memo, claude_review: review,
+        ...target, memo, gemini_brief: geminiBrief, claude_review: review,
       });
     }
 
     await dbPut("daily_sessions", session);
 
-    // UI: 結果に差し替え
-    if (wrap) {
-      wrap.innerHTML = `
+    // UI: Claude 結果に差し替え
+    if (claudeWrap) {
+      claudeWrap.innerHTML = `
         <div class="ev-claude-result">${escapeHtml(review.text)}</div>
         <div class="ev-claude-meta">
-          <span>🧠 Claude / ${formatJpDateTime(review.generated_at)}</span>
-          <button class="regen-link" onclick="requestClaudeReview('${code4}', true)">🔄 再生成</button>
+          <span>🧠 ${CLAUDE_MODEL} / ${formatJpDateTime(review.generated_at)}</span>
+          <button class="regen-link" onclick="requestEveningReview('${code4}', true)">🔄 再生成</button>
         </div>`;
     }
     toast(`🧠 ${target.name || code4} の振り返り完了`);
 
   } catch(e) {
     console.error("[evening] claude review failed:", e);
-    if (wrap) {
-      wrap.innerHTML = `
+    if (claudeWrap) {
+      claudeWrap.innerHTML = `
         <div class="ev-claude-error">⚠️ ${escapeHtml(e.message || String(e))}</div>
-        <button class="ev-claude-btn" style="margin-top:6px;" onclick="requestClaudeReview('${code4}', false)">
+        <button class="ev-claude-btn" style="margin-top:6px;" onclick="requestEveningReview('${code4}', false)">
           🔄 もう一度試す
         </button>`;
     }
