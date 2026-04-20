@@ -935,6 +935,19 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   padding:4px 8px;border-radius:6px;
 }
 .chat-clear-btn:hover{color:var(--text);border-color:var(--t2);}
+/* v0.16: Claude モデル切替セレクト（ヘッダー右側、Opus 選択時は橙） */
+.chat-model-select{
+  background:transparent;border:1px solid var(--border);
+  color:var(--t2);font-size:11px;cursor:pointer;
+  padding:4px 6px;border-radius:6px;
+  font-family:inherit;line-height:1.2;
+  max-width:100px;
+}
+.chat-model-select:hover{color:var(--text);border-color:var(--t2);}
+.chat-model-select:focus{outline:none;border-color:var(--acc);}
+.chat-model-select.opus{
+  color:var(--yellow);border-color:var(--yellow);
+}
 .chat-mode-row{
   display:flex;gap:6px;padding:8px 14px;background:var(--s1);
   border-bottom:1px solid var(--border);flex-shrink:0;
@@ -1295,6 +1308,11 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="chat-hdr">
       <div class="chat-hdr-title">💬 対話チャット</div>
       <div class="chat-hdr-actions">
+        <select class="chat-model-select" id="chatModelSelect" onchange="setChatClaudeModel(this.value)" title="Claude モデル切替（合議・Claude単独時に有効）">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+          <option value="claude-opus-4-7">Opus 4.7</option>
+        </select>
         <button class="chat-clear-btn" onclick="openChatHistoryPanel()" title="履歴を見る">📚 履歴</button>
         <button class="chat-clear-btn" onclick="clearChatHistory()" title="現在の会話を終了して新規開始">🗑 クリア</button>
         <button class="modal-close" onclick="closeChatModal()">×</button>
@@ -1350,7 +1368,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.15 (Phase 4 Stage 4.4: 深掘りボタン)
+//  trade-journal morning.html  v0.16 (Phase 5.1: モデル切替 + 日付バグ修正)
 //  - Phase 2 までの全機能
 //  - Phase 3 機能A（夕会）/ 機能B（売買分析 3段分業）
 //  - Phase 3.5 B-β（計画生成の Gemini 補完）/ A-α（夕会の Gemini 補完）
@@ -1359,10 +1377,16 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 //  - Phase 4 Stage 4.1 (v0.12): Gemini × Claude 対話チャット移植
 //  - Phase 4 Stage 4.2 (v0.13): チャット文脈の選択式注入（6種チップ）
 //  - Phase 4 Stage 4.3 (v0.14): チャット履歴の IndexedDB 永続化
-//  - Phase 4 Stage 4.4 (v0.15) NEW: 朝会/夕会/機能B カードに「💬 深掘り」ボタン
-//    - 朝会計画（市場速報・計画）/ 夕会ズレ銘柄 / 機能B 履歴詳細 にボタン
-//    - openChatWithDrilldown(promptText) — 進行中セッション保存→新規開始→入力欄プリセット
-//    Phase 4 移植は v0.15 で完成
+//  - Phase 4 Stage 4.4 (v0.15): 朝会/夕会/機能B カードに「💬 深掘り」ボタン
+//  - Phase 5.1 (v0.16) NEW:
+//    [1] Claude モデル切替 UI（Haiku 4.5 / Sonnet 4.6 / Opus 4.7）
+//        - チャットヘッダーに <select>、毎回 Haiku にリセット（localStorage 保存なし）
+//        - Opus 選択時はセレクトを橙色に（視覚警告）
+//        - コスト目安をモデル倍率込みで動的再計算
+//        - chat_sessions への記録なし（DB_VERSION 3 維持）
+//    [2] 日付バグ修正（重要）
+//        - toISOString() は UTC 基準のため JST 00:00-08:59 に前日扱いとなる事故を修正
+//        - ymdJST() ヘルパーを追加、3 箇所（TODAY / getJournalCacheKey / formatPeriodRange）で使用
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
@@ -1428,8 +1452,14 @@ const WATCH_DEFAULTS = {
 };
 
 // ── 日付 ──
+// v0.16: toISOString() は UTC 基準のため、JST 00:00-08:59 の間は前日扱いになる
+//   "sv-SE" (スウェーデン語) ロケールは YYYY-MM-DD を返すので、timeZone:"Asia/Tokyo"
+//   と組み合わせて JST ベースの日付文字列を取得する
+function ymdJST(date){
+  return (date || new Date()).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
 const D_NOW = new Date();
-const TODAY = D_NOW.toISOString().slice(0,10);
+const TODAY = ymdJST(D_NOW);
 const WD = ["日","月","火","水","木","金","土"][D_NOW.getDay()];
 document.getElementById("hDate").textContent = `${TODAY} (${WD})`;
 
@@ -3456,7 +3486,7 @@ function saveJournalCache(key, data){
 // 現在の期間に対応するキャッシュキーを生成
 function getJournalCacheKey(periodDays, generatedAt){
   const dt = generatedAt ? new Date(generatedAt) : new Date();
-  const ymd = dt.toISOString().slice(0, 10);
+  const ymd = ymdJST(dt);  // v0.16: UTC→JST（TODAY とキー整合を保つ）
   return `${periodDays}d_${ymd}`;
 }
 
@@ -3824,7 +3854,7 @@ async function migrateJournalCacheToIndexedDB(){
 function formatPeriodRange(periodDays){
   const now = new Date();
   const start = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
-  const fmt = d => d.toISOString().slice(0, 10);
+  const fmt = d => ymdJST(d);  // v0.16: UTC→JST
   return `${fmt(start)} 〜 ${fmt(now)}`;
 }
 
@@ -5736,13 +5766,23 @@ let CHAT_CTX_FLAGS = {...CHAT_CTX_DEFAULTS, ...(LS.get(K.chat_ctx_flags, {}) || 
 let _chatCtxPreviewText = "";
 let _chatCtxPreviewBuilding = false;
 
-// ── チャットのモデル設定（Haiku 4.5 固定、将来ドロップダウンで切替予定） ──
-const CHAT_CLAUDE_MODEL = CLAUDE_MODEL;  // "claude-haiku-4-5-20251001"
-const CHAT_GEMINI_MODEL = GEMINI_MODEL;  // "gemini-2.5-flash"
+// ── チャットのモデル設定 ──
+// v0.16: Claude モデル切替対応（Haiku 4.5 / Sonnet 4.6 / Opus 4.7）
+//   デフォルトは Haiku 4.5、モーダルを開くたびにリセット（localStorage に保存しない）
+//   costMul は Haiku を 1.0 とした相対倍率（updateChatCostInfo で使用）
+const CLAUDE_MODEL_OPTIONS = [
+  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5",  costMul:  1.0 },
+  { id: "claude-sonnet-4-6",         label: "Sonnet 4.6", costMul:  3.5 },
+  { id: "claude-opus-4-7",           label: "Opus 4.7",   costMul: 17.0 },
+];
+let CHAT_CLAUDE_MODEL = CLAUDE_MODEL;  // デフォルト: "claude-haiku-4-5-20251001"
+const CHAT_GEMINI_MODEL = GEMINI_MODEL;  // Gemini は固定 "gemini-2.5-flash"
 
 // ── モーダル開閉 ──
 function openChatModal(){
   document.getElementById("chatModal").classList.add("on");
+  // v0.16: モーダルを開くたびに Claude モデルを Haiku にリセット（永続化しない仕様）
+  resetChatClaudeModelUI();
   // 初期メッセージがなければ empty state を表示
   updateChatEmptyState();
   // チップの状態をUIに反映
@@ -5819,21 +5859,64 @@ function updateChatCtxInfo(){
 }
 
 function updateChatCostInfo(){
-  // チップONの数 + モードでざっくり目安
+  // v0.16: Claude モデル倍率（Haiku=1.0 / Sonnet=3.5 / Opus=17.0）を反映
   const costEl = document.getElementById("chatCostInfo");
   if (!costEl) return;
   const ctxChars = _chatCtxPreviewText.length;
-  // モード別の出力 + 文脈分の入力概算（円）
-  // Haiku4.5 入力 ≒ ¥0.001/1K char、Gemini Flash も同程度
-  // 出力は1500-2000字で ¥1-2 程度
-  const inputCost = (ctxChars / 1000) * 0.5; // ざっくり
+  const inputCost = (ctxChars / 1000) * 0.5; // 文脈分の入力概算
+  const mul = getClaudeModelCostMul(CHAT_CLAUDE_MODEL);
+
   let label;
   if (CHAT_MODE === "gc") {
-    label = `💰 約¥${Math.max(2, Math.round(2 + inputCost))}-${Math.max(4, Math.round(4 + inputCost))}/往復`;
+    // 合議: Gemini (1-2) + Claude (1-2 × mul) + 文脈入力
+    const low  = Math.max(2, Math.round(1 + 1 * mul + inputCost));
+    const high = Math.max(4, Math.round(2 + 2 * mul + inputCost));
+    label = `💰 約¥${low}-${high}/往復`;
+  } else if (CHAT_MODE === "c") {
+    // Claude 単独: 1-2 × mul + 文脈入力
+    const low  = Math.max(1, Math.round(1 * mul + inputCost));
+    const high = Math.max(2, Math.round(2 * mul + inputCost));
+    label = `💰 約¥${low}-${high}/往復`;
   } else {
-    label = `💰 約¥${Math.max(1, Math.round(1 + inputCost))}-${Math.max(2, Math.round(2 + inputCost))}/往復`;
+    // Gemini 単独: モデル倍率なし（Claude 側を使わないため）
+    const low  = Math.max(1, Math.round(1 + inputCost));
+    const high = Math.max(2, Math.round(2 + inputCost));
+    label = `💰 約¥${low}-${high}/往復`;
   }
   costEl.textContent = label;
+}
+
+// v0.16: モデル選択 UI のリセット（モーダルを開くたびに Haiku 4.5 に戻す）
+function resetChatClaudeModelUI(){
+  CHAT_CLAUDE_MODEL = CLAUDE_MODEL;  // "claude-haiku-4-5-20251001"
+  const sel = document.getElementById("chatModelSelect");
+  if (sel) {
+    sel.value = CHAT_CLAUDE_MODEL;
+    sel.classList.remove("opus");
+  }
+  updateChatCostInfo();
+}
+
+// v0.16: モデル切替ハンドラ（<select> の onchange から呼ばれる）
+function setChatClaudeModel(modelId){
+  // 未知のIDが来たら無視（防御的）
+  if (!CLAUDE_MODEL_OPTIONS.some(o => o.id === modelId)) {
+    console.warn("[chat] unknown model id:", modelId);
+    return;
+  }
+  CHAT_CLAUDE_MODEL = modelId;
+  const sel = document.getElementById("chatModelSelect");
+  if (sel) {
+    // Opus 選択時は視覚警告として橙色（CSS .chat-model-select.opus）
+    sel.classList.toggle("opus", modelId === "claude-opus-4-7");
+  }
+  updateChatCostInfo();
+}
+
+// v0.16: モデル倍率取得（updateChatCostInfo 用）
+function getClaudeModelCostMul(modelId){
+  const opt = CLAUDE_MODEL_OPTIONS.find(o => o.id === modelId);
+  return opt ? opt.costMul : 1.0;
 }
 
 // v0.14: 「クリア」= 現セッションを終了して新規セッションを準備
@@ -6479,7 +6562,7 @@ function buildChatSessionMarkdown(session){
     }
   }
   lines.push("---");
-  lines.push(`_trade-journal morning.html v0.14 で生成_`);
+  lines.push(`_trade-journal morning.html v0.16 で生成_`);
   return lines.join("\n");
 }
 
