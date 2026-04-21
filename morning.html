@@ -1363,7 +1363,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.17</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.18</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -1533,6 +1533,7 @@ const URLS = {
   latest_prices:   `${DATA_BASE}/latest_prices.json`,
   weekly_results:  `${DATA_BASE}/weekly_results.json`,
   limit_watchlist: `${DATA_BASE}/limit_watchlist.json`,
+  fundamentals:    `${DATA_BASE}/fundamentals.json`,  // v0.18: Phase 5.3 ファンダ・需給データ
 };
 
 // ── Anthropic API ──
@@ -1785,6 +1786,7 @@ function escapeHtml(s){
 
 let HOLDINGS = [];
 let PRICES = {};
+let FUND = {};               // v0.18: Phase 5.3 ファンダ・需給データ(code5 → {pbr, dy, mb, ms, mr, ned})
 let MACRO = null;
 let JUDGMENTS = LS.get(K.judgments, {_date: TODAY});
 let PLAN_TEXT = "";
@@ -2084,6 +2086,14 @@ async function loadHoldings(){
     console.warn("v1 holdings parse error:", e);
   }
 
+  // v0.18: Phase 5.3 ファンダ・需給データを先に fetch（HOLDINGS 構築時にマージするため）
+  try {
+    FUND = await fetchJSON(URLS.fundamentals) || {};
+  } catch(e) {
+    console.warn("fundamentals fetch failed (未デプロイなら正常):", e);
+    FUND = {};
+  }
+
   const manualData = LS.get(K.manual_holdings, []);
   const seen = new Set();
   HOLDINGS = [];
@@ -2091,19 +2101,21 @@ async function loadHoldings(){
     if (!h || !h.cd) continue;
     if (seen.has(h.cd)) continue;
     seen.add(h.cd);
+    // v0.18: fundamentals.json から code5 で lookup（h.* > fundamentals の優先順位）
+    const f = FUND[code4to5(h.cd)] || {};
     HOLDINGS.push({
       code: h.cd, name: h.nm || h.name || `(${h.cd})`,
       buy_price: h.bp, shares: h.sh, stop_loss: h.sl, target: h.tgt,
       type: h.type || "spot", source: "v1",
       // Phase 5.3: v1 が将来出力する想定の拡張フィールド（無くても OK）
       entry_date:         h.ed  || h.entry_date         || null,
-      atr:                h.atr || null,
-      margin_buy:         h.mb  || h.margin_buy         || null,
-      margin_sell:        h.ms  || h.margin_sell        || null,
-      margin_ratio:       h.mr  || h.margin_ratio       || null,
-      pbr:                h.pbr || null,
-      dividend_yield:     h.dy  || h.dividend_yield     || null,
-      next_earnings_date: h.ned || h.next_earnings_date || null,
+      atr:                h.atr || f.atr               || null,
+      margin_buy:         h.mb  || h.margin_buy         || f.mb  || null,
+      margin_sell:        h.ms  || h.margin_sell        || f.ms  || null,
+      margin_ratio:       h.mr  || h.margin_ratio       || f.mr  || null,
+      pbr:                h.pbr || f.pbr               || null,
+      dividend_yield:    (h.dy  != null ? h.dy  : (h.dividend_yield     != null ? h.dividend_yield     : (f.dy  != null ? f.dy  : null))),
+      next_earnings_date: h.ned || h.next_earnings_date || f.ned || null,
     });
   }
   for (const h of manualData) {
@@ -2111,7 +2123,17 @@ async function loadHoldings(){
     if (seen.has(h.code)) continue;
     seen.add(h.code);
     // manual_holdings は元から spread で全フィールド保存される
-    HOLDINGS.push({...h, source: "manual"});
+    // v0.18: 足りないファンダ値を fundamentals.json から補完
+    const f = FUND[code4to5(h.code)] || {};
+    HOLDINGS.push({
+      ...h, source: "manual",
+      pbr:                h.pbr                != null ? h.pbr                : (f.pbr != null ? f.pbr : null),
+      dividend_yield:     h.dividend_yield     != null ? h.dividend_yield     : (f.dy  != null ? f.dy  : null),
+      margin_buy:         h.margin_buy         != null ? h.margin_buy         : (f.mb  != null ? f.mb  : null),
+      margin_sell:        h.margin_sell        != null ? h.margin_sell        : (f.ms  != null ? f.ms  : null),
+      margin_ratio:       h.margin_ratio       != null ? h.margin_ratio       : (f.mr  != null ? f.mr  : null),
+      next_earnings_date: h.next_earnings_date || f.ned || null,
+    });
   }
 
   try {
@@ -3267,6 +3289,19 @@ async function loadWatchlist(){
   }
 
   WATCH_RAW = Array.isArray(raw) ? raw : [];
+  // v0.18: fundamentals.json から各銘柄のファンダ・需給フィールドを補完
+  //   limit_watchlist.json 自体が将来これらを持てば不要になるが、現状は fundamentals.json 頼み
+  for (const item of WATCH_RAW) {
+    if (!item || !item.code) continue;
+    const f = FUND[code4to5(item.code)];
+    if (!f) continue;
+    if (item.pbr                == null && f.pbr != null) item.pbr                = f.pbr;
+    if (item.dividend_yield     == null && f.dy  != null) item.dividend_yield     = f.dy;
+    if (item.margin_buy         == null && f.mb  != null) item.margin_buy         = f.mb;
+    if (item.margin_sell        == null && f.ms  != null) item.margin_sell        = f.ms;
+    if (item.margin_ratio       == null && f.mr  != null) item.margin_ratio       = f.mr;
+    if (!item.next_earnings_date && f.ned) item.next_earnings_date = f.ned;
+  }
   WATCH_ITEMS = filterWatchlist(WATCH_RAW, settings);
 
   if (WATCH_ITEMS.length === 0) {
