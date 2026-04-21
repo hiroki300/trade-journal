@@ -1119,6 +1119,110 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 }
 /* 履歴パネルが開いてる時、モーダル本体はrelativeにして overlay を被せる */
 #chatModal .modal{position:relative;}
+
+/* ════════════════════════════════════════════════════════════
+   Phase 5.3 (v0.17): ファンダ・需給チップ + 動的リスク管理 + 見送り機能
+   ════════════════════════════════════════════════════════════ */
+
+/* ── ファンダ・需給チップ（h-card / w-card 共通） ── */
+.fund-chips{
+  display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;
+}
+.fund-chip{
+  font-size:10px;padding:2px 7px;border-radius:10px;
+  background:var(--s1);color:var(--t2);border:1px solid var(--border);
+  font-family:var(--mono);line-height:1.45;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:3px;
+}
+.fund-chip-lbl{color:var(--t3);font-size:9px;font-family:var(--font);}
+.fund-chip.warn{background:#3a2a18;color:#fcd34d;border-color:#92400e;}
+.fund-chip.danger{background:#3a1818;color:#fca5a5;border-color:#7f1d1d;}
+.fund-chip.muted{opacity:.45;}
+.fund-chip.good{background:#0f2a1f;color:#6ee7b7;border-color:#065f46;}
+
+/* ── ATR ベース撤退ライン目安（h-meta 内） ── */
+.atr-hint{
+  display:block;font-size:9px;color:var(--t3);
+  font-family:var(--mono);margin-top:3px;line-height:1.3;
+}
+.atr-hint.has-data{color:#7dd3fc;}
+.atr-hint .atr-lbl{color:var(--t3);font-size:8.5px;}
+
+/* ── タイムストップ警告アイコン ── */
+.time-stop-icon{
+  display:inline-flex;align-items:center;gap:3px;
+  font-size:10px;padding:1px 6px;border-radius:8px;
+  background:#3a2a18;color:#fcd34d;border:1px solid #92400e;
+  margin-left:6px;font-family:var(--mono);font-weight:700;vertical-align:middle;
+}
+.time-stop-icon.danger{background:#3a1818;color:#fca5a5;border-color:#7f1d1d;}
+
+/* ── 4列に拡張した判定ボタン（見送り追加） ── */
+.h-judge-btns.with-skip{grid-template-columns:repeat(4,1fr);}
+.h-judge-btns.with-skip .j-btn{padding:9px 2px;font-size:10px;}
+.h-judge-btns.with-skip .j-btn .ji{font-size:16px;}
+.j-btn.sel-skip{background:#475569;color:#fff;border-color:#475569;}
+
+/* ── 検討スルー記録リンク（手動追加フォーム下） ── */
+.skip-log-link{
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  background:transparent;border:1px dashed #475569;color:#94a3b8;
+  border-radius:6px;padding:7px 10px;font-size:11px;cursor:pointer;
+  width:100%;margin-top:6px;font-family:inherit;
+}
+.skip-log-link:hover{background:rgba(148,163,184,.06);color:#cbd5e1;}
+
+/* ── 見送りモーダル ── */
+.skip-reasons{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px;}
+@media(max-width:380px){.skip-reasons{grid-template-columns:1fr;}}
+.skip-reason{
+  background:var(--s2);border:1px solid var(--border);border-radius:6px;
+  padding:8px 10px;font-size:12px;color:var(--t2);cursor:pointer;
+  display:flex;align-items:center;gap:7px;user-select:none;
+  transition:.12s;
+}
+.skip-reason:hover{border-color:var(--t2);color:var(--text);}
+.skip-reason.on{
+  background:rgba(59,130,246,.15);border-color:var(--acc);color:#93c5fd;font-weight:600;
+}
+.skip-reason input{display:none;}
+.skip-reason .check{
+  width:14px;height:14px;border-radius:3px;border:1.5px solid var(--t3);
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-size:9px;line-height:1;color:transparent;
+}
+.skip-reason.on .check{background:var(--acc);border-color:var(--acc);color:#fff;}
+.skip-reason.on .check::before{content:"✓";}
+.skip-memo{
+  width:100%;background:var(--s2);border:1px solid var(--border);
+  color:var(--text);padding:8px 10px;border-radius:6px;font-size:12px;
+  font-family:var(--font);line-height:1.5;resize:vertical;min-height:60px;
+}
+.skip-memo:focus{outline:none;border-color:var(--acc);}
+.skip-target-info{
+  background:var(--s2);border-radius:6px;padding:9px 11px;margin-bottom:14px;
+  font-size:11px;color:var(--t2);line-height:1.5;
+  border-left:3px solid #475569;
+}
+.skip-target-info b{color:var(--text);font-family:var(--mono);}
+.skip-target-info .skip-target-meta{color:var(--t3);font-size:10px;margin-top:3px;}
+.skip-code-input{
+  display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-bottom:10px;
+}
+.skip-code-input input{
+  background:var(--bg);border:1px solid var(--border);color:var(--text);
+  padding:7px 9px;border-radius:5px;font-size:12px;font-family:var(--mono);
+}
+.skip-code-input input:focus{outline:none;border-color:var(--acc);}
+.skip-actions{display:flex;gap:8px;margin-top:12px;}
+.skip-actions button{
+  flex:1;padding:10px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;
+  border:1px solid var(--border);font-family:inherit;
+}
+.skip-actions .skip-cancel{background:var(--s2);color:var(--t2);}
+.skip-actions .skip-cancel:hover{background:var(--border);}
+.skip-actions .skip-confirm{background:var(--acc);color:#fff;border-color:var(--acc);}
+.skip-actions .skip-confirm:disabled{opacity:.4;cursor:not-allowed;}
 </style>
 </head>
 <body>
@@ -1259,7 +1363,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.11</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.17</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -1366,9 +1470,33 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   </div>
 </div>
 
+<!-- 見送りモーダル (Phase 5.3 / v0.17) -->
+<div class="modal-bg" id="skipModal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">⏭️ 見送り記録</div>
+      <button class="modal-close" onclick="closeSkipModal()">×</button>
+    </div>
+    <div id="skipTargetInfo" class="skip-target-info"></div>
+    <div id="skipCodeInputArea"></div>
+    <div class="modal-sec">
+      <div class="modal-sec-title">見送り理由（複数選択可）</div>
+      <div class="skip-reasons" id="skipReasons"></div>
+    </div>
+    <div class="modal-sec" style="margin-bottom:8px;">
+      <div class="modal-sec-title">補足メモ（任意）</div>
+      <textarea class="skip-memo" id="skipMemo" placeholder="例: 日経 -2% で全体撤退、決算跨ぎを回避、など"></textarea>
+    </div>
+    <div class="skip-actions">
+      <button class="skip-cancel" onclick="closeSkipModal()">キャンセル</button>
+      <button class="skip-confirm" id="skipConfirmBtn" onclick="confirmSkip()" disabled>記録する</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.16 (Phase 5.1: モデル切替 + 日付バグ修正)
+//  trade-journal morning.html  v0.17 (Phase 5.3: ファンダ・需給・見送り)
 //  - Phase 2 までの全機能
 //  - Phase 3 機能A（夕会）/ 機能B（売買分析 3段分業）
 //  - Phase 3.5 B-β（計画生成の Gemini 補完）/ A-α（夕会の Gemini 補完）
@@ -1378,15 +1506,23 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 //  - Phase 4 Stage 4.2 (v0.13): チャット文脈の選択式注入（6種チップ）
 //  - Phase 4 Stage 4.3 (v0.14): チャット履歴の IndexedDB 永続化
 //  - Phase 4 Stage 4.4 (v0.15): 朝会/夕会/機能B カードに「💬 深掘り」ボタン
-//  - Phase 5.1 (v0.16) NEW:
-//    [1] Claude モデル切替 UI（Haiku 4.5 / Sonnet 4.6 / Opus 4.7）
-//        - チャットヘッダーに <select>、毎回 Haiku にリセット（localStorage 保存なし）
-//        - Opus 選択時はセレクトを橙色に（視覚警告）
-//        - コスト目安をモデル倍率込みで動的再計算
-//        - chat_sessions への記録なし（DB_VERSION 3 維持）
-//    [2] 日付バグ修正（重要）
-//        - toISOString() は UTC 基準のため JST 00:00-08:59 に前日扱いとなる事故を修正
-//        - ymdJST() ヘルパーを追加、3 箇所（TODAY / getJournalCacheKey / formatPeriodRange）で使用
+//  - Phase 5.1 (v0.16): Claude モデル切替 UI / 日付バグ修正
+//  - Phase 5.3 (v0.17) NEW:
+//    [1] 拡張データスキーマ（ATR / 保有日数 / 信用残 / PBR / 配当利回 / 決算日）
+//        - HOLDINGS / WATCH_ITEMS にフィールド追加（v1 と limit_watchlist 側の出力は別タスク）
+//        - データ未提供時は muted チップで構造を可視化
+//    [2] ファンダ・需給チップ表示（h-card / w-card 共通）
+//        - 決算日近接時は警告色（5日以内=黄、当日/翌日=赤）
+//        - 信用倍率5倍超で warn 色
+//    [3] 動的撤退ライン目安（ATR ベース）
+//        - 損切目安: 現在値 - ATR × 2
+//        - 目標目安: 現在値 + ATR × 6（RR1:3 相当）
+//        - 保有日数 > 10営業日 でタイムストップ ⏳ アイコン
+//    [4] 見送り（スルー）機能
+//        - 保有銘柄の判定: ✋ ⛔ 💰 ⏭️ の4ボタン化
+//        - 新規検討記録: 添加フォーム下に「⏭️ 検討スルーを記録」リンク
+//        - 理由はチェックボックス（複数選択可）+ 自由メモ
+//        - JUDGMENTS（保有）/ K.skip_log（非保有）に分けて保存
 // ════════════════════════════════════════════════════════════════════
 
 // ── データソース ──
@@ -1440,7 +1576,26 @@ const K = {
   journal_analysis: "tjm_journal_analysis", // v0.8 B-6: 売買分析キャッシュ（期間別、LRU 3件）
   journal_migrated: "tjm_journal_migrated_v010", // v0.10: LRU→IndexedDB 一度限りの移行フラグ
   chat_ctx_flags:   "tjm_chat_ctx_flags",   // v0.13: チャット文脈の選択チップ状態
+  skip_log:         "tjm_skip_log",         // v0.17: 見送り記録（非保有銘柄、日付別）
 };
+
+// ── Phase 5.3: リスク管理の閾値・定数 ──
+const RISK_CONFIG = {
+  ATR_STOP_MULT: 2.0,         // 損切目安 = 現在値 - ATR × N
+  ATR_TARGET_MULT: 6.0,       // 目標目安 = 現在値 + ATR × N (RR1:3 相当)
+  MAX_HOLDING_DAYS: 10,       // タイムストップ閾値（営業日）
+  EARNINGS_WARN_DAYS: 5,      // 決算日警告（黄チップ）
+  EARNINGS_DANGER_DAYS: 1,    // 決算日危険（赤チップ）
+  MARGIN_RATIO_WARN: 5.0,     // 信用倍率警告
+  PBR_HIGH: 3.0,              // PBR割高ライン
+  PBR_LOW: 1.0,               // PBR割安ライン
+};
+
+// 見送り理由のプリセット（複数選択可）
+const SKIP_REASONS = [
+  "地合い悪化", "信用残多い", "PBR割高", "決算前リスク",
+  "チャート形状不良", "資金枠不足", "出来高薄い", "材料出尽くし",
+];
 
 // v0.5: 指値ウォッチのデフォルト設定
 const WATCH_DEFAULTS = {
@@ -1779,6 +1934,147 @@ function dismissAlert(){
 //  ② 保有銘柄
 // ════════════════════════════════════════════════════════════════════
 
+// ── Phase 5.3: ファンダ・需給・ATR・保有日数のヘルパー群 ──
+
+// JSTの YYYY-MM-DD 文字列を Date(JST 0:00 相当, ローカル) に変換
+function parseYmdJST(ymd){
+  if (!ymd) return null;
+  const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+}
+
+// 営業日カウント（土日のみ除外、祝日は無視）
+//   from と to の差を、土日を除いた日数で返す。to を含む。
+function businessDaysBetween(fromYmd, toYmd){
+  const a = parseYmdJST(fromYmd);
+  const b = parseYmdJST(toYmd);
+  if (!a || !b) return null;
+  if (a > b) return 0;
+  let count = 0;
+  const cur = new Date(a);
+  while (cur <= b){
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+// 保有日数（営業日）。entry_date が無ければ null
+function calcHoldingDays(entryDate){
+  if (!entryDate) return null;
+  return businessDaysBetween(entryDate, TODAY);
+}
+
+// 暦日数（決算日までのカウントダウン用）
+function daysUntil(targetYmd){
+  const t = parseYmdJST(targetYmd);
+  if (!t) return null;
+  const today = parseYmdJST(TODAY);
+  const ms = t - today;
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
+// ATR ベースの撤退/目標目安
+function calcAtrStop(price, atr){
+  if (!price || !atr) return null;
+  return Math.round(price - atr * RISK_CONFIG.ATR_STOP_MULT);
+}
+function calcAtrTarget(price, atr){
+  if (!price || !atr) return null;
+  return Math.round(price + atr * RISK_CONFIG.ATR_TARGET_MULT);
+}
+
+// 信用倍率を margin_buy/margin_sell から自動計算（数値が直接あればそれを優先）
+function calcMarginRatio(meta){
+  if (!meta) return null;
+  if (meta.margin_ratio != null && !isNaN(meta.margin_ratio)) return Number(meta.margin_ratio);
+  if (meta.margin_buy && meta.margin_sell && meta.margin_sell > 0){
+    return meta.margin_buy / meta.margin_sell;
+  }
+  return null;
+}
+
+// ファンダ・需給チップ HTML を生成（meta = HOLDINGS要素 or WATCH_ITEMS要素）
+//   showMuted=true の場合はデータ無しでも"—"プレースホルダを出す
+function formatFundChips(meta, showMuted=true){
+  const chips = [];
+
+  // PBR
+  if (meta.pbr != null && !isNaN(meta.pbr)){
+    const pbr = Number(meta.pbr);
+    let cls = "";
+    if (pbr >= RISK_CONFIG.PBR_HIGH) cls = "warn";
+    else if (pbr <= RISK_CONFIG.PBR_LOW) cls = "good";
+    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">PBR</span>${fmt(pbr,2)}</span>`);
+  } else if (showMuted){
+    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">PBR</span>—</span>`);
+  }
+
+  // 配当利回り
+  if (meta.dividend_yield != null && !isNaN(meta.dividend_yield)){
+    const dy = Number(meta.dividend_yield);
+    chips.push(`<span class="fund-chip"><span class="fund-chip-lbl">配当</span>${fmt(dy,2)}%</span>`);
+  } else if (showMuted){
+    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">配当</span>—</span>`);
+  }
+
+  // 信用倍率
+  const ratio = calcMarginRatio(meta);
+  if (ratio != null){
+    const cls = ratio >= RISK_CONFIG.MARGIN_RATIO_WARN ? "warn" : "";
+    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">信用</span>${fmt(ratio,1)}倍</span>`);
+  } else if (showMuted){
+    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">信用</span>—</span>`);
+  }
+
+  // 次回決算日（近接時は警告）
+  if (meta.next_earnings_date){
+    const days = daysUntil(meta.next_earnings_date);
+    let cls = "", suffix = "";
+    if (days != null){
+      if (days < 0) {
+        // 既に過去の決算日（データ更新漏れの可能性、muted扱い）
+        cls = "muted"; suffix = "";
+      } else if (days <= RISK_CONFIG.EARNINGS_DANGER_DAYS){
+        cls = "danger"; suffix = days === 0 ? " (本日!)" : ` (${days}日後!)`;
+      } else if (days <= RISK_CONFIG.EARNINGS_WARN_DAYS){
+        cls = "warn"; suffix = ` (${days}日後)`;
+      } else {
+        suffix = ` (${days}日後)`;
+      }
+    }
+    // YYYY-MM-DD → M/D 短縮表示
+    const m = String(meta.next_earnings_date).match(/-(\d{2})-(\d{2})/);
+    const shortDate = m ? `${parseInt(m[1])}/${parseInt(m[2])}` : meta.next_earnings_date;
+    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">決算</span>${shortDate}${suffix}</span>`);
+  } else if (showMuted){
+    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">決算</span>—</span>`);
+  }
+
+  if (chips.length === 0) return "";
+  return `<div class="fund-chips">${chips.join("")}</div>`;
+}
+
+// タイムストップ警告アイコンの HTML（保有日数が閾値を超えている場合）
+function formatTimeStopIcon(holdingDays){
+  if (holdingDays == null) return "";
+  if (holdingDays < RISK_CONFIG.MAX_HOLDING_DAYS) return "";
+  const overDays = holdingDays - RISK_CONFIG.MAX_HOLDING_DAYS;
+  const cls = overDays >= 5 ? "danger" : "";
+  return `<span class="time-stop-icon ${cls}" title="保有 ${holdingDays}営業日 / タイムストップ閾値 ${RISK_CONFIG.MAX_HOLDING_DAYS}日 超過">⏳ ${holdingDays}日</span>`;
+}
+
+// ATR ベースの撤退ライン目安 HTML
+function formatAtrHint(price, atr, kind){
+  // kind: "stop" | "target"
+  if (!price || !atr) return `<span class="atr-hint"><span class="atr-lbl">目安:</span> —</span>`;
+  const val = kind === "stop" ? calcAtrStop(price, atr) : calcAtrTarget(price, atr);
+  const mult = kind === "stop" ? RISK_CONFIG.ATR_STOP_MULT : RISK_CONFIG.ATR_TARGET_MULT;
+  return `<span class="atr-hint has-data"><span class="atr-lbl">目安:</span> ¥${fmt(val,0)} <span class="atr-lbl">(ATR×${mult})</span></span>`;
+}
+
 async function loadHoldings(){
   let v1Data = [];
   try {
@@ -1799,12 +2095,22 @@ async function loadHoldings(){
       code: h.cd, name: h.nm || h.name || `(${h.cd})`,
       buy_price: h.bp, shares: h.sh, stop_loss: h.sl, target: h.tgt,
       type: h.type || "spot", source: "v1",
+      // Phase 5.3: v1 が将来出力する想定の拡張フィールド（無くても OK）
+      entry_date:         h.ed  || h.entry_date         || null,
+      atr:                h.atr || null,
+      margin_buy:         h.mb  || h.margin_buy         || null,
+      margin_sell:        h.ms  || h.margin_sell        || null,
+      margin_ratio:       h.mr  || h.margin_ratio       || null,
+      pbr:                h.pbr || null,
+      dividend_yield:     h.dy  || h.dividend_yield     || null,
+      next_earnings_date: h.ned || h.next_earnings_date || null,
     });
   }
   for (const h of manualData) {
     if (!h || !h.code) continue;
     if (seen.has(h.code)) continue;
     seen.add(h.code);
+    // manual_holdings は元から spread で全フィールド保存される
     HOLDINGS.push({...h, source: "manual"});
   }
 
@@ -1882,6 +2188,9 @@ function renderHoldings(){
         <input id="addStop"   type="number" placeholder="損切">
         <button class="add-btn" onclick="addManualHolding()">＋</button>
       </div>
+      <button class="skip-log-link" onclick="skipNewStockFromForm()" title="保有しないが検討した銘柄の見送りを記録">
+        ⏭️ 検討スルーを記録
+      </button>
     </div>
   `;
 
@@ -1920,19 +2229,37 @@ function renderHoldingCard(h){
     } else tgtPctHtml = `${fmt(h.target, 0)}`;
   }
 
+  // Phase 5.3: ATR ベースの撤退ライン目安 + 保有日数 + ファンダ需給チップ
+  const curPrice = price ? price.close : null;
+  const atrStopHint   = formatAtrHint(curPrice, h.atr, "stop");
+  const atrTargetHint = formatAtrHint(curPrice, h.atr, "target");
+  const holdingDays   = calcHoldingDays(h.entry_date);
+  const timeStopIcon  = formatTimeStopIcon(holdingDays);
+  const fundChips     = formatFundChips(h, true);
+  const holdingDaysStr = holdingDays != null ? `${holdingDays}日保有` : "";
+
   let judgeHtml;
   if (judged) {
-    const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
-    const icons  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰"};
+    const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討", skip:"見送り"};
+    const icons  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰", skip:"⏭️"};
+    const lbl = labels[judged.judgment] || judged.judgment;
+    const ic  = icons[judged.judgment]  || "•";
+    // 見送りの場合は理由も小さく表示
+    const reasonsTxt = judged.judgment === "skip" && Array.isArray(judged.reasons) && judged.reasons.length
+      ? `<div style="font-size:10px;color:var(--t3);margin-top:3px;">理由: ${judged.reasons.map(escapeHtml).join("・")}</div>`
+      : "";
     judgeHtml = `
       <div class="h-judged-banner" onclick="resetJudgment('${escapeHtml(h.code)}')">
-        ${icons[judged.judgment]} 判定: <b>${labels[judged.judgment]}</b>
-        <span class="change-link">変更</span>
+        <div>
+          ${ic} 判定: <b>${lbl}</b>
+          <span class="change-link">変更</span>
+          ${reasonsTxt}
+        </div>
       </div>
     `;
   } else {
     judgeHtml = `
-      <div class="h-judge-btns">
+      <div class="h-judge-btns with-skip">
         <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','hold')">
           <span class="ji">✋</span>継続保有
         </button>
@@ -1942,6 +2269,9 @@ function renderHoldingCard(h){
         <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','consider_sell')">
           <span class="ji">💰</span>利確検討
         </button>
+        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','skip')">
+          <span class="ji">⏭️</span>見送り
+        </button>
       </div>
     `;
   }
@@ -1950,7 +2280,7 @@ function renderHoldingCard(h){
     <div class="h-card ${judged ? 'judged' : ''}" id="card-${escapeHtml(h.code)}">
       <div class="h-card-top">
         <div class="h-code-name">
-          <div class="h-code">${code5} ${h.type === 'margin' ? '<span style="color:var(--yellow)">[信用]</span>' : ''}</div>
+          <div class="h-code">${code5} ${h.type === 'margin' ? '<span style="color:var(--yellow)">[信用]</span>' : ''}${holdingDaysStr ? `<span style="color:var(--t3);margin-left:6px;font-size:10px;">${holdingDaysStr}</span>` : ""}${timeStopIcon}</div>
           <div class="h-name">${escapeHtml(h.name)}</div>
         </div>
         <div class="h-price">${curHtml}</div>
@@ -1964,20 +2294,31 @@ function renderHoldingCard(h){
         <div class="h-meta-item">
           <div class="h-meta-lbl">損切ライン</div>
           <div class="h-meta-val">${slPctHtml}</div>
+          ${atrStopHint}
         </div>
         <div class="h-meta-item">
           <div class="h-meta-lbl">目標</div>
           <div class="h-meta-val">${tgtPctHtml}</div>
+          ${atrTargetHint}
         </div>
       </div>
+      ${fundChips}
       ${judgeHtml}
     </div>
   `;
 }
 
-function setJudgment(code, judgment){
+function setJudgment(code, judgment, extra){
   const h = HOLDINGS.find(x => x.code === code);
   if (!h) return;
+
+  // Phase 5.3: 見送りの場合はモーダルを開いて理由入力を要求
+  //   extra が渡されている場合は確定済み（モーダルから呼ばれた）として保存に進む
+  if (judgment === "skip" && !extra) {
+    openSkipModal({mode: "holding", code: h.code, name: h.name});
+    return;
+  }
+
   const price = getPrice(code);
 
   JUDGMENTS[code] = {
@@ -1989,6 +2330,8 @@ function setJudgment(code, judgment){
     target: h.target ?? null,
     type: h.type ?? null,
     judged_at: new Date().toISOString(),
+    // Phase 5.3: 見送り時の理由・メモを記録
+    ...(extra ? {reasons: extra.reasons || [], memo: extra.memo || ""} : {}),
   };
   LS.set(K.judgments, JUDGMENTS);
   renderHoldings();
@@ -2035,6 +2378,151 @@ function syncFromV1(){
   cache.delete(URLS.latest_prices);
   loadHoldings();
   toast("🔄 再読込完了");
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Phase 5.3: 見送り（スルー）機能
+// ════════════════════════════════════════════════════════════════════
+
+// 見送りモーダルの内部状態（モーダルが閉じるまで保持）
+let _skipCtx = null;  // {mode: "holding"|"new", code, name}
+
+// 見送りモーダルを開く
+//   ctx = {mode: "holding", code, name}     - 保有銘柄の判定として
+//   ctx = {mode: "new"}                     - フォーム入力（コード・銘柄名）から
+//   ctx = {mode: "new", code, name}         - フォーム値が事前にある状態で開く
+function openSkipModal(ctx){
+  _skipCtx = ctx || {mode: "new"};
+
+  // ヘッダ情報の組み立て
+  const target = document.getElementById("skipTargetInfo");
+  const codeArea = document.getElementById("skipCodeInputArea");
+
+  if (_skipCtx.mode === "holding"){
+    const c5 = code4to5(_skipCtx.code);
+    const price = getPrice(_skipCtx.code);
+    const priceStr = price ? `¥${fmt(price.close, 0)} (${price.change_pct >= 0 ? '+' : ''}${fmt(price.change_pct, 2)}%)` : "価格不明";
+    target.innerHTML = `
+      <div><b>${escapeHtml(_skipCtx.name)}</b> <span style="color:var(--t3);font-family:var(--mono);">${c5}</span></div>
+      <div class="skip-target-meta">保有銘柄として「見送り」（今日は何もしない）を記録します / 現在値 ${priceStr}</div>
+    `;
+    codeArea.innerHTML = "";
+  } else {
+    // new モード: コード/銘柄名入力欄を出す
+    target.innerHTML = `
+      <div><b>新規検討の見送り記録</b></div>
+      <div class="skip-target-meta">買おうか迷ったが見送った銘柄を記録します。後日「見送って正解だったか」をレビューで検証できます。</div>
+    `;
+    codeArea.innerHTML = `
+      <div class="modal-sec-title" style="margin-bottom:6px;">銘柄</div>
+      <div class="skip-code-input">
+        <input type="text" id="skipCodeInp" placeholder="コード" maxlength="5" value="${escapeHtml(_skipCtx.code || "")}">
+        <input type="text" id="skipNameInp" placeholder="銘柄名" value="${escapeHtml(_skipCtx.name || "")}">
+      </div>
+    `;
+  }
+
+  // 理由チェックボックスの組み立て
+  const reasonsEl = document.getElementById("skipReasons");
+  reasonsEl.innerHTML = SKIP_REASONS.map((r, i) => `
+    <label class="skip-reason" data-reason="${escapeHtml(r)}" onclick="toggleSkipReason(this)">
+      <input type="checkbox">
+      <span class="check"></span>
+      <span>${escapeHtml(r)}</span>
+    </label>
+  `).join("");
+
+  document.getElementById("skipMemo").value = "";
+  document.getElementById("skipConfirmBtn").disabled = true;
+
+  document.getElementById("skipModal").classList.add("on");
+}
+
+function closeSkipModal(){
+  document.getElementById("skipModal").classList.remove("on");
+  _skipCtx = null;
+}
+
+// チェックボックストグル + 確定ボタンの活性制御
+function toggleSkipReason(el){
+  el.classList.toggle("on");
+  const cb = el.querySelector("input");
+  if (cb) cb.checked = el.classList.contains("on");
+  updateSkipConfirmState();
+}
+
+function updateSkipConfirmState(){
+  const checked = document.querySelectorAll("#skipReasons .skip-reason.on").length;
+  const memo = document.getElementById("skipMemo").value.trim();
+  // 理由を1つ以上 OR メモが入力されていれば確定可能
+  document.getElementById("skipConfirmBtn").disabled = (checked === 0 && memo.length === 0);
+}
+
+// モーダル背景クリックで閉じる + メモ入力で確定状態を更新
+document.getElementById("skipModal").onclick = (e) => {
+  if (e.target.id === "skipModal") closeSkipModal();
+};
+document.getElementById("skipMemo").addEventListener("input", updateSkipConfirmState);
+
+// 確定: 見送りを記録
+function confirmSkip(){
+  if (!_skipCtx){ closeSkipModal(); return; }
+
+  const reasons = Array.from(document.querySelectorAll("#skipReasons .skip-reason.on"))
+    .map(el => el.dataset.reason);
+  const memo = document.getElementById("skipMemo").value.trim();
+
+  if (_skipCtx.mode === "holding"){
+    // 保有銘柄の見送り判定 → setJudgment 経由で JUDGMENTS に保存
+    closeSkipModal();
+    setJudgment(_skipCtx.code, "skip", {reasons, memo});
+    toast(`⏭️ ${_skipCtx.name} を見送り記録`);
+  } else {
+    // 新規検討の見送り → K.skip_log（localStorage、日付別配列）に保存
+    let code = _skipCtx.code || "";
+    let name = _skipCtx.name || "";
+    const codeInp = document.getElementById("skipCodeInp");
+    const nameInp = document.getElementById("skipNameInp");
+    if (codeInp) code = codeInp.value.trim();
+    if (nameInp) name = nameInp.value.trim();
+    if (!code && !name){
+      toast("⚠️ コードか銘柄名を入力してください");
+      return;
+    }
+
+    const log = LS.get(K.skip_log, []);
+    const entry = {
+      date: TODAY,
+      code, name,
+      reasons, memo,
+      timestamp: new Date().toISOString(),
+    };
+    log.push(entry);
+    LS.set(K.skip_log, log);
+    closeSkipModal();
+    toast(`⏭️ ${name || code} を見送り記録`);
+
+    // フォーム値を初期化
+    const ac = document.getElementById("addCode");
+    const an = document.getElementById("addName");
+    const as = document.getElementById("addStop");
+    if (ac) ac.value = "";
+    if (an) an.value = "";
+    if (as) as.value = "";
+  }
+}
+
+// 手動追加フォーム下のリンクから呼ばれる
+function skipNewStockFromForm(){
+  const code = (document.getElementById("addCode")?.value || "").trim();
+  const name = (document.getElementById("addName")?.value || "").trim();
+  openSkipModal({mode: "new", code, name});
+}
+
+// 当日の見送り記録（K.skip_log のうち today 分のみ）を取得
+function getTodaysSkipLog(){
+  const log = LS.get(K.skip_log, []);
+  return log.filter(e => e.date === TODAY);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2595,6 +3083,9 @@ async function completeSession(){
     return;
   }
 
+  // Phase 5.3: 当日の見送り記録（保有外）も session に含める
+  const skipLogToday = getTodaysSkipLog();
+
   const session = {
     date: TODAY,
     completed_at: new Date().toISOString(),
@@ -2607,6 +3098,8 @@ async function completeSession(){
     } : null,
     judgments: judgmentsList,
     plan_text: PLAN_TEXT || null,
+    // Phase 5.3: 見送り記録（保有外の検討スルー）
+    skip_log: skipLogToday,
   };
 
   try {
@@ -2832,6 +3325,14 @@ function filterWatchlist(raw, settings){
       generated_price: item.current_price,
       nearest,
       generated_at: item.generated_at,
+      // Phase 5.3: ファンダ・需給フィールドを通過させる
+      //   limit_watchlist.json の出力側（stock-checker）が将来追加する想定
+      pbr:                item.pbr                || null,
+      dividend_yield:     item.dividend_yield     || null,
+      margin_buy:         item.margin_buy         || null,
+      margin_sell:        item.margin_sell        || null,
+      margin_ratio:       item.margin_ratio       || null,
+      next_earnings_date: item.next_earnings_date || null,
     });
   }
 
@@ -2859,6 +3360,8 @@ function renderWatchlist(){
     const c5 = code4to5(it.code);
     const distClass = it.nearest.distance_pct <= 1 ? "very-close" :
                       it.nearest.distance_pct <= 3 ? "close" : "";
+    // Phase 5.3: ウォッチカードにもファンダ・需給チップを表示
+    const fundChips = formatFundChips(it, true);
     return `
       <div class="w-card">
         <div class="w-card-top">
@@ -2879,6 +3382,7 @@ function renderWatchlist(){
           <span class="w-level-price">¥${fmt(it.nearest.price, 0)}</span>
           <span class="w-level-dist ${distClass}">+${fmt(it.nearest.distance_pct, 1)}%</span>
         </div>
+        ${fundChips}
         <div class="w-meta">
           <span>スコア ${it.total_score}</span>
           ${it.atr ? `<span>ATR ${fmt(it.atr, 0)}</span>` : ""}
