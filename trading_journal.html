@@ -182,6 +182,15 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .rcard-fade::after{content:'';position:absolute;bottom:0;left:0;right:0;height:30px;background:linear-gradient(transparent,var(--s1));pointer-events:none;}
 .rcard-fade.expanded::after{display:none;}
 .expand-btn{display:block;text-align:center;font-size:11px;color:var(--acc);padding:4px 0 8px;cursor:pointer;}
+/* --- 計算アシスタント用 --- */
+.calc-panel{background:var(--s2);border:1px dotted var(--acc);border-radius:8px;padding:12px;margin:10px 0;font-size:13px;color:var(--text);}
+.calc-row{display:flex;justify-content:space-between;margin-bottom:4px;}
+.calc-btn-group{display:flex;gap:4px;margin-top:8px;}
+.btn-mini{background:var(--border);color:var(--t2);border:none;padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;}
+.btn-mini.active{background:var(--acc);color:#fff;}
+.btn-apply{background:var(--acc);color:#fff;border:none;width:100%;padding:8px;border-radius:6px;margin-top:8px;font-weight:bold;font-size:12px;}
+.rr-status{display:block;margin:4px 0 12px 0;font-size:12px;font-weight:bold;}
+
 </style>
 </head>
 <body>
@@ -256,6 +265,24 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="frow" style="margin-top:8px">
       <div><label class="fl">株数</label><input class="fi" id="tsh" type="number" inputmode="numeric" placeholder="100" style="margin-bottom:0"></div>
       <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0"></div>
+      <div id="calcPanel" class="calc-panel" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="color:var(--acc); font-weight:bold;">💡 計算アシスタント</span>
+        <div class="calc-btn-group">
+            <button type="button" class="btn-mini active" onclick="setRisk(15, this)">15%</button>
+            <button type="button" class="btn-mini" onclick="setRisk(10, this)">10%</button>
+            <button type="button" class="btn-mini" onclick="setRisk(5, this)">5%</button>
+        </div>
+    </div>
+    <div class="calc-row"><span>損切り目安:</span><span id="suggestSl" style="color:var(--red); font-weight:bold;">--</span></div>
+    <div class="calc-row"><span>利確目安:</span><span id="suggestTgt" style="color:var(--green); font-weight:bold;">--</span></div>
+    <div class="calc-row" style="border-top:1px solid var(--border); margin-top:4px; padding-top:4px; color:var(--t2);">
+        <span>想定損益:</span><span id="suggestPnl">--</span>
+    </div>
+    <button type="button" class="btn-apply" onclick="applySuggestions()">💡 推奨値を自動入力</button>
+</div>
+<div id="rrDisplay" class="rr-status">📐 RR 1 : --</div>
+
     </div>
     <div id="buyEx" style="margin-top:8px">
       <div class="frow">
@@ -2397,6 +2424,59 @@ if (todayRev) {
 // 履歴を初期表示
 rRevHistory();
 rAzHistory();
+
+  // --- 損切り計算アシスタントロジック (後付け設定) ---
+let currentRisk = 15;
+function setRisk(val, btn) {
+    currentRisk = val;
+    btn.parentElement.querySelectorAll('.btn-mini').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    runAssistant();
+}
+
+function runAssistant() {
+    const bp = parseFloat(document.getElementById('tp')?.value);
+    const sh = parseInt(document.getElementById('tsh')?.value) || 0;
+    const panel = document.getElementById('calcPanel');
+    if (!bp || bp <= 0) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    const rPrice = Math.round(bp * (1 - currentRisk / 100));
+    const tPrice = Math.round(bp * (1 + (currentRisk * 3) / 100));
+    document.getElementById('suggestSl').textContent = '¥' + rPrice.toLocaleString();
+    document.getElementById('suggestTgt').textContent = '¥' + tPrice.toLocaleString();
+    if (sh > 0) {
+        document.getElementById('suggestPnl').textContent = `損失 -¥${((bp-rPrice)*sh).toLocaleString()} / 利益 +¥${((tPrice-bp)*sh).toLocaleString()}`;
+    }
+    updateRRCalc();
+}
+
+function applySuggestions() {
+    const bp = parseFloat(document.getElementById('tp').value);
+    if(!bp) return;
+    document.getElementById('tsl').value = Math.round(bp * (1 - currentRisk / 100));
+    document.getElementById('ttgt').value = Math.round(bp * (1 + (currentRisk * 3) / 100));
+    updateRRCalc();
+}
+
+function updateRRCalc() {
+    const bp = parseFloat(document.getElementById('tp')?.value);
+    const sl = parseFloat(document.getElementById('tsl')?.value);
+    const tgt = parseFloat(document.getElementById('ttgt')?.value);
+    const disp = document.getElementById('rrDisplay');
+    if (bp && sl && tgt) {
+        if (sl >= bp) { disp.innerHTML = "<span style='color:var(--red)'>⚠️ 損切りが買値以上です</span>"; return; }
+        const rr = ((tgt - bp) / (bp - sl)).toFixed(2);
+        disp.innerHTML = `📐 RR 1 : ${rr} <span style="color:${rr>=3?'var(--green)':'var(--yellow)'}">(${rr>=3?'理想的':'1:3推奨'})</span>`;
+    }
+}
+
+const setupAssistant = () => {
+    ['tp', 'tsh'].forEach(id => document.getElementById(id)?.addEventListener('input', runAssistant));
+    ['tsl', 'ttgt'].forEach(id => document.getElementById(id)?.addEventListener('input', updateRRCalc));
+};
+if (document.readyState !== 'loading') setupAssistant();
+else document.addEventListener('DOMContentLoaded', setupAssistant);
+
 </script>
 <!-- SW removed -->
 </body>
