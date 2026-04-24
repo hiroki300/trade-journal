@@ -1363,7 +1363,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.18</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.19</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -2023,10 +2023,14 @@ function formatFundChips(meta, showMuted=true){
   }
 
   // 信用倍率
+  //   v0.19: ETF等の売残ほぼゼロ銘柄で 700倍 など意味のない大きな値が出る対策
+  //   - 20倍超は "N倍超" と整数表記(小数に意味なし)
+  //   - 50倍超は警告色を外す(ETF等で需給悪化のサインとして誤検知するため)
   const ratio = calcMarginRatio(meta);
   if (ratio != null){
-    const cls = ratio >= RISK_CONFIG.MARGIN_RATIO_WARN ? "warn" : "";
-    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">信用</span>${fmt(ratio,1)}倍</span>`);
+    const displayText = ratio >= 20 ? `${Math.floor(ratio)}倍超` : `${fmt(ratio,1)}倍`;
+    const cls = (ratio >= RISK_CONFIG.MARGIN_RATIO_WARN && ratio < 50) ? "warn" : "";
+    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">信用</span>${displayText}</span>`);
   } else if (showMuted){
     chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">信用</span>—</span>`);
   }
