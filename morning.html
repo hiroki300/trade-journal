@@ -2847,6 +2847,21 @@ async function copyPlanAll(){
   await copyMarkdown(md, "今朝の計画まるごと");
 }
 
+// ─── 共通: ひろき様のトレード戦略コンテキスト（全AIプロンプトの冒頭に差し込む）──
+// 2026-04-25: 中長期保有・RR1:3 から 短期回転重視 へ転換。
+// 戦略方針を変えたい時はここだけ修正すれば全プロンプトに反映される。
+function buildStrategyContext(){
+  return `## ひろき様のトレードスタンス（前提）
+- スタイル: **短期回転重視スイング**（保有数日〜数週間、最長1ヶ月目安）
+- 1ポジション: 10〜30万円、最大5銘柄同時保有、6,000円以下中心
+- 損切り: **-8% デフォルト**（-5%/-3% もあり、浅めに切って回転を優先）
+- 利確: **RR 1:2 デフォルト**（+16%目安、1:1.5〜1:3 の範囲、現実的な目標価を設定）
+- 目標勝率: **50%以上**（RR が低めの分、勝率で積み上げる）
+- 銘柄選定軸: **直近モメンタム・出来高急増・テーマ性・板の厚さ** を重視。業績堅調/割安だけでは弱く、動意づいていることが必要。
+- 回避すべき: 決算またぎ・低出来高・長期横ばいのファンダ銘柄（中長期の仕込みは別枠）
+`;
+}
+
 // ── Gemini Step1: 今朝の市場速報プロンプト ──
 function buildGeminiMarketBriefPrompt(){
   // ユーザー（ひろき様）の注目テーマ（watchlist のテーマから抽出、固定）
@@ -2860,8 +2875,8 @@ function buildGeminiMarketBriefPrompt(){
   return `あなたは日本株トレーダー向けの市場アナリストです。
 本日 ${TODAY} (${WD}) の東京市場が始まる直前の**今朝の市場ブリーフ**を、Google検索で直近24時間のデータを基に作成してください。
 
+${buildStrategyContext()}
 ## 読者の文脈
-- 日本株スイングトレーダー（1ポジション10〜30万円、6,000円以下中心）
 - 注目テーマ: ${themes}
 - 本日の保有銘柄: ${holdingNames}
 
@@ -2931,9 +2946,10 @@ ${geminiResult}
     : "";
 
   return `あなたはひろき様の専属トレーディング・コーチです。
-スイングトレーダーであるひろき様が朝会で記録した本日の判断を踏まえ、
+短期回転重視のスイングトレーダーであるひろき様が朝会で記録した本日の判断を踏まえ、
 **今日一日の具体的な行動計画**を簡潔にアドバイスしてください。
-${marketBriefSection}
+
+${buildStrategyContext()}${marketBriefSection}
 ## 📊 マクロ状態
 ${macroSummary ? "```json\n" + JSON.stringify(macroSummary, null, 2) + "\n```" : "(データなし)"}
 
@@ -2976,6 +2992,7 @@ ${watchList ? `## 💎 押し目候補へのアプローチ
 - 全体で ${watchList ? '500〜700' : '400〜600'} 字程度に収める
 - マクロ "${macroSummary?.regime}" を必ず考慮（特に STORM/HALT 時はサイズ縮小強調）
 - 「損切検討」「利確検討」と判断した銘柄には、具体的な価格水準で行動指示
+- 推奨する損切り/利確水準は回転重視ルール（損切り -8%目安・RR 1:2目安）に沿って提示。抱え込むより浅く切って次に回すことを優先。
 ${geminiResult ? '- 今朝の市場速報（NY市況・為替・海外セクター）が日本株や保有銘柄にどう波及するかを、計画に必ず織り込む\n' : ''}${watchList ? '- 押し目候補は、現在の地合いと既存ポジションのリスクを踏まえて慎重に評価\n' : ''}- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
 - 不確実性を避けず、リスクは率直に明示`;
 }
@@ -3678,6 +3695,8 @@ function buildMonthlyAnalysisPrompt(stats){
 
   return `あなたは日本株スイングトレーダーであるひろき様の専属コーチです。
 過去30日のトレード判定データを分析し、傾向と来月のアドバイスを提示してください。
+
+${buildStrategyContext()}
 
 ## 📊 判定統計
 - 評価済み判定数: ${stats.evaluated}件
@@ -4516,7 +4535,9 @@ function buildClaudeStrategyPrompt(data, geminiContext, geminiStats){
   }).join("\n");
 
   return `あなたは運用歴25年の日本株シニアファンドマネージャーです。
-ひろき様（個人投資家・スイングトレード）の過去${period_days}日間のトレードを統合的に分析し、戦略アドバイスを書いてください。
+ひろき様（個人投資家・短期回転重視スイング）の過去${period_days}日間のトレードを統合的に分析し、戦略アドバイスを書いてください。
+
+${buildStrategyContext()}
 
 ## 📊 数値統計（参考）
 - 取引: ${stats.total_trades}回（買 ${stats.buy_count} / 売 ${stats.sell_count}）
@@ -6046,6 +6067,7 @@ ${geminiContext}
 
   return `あなたは運用歴25年の日本株シニアファンドマネージャーです。トレーダーの「朝の判定」と「実際の行動」のズレを冷静かつ建設的にレビューしてください。
 
+${buildStrategyContext()}
 ${ctx.join("\n")}
 ${marketContextSection}
 以下の3点を、各1〜2行で簡潔に答えてください。前置き・自己紹介・お疲れ様の挨拶は不要です。
@@ -6772,9 +6794,10 @@ async function sendChatMessage(){
   updateChatCtxInfo();
 
   const ctxBlock = pfs ? `\n\n# 現在の状況・コンテキスト\n${pfs}` : "";
-  const gemSys = `あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。${ctxBlock}`;
+  const strategyBlock = `\n\n${buildStrategyContext()}`;
+  const gemSys = `あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。${strategyBlock}${ctxBlock}`;
   const cldSys = `あなたは運用歴25年の日本株専門シニアFMです。
-率直・具体的にアドバイスしてください。数値根拠を示し、損切り・利確ラインを具体的に。${ctxBlock}`;
+ひろき様は短期回転重視のスイングトレーダー（下記スタンス参照）。率直・具体的にアドバイスしてください。数値根拠を示し、損切り・利確ラインを具体的に。${strategyBlock}${ctxBlock}`;
 
   // ローディング表示
   const loadingEl = addChatLoading(CHAT_MODE);
