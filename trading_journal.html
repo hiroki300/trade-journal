@@ -265,25 +265,24 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="frow" style="margin-top:8px">
       <div><label class="fl">株数</label><input class="fi" id="tsh" type="number" inputmode="numeric" placeholder="100" style="margin-bottom:0"></div>
       <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0"></div>
-      <div id="calcPanel" class="calc-panel" style="display:none;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    </div>
+    <div id="calcPanel" class="calc-panel" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <span style="color:var(--acc); font-weight:bold;">💡 計算アシスタント</span>
         <div class="calc-btn-group">
-            <button type="button" class="btn-mini active" onclick="setRisk(15, this)">15%</button>
-            <button type="button" class="btn-mini" onclick="setRisk(10, this)">10%</button>
-            <button type="button" class="btn-mini" onclick="setRisk(5, this)">5%</button>
+          <button type="button" class="btn-mini active" onclick="setRisk(15, this)">15%</button>
+          <button type="button" class="btn-mini" onclick="setRisk(10, this)">10%</button>
+          <button type="button" class="btn-mini" onclick="setRisk(5, this)">5%</button>
         </div>
-    </div>
-    <div class="calc-row"><span>損切り目安:</span><span id="suggestSl" style="color:var(--red); font-weight:bold;">--</span></div>
-    <div class="calc-row"><span>利確目安:</span><span id="suggestTgt" style="color:var(--green); font-weight:bold;">--</span></div>
-    <div class="calc-row" style="border-top:1px solid var(--border); margin-top:4px; padding-top:4px; color:var(--t2);">
+      </div>
+      <div class="calc-row"><span>損切り目安:</span><span id="suggestSl" style="color:var(--red); font-weight:bold;">--</span></div>
+      <div class="calc-row"><span>利確目安 (RR 1:3):</span><span id="suggestTgt" style="color:var(--green); font-weight:bold;">--</span></div>
+      <div class="calc-row" style="border-top:1px solid var(--border); margin-top:4px; padding-top:4px; color:var(--t2);">
         <span>想定損益:</span><span id="suggestPnl">--</span>
+      </div>
+      <button type="button" class="btn-apply" onclick="applySuggestions()">💡 推奨値を自動入力</button>
     </div>
-    <button type="button" class="btn-apply" onclick="applySuggestions()">💡 推奨値を自動入力</button>
-</div>
-<div id="rrDisplay" class="rr-status">📐 RR 1 : --</div>
-
-    </div>
+    <div id="rrDisplay" class="rr-status" style="display:none;">📐 RR 1 : --</div>
     <div id="buyEx" style="margin-top:8px">
       <div class="frow">
         <div><label class="fl">損切りライン</label><input class="fi" id="tsl" type="number" inputmode="decimal" placeholder="2420" style="margin-bottom:0"></div>
@@ -772,6 +771,12 @@ function onAct() {
   document.getElementById('buyEx').style.display = b ? '' : 'none';
   document.getElementById('tBtn').textContent = b ? '💱 買いを記録する' : '💰 売りを記録する';
   document.getElementById('tBtn').className = 'btn ' + (b ? 'btnb' : 'btns');
+  // 売り時は計算アシスタント/RR表示を隠す
+  const cp = document.getElementById('calcPanel');
+  const rd = document.getElementById('rrDisplay');
+  if (cp) cp.style.display = b ? '' : 'none';
+  if (rd) rd.style.display = b ? '' : 'none';
+  if (b && typeof runAssistant === 'function') runAssistant();
 }
 function doTrade() {
   const a = document.getElementById('ta').value;
@@ -2425,8 +2430,14 @@ if (todayRev) {
 rRevHistory();
 rAzHistory();
 
-  // --- 損切り計算アシスタントロジック (後付け設定) ---
+  // --- 損切り計算アシスタントロジック (Phase 5 v1) ---
 let currentRisk = 15;
+
+function isBuyMode() {
+  const ta = document.getElementById('ta');
+  return !ta || ta.value === 'buy';
+}
+
 function setRisk(val, btn) {
     currentRisk = val;
     btn.parentElement.querySelectorAll('.btn-mini').forEach(b => b.classList.remove('active'));
@@ -2435,17 +2446,25 @@ function setRisk(val, btn) {
 }
 
 function runAssistant() {
+    const panel = document.getElementById('calcPanel');
+    if (!panel) return;
+    // 売り時は計算アシスタントを表示しない
+    if (!isBuyMode()) { panel.style.display = 'none'; updateRRCalc(); return; }
     const bp = parseFloat(document.getElementById('tp')?.value);
     const sh = parseInt(document.getElementById('tsh')?.value) || 0;
-    const panel = document.getElementById('calcPanel');
-    if (!bp || bp <= 0) { panel.style.display = 'none'; return; }
+    if (!bp || bp <= 0) { panel.style.display = 'none'; updateRRCalc(); return; }
     panel.style.display = 'block';
     const rPrice = Math.round(bp * (1 - currentRisk / 100));
     const tPrice = Math.round(bp * (1 + (currentRisk * 3) / 100));
     document.getElementById('suggestSl').textContent = '¥' + rPrice.toLocaleString();
     document.getElementById('suggestTgt').textContent = '¥' + tPrice.toLocaleString();
     if (sh > 0) {
-        document.getElementById('suggestPnl').textContent = `損失 -¥${((bp-rPrice)*sh).toLocaleString()} / 利益 +¥${((tPrice-bp)*sh).toLocaleString()}`;
+        const loss = Math.round((bp - rPrice) * sh);
+        const profit = Math.round((tPrice - bp) * sh);
+        document.getElementById('suggestPnl').textContent =
+          `損失 -¥${loss.toLocaleString()} / 利益 +¥${profit.toLocaleString()}`;
+    } else {
+        document.getElementById('suggestPnl').textContent = '株数を入力すると金額ベースで表示';
     }
     updateRRCalc();
 }
@@ -2456,23 +2475,65 @@ function applySuggestions() {
     document.getElementById('tsl').value = Math.round(bp * (1 - currentRisk / 100));
     document.getElementById('ttgt').value = Math.round(bp * (1 + (currentRisk * 3) / 100));
     updateRRCalc();
+    if (typeof toast === 'function') toast('✅ 損切り・利確を自動入力しました');
 }
 
 function updateRRCalc() {
+    const disp = document.getElementById('rrDisplay');
+    if (!disp) return;
+    // 売り時はRR表示も隠す
+    if (!isBuyMode()) { disp.style.display = 'none'; return; }
     const bp = parseFloat(document.getElementById('tp')?.value);
     const sl = parseFloat(document.getElementById('tsl')?.value);
     const tgt = parseFloat(document.getElementById('ttgt')?.value);
-    const disp = document.getElementById('rrDisplay');
-    if (bp && sl && tgt) {
-        if (sl >= bp) { disp.innerHTML = "<span style='color:var(--red)'>⚠️ 損切りが買値以上です</span>"; return; }
-        const rr = ((tgt - bp) / (bp - sl)).toFixed(2);
-        disp.innerHTML = `📐 RR 1 : ${rr} <span style="color:${rr>=3?'var(--green)':'var(--yellow)'}">(${rr>=3?'理想的':'1:3推奨'})</span>`;
+    // 買値未入力なら非表示
+    if (!bp) { disp.style.display = 'none'; return; }
+    disp.style.display = 'block';
+
+    // --- 損切りラインの決定 ---
+    // 明示入力がなければ現在のリスク率で仮置き
+    const slUsed = (sl && sl > 0) ? sl : Math.round(bp * (1 - currentRisk / 100));
+    const slIsActual = !!(sl && sl > 0);
+
+    if (slUsed >= bp) {
+      disp.innerHTML = "<span style='color:var(--red)'>⚠️ 損切りが買値以上です</span>";
+      return;
     }
+
+    // --- 目標価未入力: 必要目標価 (RR 1:3 達成) を案内 ---
+    if (!tgt || tgt <= 0) {
+      const need = Math.round(bp + (bp - slUsed) * 3);
+      const slNote = slIsActual ? '入力SL基準' : `-${currentRisk}%仮置`;
+      disp.innerHTML = `📐 RR 1:3 目標価 <span style="color:var(--acc);font-weight:700">¥${need.toLocaleString()}</span> <span style="color:var(--t3);font-size:11px">（${slNote}）</span>`;
+      return;
+    }
+
+    // --- 実RR算出 ---
+    const rr = (tgt - bp) / (bp - slUsed);
+    const rrText = rr.toFixed(2);
+    let color, label;
+    if (rr >= 3) { color = 'var(--green)'; label = '✅ RR 1:3 達成'; }
+    else if (rr >= 2) { color = 'var(--yellow)'; label = '⚠️ 低RR (再検討)'; }
+    else if (rr > 0) { color = 'var(--red)'; label = '🚫 RR不足'; }
+    else { color = 'var(--red)'; label = '🚫 目標価が買値以下'; }
+
+    const slNote = slIsActual ? '' : ` <span style="color:var(--t3);font-size:10px">(SL仮置-${currentRisk}%)</span>`;
+    disp.innerHTML = `📐 RR 1 : ${rrText} <span style="color:${color};font-weight:700">${label}</span>${slNote}`;
 }
 
 const setupAssistant = () => {
     ['tp', 'tsh'].forEach(id => document.getElementById(id)?.addEventListener('input', runAssistant));
     ['tsl', 'ttgt'].forEach(id => document.getElementById(id)?.addEventListener('input', updateRRCalc));
+    // 売買モード切替時にも再評価
+    document.getElementById('ta')?.addEventListener('change', () => {
+      if (isBuyMode()) runAssistant();
+      else {
+        const cp = document.getElementById('calcPanel');
+        const rd = document.getElementById('rrDisplay');
+        if (cp) cp.style.display = 'none';
+        if (rd) rd.style.display = 'none';
+      }
+    });
 };
 if (document.readyState !== 'loading') setupAssistant();
 else document.addEventListener('DOMContentLoaded', setupAssistant);
