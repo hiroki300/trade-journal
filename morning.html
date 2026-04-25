@@ -227,6 +227,15 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 .h-yutai-pnl{font-family:var(--mono);font-size:11px;font-weight:700;}
 .h-yutai-pnl .up{color:var(--green);}
 .h-yutai-pnl .dn{color:var(--red);}
+.h-yutai-detail{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  padding:5px 0 0 22px;font-size:10.5px;color:var(--t2);line-height:1.5;
+}
+.h-yutai-month{
+  background:rgba(245,158,11,0.22);color:#fde68a;font-weight:700;
+  padding:1px 6px;border-radius:3px;font-size:9.5px;letter-spacing:.04em;
+}
+.h-yutai-content{color:var(--text);font-size:10.5px;}
 
 /* 手動入力フォーム */
 .h-add-row{
@@ -2181,6 +2190,8 @@ async function loadHoldings(){
       buy_price: h.bp, shares: h.sh, stop_loss: h.sl, target: h.tgt,
       type: h.type || "spot", source: "v1",
       is_yutai: !!h.is_yutai,  // v0.18 Phase 1: 優待枠フラグ（朝会の分析対象から除外）
+      yutai_month:        h.yutai_month   || null,  // v0.19: 権利確定月 (1-12)
+      yutai_content:      h.yutai_content || null,  // v0.19: 優待内容 (自由記述)
       // Phase 5.3: v1 が将来出力する想定の拡張フィールド（無くても OK）
       entry_date:         h.ed  || h.entry_date         || null,
       atr:                h.atr || f.atr               || null,
@@ -2202,6 +2213,8 @@ async function loadHoldings(){
     HOLDINGS.push({
       ...h, source: "manual",
       is_yutai: !!h.is_yutai,  // v0.18 Phase 1: 優待枠フラグ
+      yutai_month:        h.yutai_month   || null,
+      yutai_content:      h.yutai_content || null,
       pbr:                h.pbr                != null ? h.pbr                : (f.pbr != null ? f.pbr : null),
       dividend_yield:     h.dividend_yield     != null ? h.dividend_yield     : (f.dy  != null ? f.dy  : null),
       margin_buy:         h.margin_buy         != null ? h.margin_buy         : (f.mb  != null ? f.mb  : null),
@@ -2491,6 +2504,14 @@ function renderYutaiHoldingCard(h){
     pnlHtml = `<span class="${cls}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 1)}%</span>`;
   }
   const curStr = price ? `¥${fmt(price.close, 0)}` : "（価格不明）";
+  // v0.19: 優待詳細 (権利月・内容) があれば 2 行目で表示
+  const ym = h.yutai_month;
+  const yc = h.yutai_content;
+  const detailLine = (ym || yc) ? `
+      <div class="h-yutai-detail">
+        ${ym ? `<span class="h-yutai-month">${ym}月権利</span>` : ''}
+        ${yc ? `<span class="h-yutai-content">${escapeHtml(yc)}</span>` : ''}
+      </div>` : '';
   return `
     <div class="h-card-yutai">
       <div class="h-yutai-row">
@@ -2500,6 +2521,7 @@ function renderYutaiHoldingCard(h){
         <span class="h-yutai-price">${curStr}</span>
         <span class="h-yutai-pnl">${pnlHtml}</span>
       </div>
+      ${detailLine}
     </div>`;
 }
 
