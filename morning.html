@@ -164,6 +164,70 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 .h-judged-banner b{color:var(--text);}
 .h-judged-banner .change-link{color:var(--acc);font-size:10px;margin-left:4px;}
 
+/* ─── Phase 1 (v0.18): 📰 ニュース・材料セクション ─── */
+.news-section{
+  background:var(--s1);border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;margin:8px 0;
+}
+.news-hdr{
+  display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);
+  margin-bottom:6px;
+}
+.news-hdr b{color:var(--text);font-size:12px;}
+.news-meta{color:var(--t3);font-size:10px;margin-left:auto;}
+.news-refresh-btn{
+  background:transparent;border:none;color:var(--t3);cursor:pointer;
+  font-size:12px;padding:2px 4px;
+}
+.news-refresh-btn:hover{color:var(--acc);}
+.news-fetch-btn{
+  width:100%;background:linear-gradient(135deg,#1d4ed8,#0891b2);
+  border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;
+  padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;
+}
+.news-fetch-btn:active{transform:scale(.98);}
+.news-bulk-btn{
+  width:100%;background:linear-gradient(135deg,#1d4ed8,#0891b2);
+  border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;
+  padding:11px 12px;cursor:pointer;margin-bottom:10px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.news-bulk-btn:active{transform:scale(.98);}
+.news-bulk-btn:disabled{opacity:.6;cursor:wait;}
+.news-bulk-cached{font-size:10px;color:rgba(255,255,255,0.7);font-weight:500;}
+.news-loading{
+  font-size:11px;color:var(--t2);padding:6px 4px;display:flex;align-items:center;gap:8px;
+}
+.news-body{
+  font-size:11.5px;line-height:1.7;color:#cbd5e1;white-space:normal;
+  padding:4px 2px;
+}
+.news-body b{color:var(--acc);}
+.news-error{
+  font-size:11px;color:#fca5a5;padding:6px 8px;background:rgba(239,68,68,0.08);
+  border-radius:5px;display:flex;flex-direction:column;gap:6px;
+}
+
+/* ─── Phase 1 (v0.18): 🎁 優待保有銘柄セクション ─── */
+.yutai-section-hdr{
+  font-size:11px;color:var(--t3);font-weight:700;letter-spacing:.04em;
+  margin:14px 0 6px;padding-top:10px;border-top:1px dashed var(--border);
+}
+.h-card-yutai{
+  background:rgba(217,119,6,0.05);border:1px solid rgba(245,158,11,0.2);
+  border-radius:8px;padding:8px 10px;margin-bottom:5px;opacity:.85;
+}
+.h-yutai-row{
+  display:flex;align-items:center;gap:6px;font-size:11px;flex-wrap:wrap;
+}
+.h-yutai-badge{font-size:13px;}
+.h-yutai-code{color:var(--t3);font-family:var(--mono);font-size:10px;}
+.h-yutai-name{color:var(--text);font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.h-yutai-price{color:var(--t2);font-family:var(--mono);font-size:11px;}
+.h-yutai-pnl{font-family:var(--mono);font-size:11px;font-weight:700;}
+.h-yutai-pnl .up{color:var(--green);}
+.h-yutai-pnl .dn{color:var(--red);}
+
 /* 手動入力フォーム */
 .h-add-row{
   display:grid;grid-template-columns:1fr 2fr 1fr 50px;gap:6px;margin-bottom:10px;
@@ -1578,6 +1642,7 @@ const K = {
   journal_migrated: "tjm_journal_migrated_v010", // v0.10: LRU→IndexedDB 一度限りの移行フラグ
   chat_ctx_flags:   "tjm_chat_ctx_flags",   // v0.13: チャット文脈の選択チップ状態
   skip_log:         "tjm_skip_log",         // v0.17: 見送り記録（非保有銘柄、日付別）
+  news_cache_today: "tjm_news_cache_today", // v0.18 Phase 1: 当日のニュースキャッシュ (code → {text, fetched_at})
 };
 
 // ── Phase 5.3: リスク管理の閾値・定数 ──
@@ -1789,6 +1854,10 @@ let PRICES = {};
 let FUND = {};               // v0.18: Phase 5.3 ファンダ・需給データ(code5 → {pbr, dy, mb, ms, mr, ned})
 let MACRO = null;
 let JUDGMENTS = LS.get(K.judgments, {_date: TODAY});
+// v0.18 Phase 1: 📰 ニュースキャッシュ (code → {text, fetched_at, loading?, error?})
+//   当日中のみ有効。日付が変わったら自動クリア。
+let NEWS_CACHE = LS.get(K.news_cache_today, {_date: TODAY});
+if (NEWS_CACHE._date !== TODAY) NEWS_CACHE = {_date: TODAY};
 let PLAN_TEXT = "";
 let SESSION_COMPLETED = false;
 let WATCH_ITEMS = [];        // v0.5: 表示対象の接近銘柄リスト
@@ -2111,6 +2180,7 @@ async function loadHoldings(){
       code: h.cd, name: h.nm || h.name || `(${h.cd})`,
       buy_price: h.bp, shares: h.sh, stop_loss: h.sl, target: h.tgt,
       type: h.type || "spot", source: "v1",
+      is_yutai: !!h.is_yutai,  // v0.18 Phase 1: 優待枠フラグ（朝会の分析対象から除外）
       // Phase 5.3: v1 が将来出力する想定の拡張フィールド（無くても OK）
       entry_date:         h.ed  || h.entry_date         || null,
       atr:                h.atr || f.atr               || null,
@@ -2131,6 +2201,7 @@ async function loadHoldings(){
     const f = FUND[code4to5(h.code)] || {};
     HOLDINGS.push({
       ...h, source: "manual",
+      is_yutai: !!h.is_yutai,  // v0.18 Phase 1: 優待枠フラグ
       pbr:                h.pbr                != null ? h.pbr                : (f.pbr != null ? f.pbr : null),
       dividend_yield:     h.dividend_yield     != null ? h.dividend_yield     : (f.dy  != null ? f.dy  : null),
       margin_buy:         h.margin_buy         != null ? h.margin_buy         : (f.mb  != null ? f.mb  : null),
@@ -2157,13 +2228,16 @@ function getPrice(code){
 
 function renderHoldings(){
   const body = document.getElementById("bodyHoldings");
-  const total = HOLDINGS.length;
-  const judged = HOLDINGS.filter(h => JUDGMENTS[h.code]).length;
+  // v0.18 Phase 1: 優待枠は判定対象外として総数からも除外
+  const target = HOLDINGS.filter(h => !h.is_yutai);
+  const yutai  = HOLDINGS.filter(h =>  h.is_yutai);
+  const total = target.length;
+  const judged = target.filter(h => JUDGMENTS[h.code]).length;
   const allFromV1 = HOLDINGS.length > 0 && HOLDINGS.every(h => h.source === "v1");
 
   const badge = document.getElementById("badgeHoldings");
   if (total === 0) {
-    badge.className = "sec-badge"; badge.textContent = "0件";
+    badge.className = "sec-badge"; badge.textContent = HOLDINGS.length === 0 ? "0件" : `🎁${yutai.length}`;
   } else if (judged === total) {
     badge.className = "sec-badge done";
     badge.textContent = `✓ ${judged}/${total}`;
@@ -2178,8 +2252,9 @@ function renderHoldings(){
     document.getElementById("numHoldings").textContent = "2";
   }
 
+  const yutaiNote = yutai.length > 0 ? ` / 🎁${yutai.length}銘柄は優待枠` : "";
   document.getElementById("previewHoldings").textContent =
-    total === 0 ? "保有銘柄なし" : `${total}銘柄 / 判定済 ${judged}`;
+    HOLDINGS.length === 0 ? "保有銘柄なし" : `${total}銘柄 / 判定済 ${judged}${yutaiNote}`;
 
   let html = "";
 
@@ -2191,6 +2266,17 @@ function renderHoldings(){
         <button onclick="syncFromV1()" style="margin-left:auto;">🔄 再読込</button>
       </div>
     `;
+    // v0.18 Phase 1: 📰 全保有銘柄のニュースを一括取得ボタン
+    const targets = HOLDINGS.filter(h => !h.is_yutai);
+    const cachedCount = targets.filter(h => NEWS_CACHE[h.code]?.text).length;
+    if (targets.length > 0) {
+      html += `
+        <button class="news-bulk-btn" onclick="fetchAllHoldingsNews()" id="newsBulkBtn">
+          📰 保有銘柄${targets.length}件のニュースを一括取得
+          ${cachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${cachedCount}/${targets.length}）</span>` : ''}
+        </button>
+      `;
+    }
   }
 
   if (HOLDINGS.length === 0) {
@@ -2202,7 +2288,16 @@ function renderHoldings(){
       </div>
     `;
   } else {
-    html += HOLDINGS.map(renderHoldingCard).join("");
+    // 優待枠は朝会の分析対象から除外し、別セクションで淡色表示
+    const normal = HOLDINGS.filter(h => !h.is_yutai);
+    const yutai  = HOLDINGS.filter(h =>  h.is_yutai);
+    html += normal.map(renderHoldingCard).join("");
+    if (yutai.length > 0) {
+      html += `
+        <div class="yutai-section-hdr">🎁 優待保有銘柄（${yutai.length}銘柄・分析対象外）</div>
+      `;
+      html += yutai.map(renderYutaiHoldingCard).join("");
+    }
   }
 
   html += `
@@ -2329,9 +2424,188 @@ function renderHoldingCard(h){
         </div>
       </div>
       ${fundChips}
+      ${renderNewsSection(h.code, h.name)}
       ${judgeHtml}
     </div>
   `;
+}
+
+// ─── Phase 1 (v0.18): 📰 ニュース・材料セクション ───
+//   各保有銘柄カードに表示。初回はボタンのみ、押下で Gemini に投げる。
+//   セッション IndexedDB にキャッシュし、当日中の再展開時はキャッシュを使う。
+function renderNewsSection(code, name){
+  const cached = NEWS_CACHE[code];
+  if (cached && cached.text) {
+    return `
+      <div class="news-section">
+        <div class="news-hdr">
+          📰 <b>ニュース・材料</b>
+          <span class="news-meta">${formatJpDateTime(cached.fetched_at)}</span>
+          <button class="news-refresh-btn" onclick="fetchNewsForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)" title="再取得">🔄</button>
+        </div>
+        <div class="news-body" id="news-body-${escapeHtml(code)}">${formatNewsBody(cached.text)}</div>
+      </div>`;
+  }
+  if (cached && cached.error) {
+    return `
+      <div class="news-section">
+        <div class="news-hdr">📰 <b>ニュース・材料</b></div>
+        <div class="news-error" id="news-body-${escapeHtml(code)}">⚠️ ${escapeHtml(cached.error)}
+          <button class="news-fetch-btn" onclick="fetchNewsForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)">🔄 再試行</button>
+        </div>
+      </div>`;
+  }
+  if (cached && cached.loading) {
+    return `
+      <div class="news-section">
+        <div class="news-hdr">📰 <b>ニュース・材料</b></div>
+        <div class="news-loading" id="news-body-${escapeHtml(code)}">
+          <span class="loading"></span> Gemini が直近72時間のニュースを Google検索中...
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="news-section">
+      <div class="news-hdr">📰 <b>ニュース・材料</b></div>
+      <button class="news-fetch-btn" onclick="fetchNewsForHolding('${escapeHtml(code)}','${escapeHtml(name)}',false)">
+        🔍 直近72時間のニュース・材料を取得
+      </button>
+    </div>`;
+}
+
+function formatNewsBody(text){
+  // 改行を <br> に、見出しっぽい行は強調 (簡易マークダウン風)
+  return escapeHtml(text)
+    .replace(/\n/g, "<br>")
+    .replace(/\*\*([^\*]+)\*\*/g, "<b>$1</b>");
+}
+
+// ─── 優待保有銘柄の表示（分析対象外、淡色） ───
+function renderYutaiHoldingCard(h){
+  const code5 = code4to5(h.code);
+  const price = getPrice(h.code);
+  let pnlHtml = "-";
+  if (price && h.buy_price) {
+    const pnlPct = (price.close / h.buy_price - 1) * 100;
+    const cls = pnlPct >= 0 ? "up" : "dn";
+    pnlHtml = `<span class="${cls}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 1)}%</span>`;
+  }
+  const curStr = price ? `¥${fmt(price.close, 0)}` : "（価格不明）";
+  return `
+    <div class="h-card-yutai">
+      <div class="h-yutai-row">
+        <span class="h-yutai-badge">🎁</span>
+        <span class="h-yutai-code">${code5}</span>
+        <span class="h-yutai-name">${escapeHtml(h.name)}</span>
+        <span class="h-yutai-price">${curStr}</span>
+        <span class="h-yutai-pnl">${pnlHtml}</span>
+      </div>
+    </div>`;
+}
+
+// ─── Phase 1: ニュース取得 (Gemini + Google検索) ───
+//   force=true で強制再取得。code は v1 の 4桁/英数字コード。
+async function fetchNewsForHolding(code, name, force){
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  if (!geminiKey) {
+    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  // 当日キャッシュがあり、force じゃなければ何もしない（既に画面に出ている）
+  if (!force && NEWS_CACHE[code] && NEWS_CACHE[code].text) {
+    return;
+  }
+  // ローディング状態を反映
+  NEWS_CACHE[code] = {loading: true};
+  // 個別の DOM だけ更新（renderHoldings 全再描画は判定や金額表示に影響するので避ける）
+  const bodyEl = document.getElementById(`news-body-${code}`);
+  const sectionParent = bodyEl ? bodyEl.closest(".h-card") : null;
+  // セクションごとごっそり差し替え
+  const _refreshOne = () => {
+    const card = document.getElementById(`card-${code}`);
+    if (!card) return;
+    const sec = card.querySelector(".news-section");
+    if (sec) sec.outerHTML = renderNewsSection(code, name);
+  };
+  _refreshOne();
+
+  const prompt = buildHoldingNewsPrompt(code, name);
+  try {
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 1200});
+    NEWS_CACHE[code] = {
+      text: (text || "").trim(),
+      fetched_at: new Date().toISOString(),
+    };
+  } catch(e) {
+    console.warn("[news] fetch failed:", code, e);
+    NEWS_CACHE[code] = {
+      error: e.message || String(e),
+      fetched_at: new Date().toISOString(),
+    };
+  }
+  // 当日キャッシュとして localStorage に保存
+  try { LS.set(K.news_cache_today, {...NEWS_CACHE, _date: TODAY}); } catch(_) {}
+  _refreshOne();
+}
+
+// ─── Phase 1: 全保有銘柄のニュースを一括並列取得 ───
+async function fetchAllHoldingsNews(){
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  if (!geminiKey) {
+    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  const targets = HOLDINGS.filter(h => !h.is_yutai);
+  if (targets.length === 0) {
+    toast("対象銘柄なし"); return;
+  }
+  // 既にキャッシュ済みの銘柄はスキップ。エラー or 未取得のみ実行。
+  const todo = targets.filter(h => !(NEWS_CACHE[h.code]?.text));
+  if (todo.length === 0) {
+    toast("✅ 全銘柄取得済み（個別の🔄で再取得可）"); return;
+  }
+  const btn = document.getElementById("newsBulkBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="loading"></span> ${todo.length}件のニュース取得中...`;
+  }
+  toast(`📰 ${todo.length}件のニュースを並列取得開始`);
+  // 並列実行（Promise.allSettled で 1件失敗しても他は続行）
+  const results = await Promise.allSettled(
+    todo.map(h => fetchNewsForHolding(h.code, h.name, false))
+  );
+  const ok = results.filter(r => r.status === "fulfilled").length;
+  toast(`📰 ニュース取得完了: ${ok}/${todo.length} 件`);
+  // ボタン状態の最終更新は renderHoldings で
+  if (btn) { btn.disabled = false; }
+  // 全体再描画して取得済 count を更新
+  renderHoldings();
+}
+
+// ─── Phase 1: ニュース取得プロンプト（個別銘柄） ───
+function buildHoldingNewsPrompt(code, name){
+  return `日本株「${name}（${code}）」の直近72時間のニュース・材料を Google検索で調べて、
+箇条書きで最大5件に絞って提示してください。
+
+## 出力フォーマット（必ず守る）
+
+各項目を以下の形式で：
+- **[YYYY-MM-DD or 〇日前]** [1行サマリ]（出典: [媒体名]）[インパクト: 強/中/弱]
+
+特に注目すべき項目:
+- 決算発表・業績修正・配当方針変更
+- IR・適時開示（提携・M&A・自社株買い・新製品）
+- 格付け変更・目標株価変更・アナリスト評価
+- セクター全体に影響する規制・政策
+- 大株主の売買・注目度の高いニュース
+
+## 執筆ルール
+- 全体で 350字以内、各項目 2行以内
+- 検索で裏取りできた情報のみ。推測・一般論は不要
+- 直近72時間でめぼしいニュースが無い場合は「（直近72時間で目立った材料なし）」と1行で明記
+- 売買の判断材料として有用な情報を優先（株価インパクトの大きさで選定）
+- 結論や推奨は書かない、事実とソースのみ
+- 日本語、最後まで書き切ること`;
 }
 
 function setJudgment(code, judgment, extra){
@@ -2347,6 +2621,10 @@ function setJudgment(code, judgment, extra){
 
   const price = getPrice(code);
 
+  // v0.18 Phase 1: 当日のニュースを判定に紐づけて保存（履歴・夕会レビュー・月次分析で参照可能に）
+  const news = NEWS_CACHE[code];
+  const briefNews = (news && news.text) ? news.text : null;
+
   JUDGMENTS[code] = {
     code, name: h.name, judgment,
     price_at_judgment: price?.close ?? null,
@@ -2356,15 +2634,16 @@ function setJudgment(code, judgment, extra){
     target: h.target ?? null,
     type: h.type ?? null,
     judged_at: new Date().toISOString(),
+    ...(briefNews ? {brief_news: briefNews} : {}),
     // Phase 5.3: 見送り時の理由・メモを記録
     ...(extra ? {reasons: extra.reasons || [], memo: extra.memo || ""} : {}),
   };
   LS.set(K.judgments, JUDGMENTS);
   renderHoldings();
 
-  // 次の未判定銘柄へスクロール
+  // 次の未判定銘柄へスクロール（優待枠は対象外）
   setTimeout(() => {
-    const next = HOLDINGS.find(x => !JUDGMENTS[x.code]);
+    const next = HOLDINGS.find(x => !x.is_yutai && !JUDGMENTS[x.code]);
     if (next) {
       const el = document.getElementById(`card-${next.code}`);
       if (el) el.scrollIntoView({behavior: "smooth", block: "center"});
