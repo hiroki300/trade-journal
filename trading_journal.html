@@ -198,6 +198,37 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .yutai-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px;cursor:pointer;user-select:none;}
 .yutai-check input{accent-color:#f59e0b;width:16px;height:16px;cursor:pointer;}
 .yutai-check.on{border-color:#d4a017;color:#fbbf24;}
+/* --- 優待詳細表示 (権利月・優待内容) --- */
+.yutai-info{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);
+  border-radius:6px;padding:6px 10px;margin-top:6px;font-size:11px;
+}
+.yutai-info-month{
+  background:rgba(245,158,11,0.25);color:#fde68a;font-weight:700;
+  padding:2px 8px;border-radius:4px;font-size:10px;letter-spacing:.04em;
+}
+.yutai-info-content{color:var(--text);flex:1;min-width:0;line-height:1.4;}
+.yutai-info-edit{
+  background:transparent;border:1px solid var(--border);color:var(--t2);
+  font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;
+}
+.yutai-info-edit:hover{color:var(--acc);border-color:var(--acc);}
+.yutai-info.empty{
+  background:transparent;border-style:dashed;color:var(--t3);
+}
+/* 優待詳細編集モーダル */
+.ymodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:none;align-items:center;justify-content:center;padding:16px;}
+.ymodal-overlay.show{display:flex;}
+.ymodal{background:var(--s1);border:1px solid var(--border);border-radius:12px;width:100%;max-width:380px;padding:20px;}
+.ymodal h3{margin:0 0 14px 0;color:#fbbf24;font-size:15px;}
+.ymodal-row{margin-bottom:12px;}
+.ymodal-row label{display:block;font-size:11px;color:var(--t2);margin-bottom:5px;}
+.ymodal-row input,.ymodal-row select{width:100%;background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:9px 10px;color:var(--text);font-size:13px;box-sizing:border-box;}
+.ymodal-actions{display:flex;gap:8px;margin-top:16px;}
+.ymodal-actions button{flex:1;padding:10px;border:none;border-radius:6px;font-weight:700;font-size:13px;cursor:pointer;}
+.ymodal-cancel{background:var(--s2);color:var(--t2);border:1px solid var(--border);}
+.ymodal-save{background:linear-gradient(135deg,#d4a017,#f59e0b);color:#fff;}
 
 </style>
 </head>
@@ -576,6 +607,16 @@ function hHTML(h, compact) {
     (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
     '</div>';
   if (!compact) {
+    if (isYutai) {
+      const ym = h.yutai_month;
+      const yc = h.yutai_content || "";
+      const hasInfo = !!(ym || yc);
+      html += '<div class="yutai-info ' + (hasInfo?'':'empty') + '">' +
+        (ym ? '<span class="yutai-info-month">' + ym + '月権利</span>' : '') +
+        '<span class="yutai-info-content">' + (yc ? escHtml(yc) : '優待内容を記録') + '</span>' +
+        '<button class="yutai-info-edit" onclick="openYutaiEdit(\'' + h.cd + '\',\'' + tp + '\')">' + (hasInfo?'✏️ 編集':'＋ 入力') + '</button>' +
+        '</div>';
+    }
     html += '<div class="hlines">' +
       '<div class="hl s"><div class="hll">損切り</div><div class="hlv">' + (h.sl ? h.sl.toLocaleString()+'円' : '－') + '</div></div>' +
       '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
@@ -714,6 +755,45 @@ function toggleYutai(cd, tp) {
   if (typeof rHold === 'function') rHold();
   if (typeof calcS === 'function') calcS();
   toast(h.is_yutai ? '🎁 優待枠に設定（朝会の分析対象外）' : '✅ 通常枠に戻しました');
+}
+
+// HTMLエスケープ (優待内容を表示する時に使用)
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// 🎁 優待詳細編集モーダルを開く
+let _yutaiEditing = null;
+function openYutaiEdit(cd, tp){
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
+  if (!h) return;
+  _yutaiEditing = {cd: h.cd, type: h.type || 'spot'};
+  document.getElementById('ymodalTitle').textContent = '🎁 ' + h.nm + ' (' + h.cd + ')';
+  document.getElementById('ymonthInput').value = h.yutai_month || '';
+  document.getElementById('ycontentInput').value = h.yutai_content || '';
+  document.getElementById('ymodalOverlay').classList.add('show');
+  setTimeout(()=>document.getElementById('ymonthInput').focus(), 50);
+}
+
+function closeYutaiEdit(){
+  document.getElementById('ymodalOverlay').classList.remove('show');
+  _yutaiEditing = null;
+}
+
+function saveYutaiEdit(){
+  if (!_yutaiEditing) return;
+  const h = H.find(h => h.cd===_yutaiEditing.cd && h.type===_yutaiEditing.type)
+         || H.find(h => h.cd===_yutaiEditing.cd);
+  if (!h) { closeYutaiEdit(); return; }
+  const m = parseInt(document.getElementById('ymonthInput').value);
+  const c = document.getElementById('ycontentInput').value.trim();
+  h.yutai_month = (m >= 1 && m <= 12) ? m : null;
+  h.yutai_content = c || null;
+  sv(KH, H);
+  closeYutaiEdit();
+  if (typeof rHold === 'function') rHold();
+  toast('✅ 優待情報を保存しました');
 }
 
 // 売買タブの優待目的チェックボックス UI 同期
@@ -2605,6 +2685,24 @@ if (document.readyState !== 'loading') setupAssistant();
 else document.addEventListener('DOMContentLoaded', setupAssistant);
 
 </script>
+<!-- 🎁 優待詳細編集モーダル -->
+<div class="ymodal-overlay" id="ymodalOverlay" onclick="if(event.target===this)closeYutaiEdit()">
+  <div class="ymodal">
+    <h3 id="ymodalTitle">🎁 優待詳細</h3>
+    <div class="ymodal-row">
+      <label>権利確定月（1〜12）</label>
+      <input type="number" id="ymonthInput" min="1" max="12" placeholder="例: 9">
+    </div>
+    <div class="ymodal-row">
+      <label>優待内容（自由記述）</label>
+      <input type="text" id="ycontentInput" placeholder="例: クオカード3000円, 自社製品詰合せ">
+    </div>
+    <div class="ymodal-actions">
+      <button class="ymodal-cancel" onclick="closeYutaiEdit()">キャンセル</button>
+      <button class="ymodal-save" onclick="saveYutaiEdit()">保存</button>
+    </div>
+  </div>
+</div>
 <!-- SW removed -->
 </body>
 </html>
