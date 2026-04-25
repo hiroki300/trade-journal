@@ -190,6 +190,14 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .btn-mini.active{background:var(--acc);color:#fff;}
 .btn-apply{background:var(--acc);color:#fff;border:none;width:100%;padding:8px;border-radius:6px;margin-top:8px;font-weight:bold;font-size:12px;}
 .rr-status{display:block;margin:4px 0 12px 0;font-size:12px;font-weight:bold;}
+/* --- 優待枠 (株主優待目的の保有) --- */
+.hrow.yutai{border-color:#d4a017;background:linear-gradient(135deg,rgba(245,158,11,0.06),rgba(217,119,6,0.04));}
+.yutai-badge{background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(245,158,11,0.3);font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;cursor:pointer;user-select:none;letter-spacing:.04em;}
+.yutai-badge.off{background:transparent;color:var(--t3);border-color:var(--border);}
+.yutai-badge:active{transform:scale(.95);}
+.yutai-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px;cursor:pointer;user-select:none;}
+.yutai-check input{accent-color:#f59e0b;width:16px;height:16px;cursor:pointer;}
+.yutai-check.on{border-color:#d4a017;color:#fbbf24;}
 
 </style>
 </head>
@@ -305,6 +313,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
         </select>
       </div>
     </div>
+    <label class="yutai-check" id="yutaiCheckLabel" onclick="toggleYutaiCheck()">
+      <input type="checkbox" id="tyutai" onclick="event.stopPropagation();syncYutaiCheck()">
+      <span>🎁 優待目的の保有（朝会の分析対象から除外）</span>
+    </label>
     <div style="margin-top:8px"><label class="fl">メモ（任意）</label><input class="fi" id="tmemo" placeholder="エントリー理由など" style="margin-bottom:0"></div>
     </div>
     <button class="btn btnb" id="tBtn" style="margin-top:10px" onclick="doTrade()">💱 買いを記録する</button>
@@ -542,16 +554,22 @@ function hHTML(h, compact) {
   const cp = h.cp || h.bp, pnl = (cp - h.bp) * h.sh, pct = (cp - h.bp) / h.bp * 100;
   const cls = pnl >= 0 ? 'up' : 'dn';
   const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
+  const isYutai = !!h.is_yutai;
   let al = '';
-  if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
-  else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
-  else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
-  let html = '<div class="hrow" id="hrow-' + h.cd + '">' + al +
+  if (!isYutai) {
+    if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
+    else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
+    else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
+  }
+  const tp = h.type || 'spot';
+  const yutaiBadge = '<span class="yutai-badge ' + (isYutai?'':'off') + '" onclick="toggleYutai(\'' + h.cd + '\',\'' + tp + '\')" title="タップで優待枠を切替">' + (isYutai?'🎁 優待枠':'🎁 通常枠') + '</span>';
+  let html = '<div class="hrow ' + (isYutai?'yutai':'') + '" id="hrow-' + h.cd + '">' + al +
     '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
     '<div><div class="hpnl ' + cls + '">' + (pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString() + '</div>' +
     '<div class="hpct ' + cls + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</div></div></div>' +
     '<div class="hmeta">' +
     '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
+    yutaiBadge +
     '<span class="hbg">' + h.sh + '株</span>' +
     '<span class="hbg" onclick="editBuyPrice(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="cursor:pointer;border:1px dashed var(--acc);color:var(--acc)">✏️ 買 ' + h.bp.toLocaleString() + '円</span>' +
     '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',\'' + (h.type||'spot') + '\',this.value)">円</span>' +
@@ -687,6 +705,32 @@ async function analyzeHolding(cd, tp) {
 
 function uCP(cd, tp, v) { const h = H.find(h => h.cd===cd && (!tp||h.type===tp)); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
 
+// 🎁 優待枠トグル: 保有銘柄を優待目的か通常かを切り替え
+function toggleYutai(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
+  if (!h) return;
+  h.is_yutai = !h.is_yutai;
+  sv(KH, H);
+  if (typeof rHold === 'function') rHold();
+  if (typeof calcS === 'function') calcS();
+  toast(h.is_yutai ? '🎁 優待枠に設定（朝会の分析対象外）' : '✅ 通常枠に戻しました');
+}
+
+// 売買タブの優待目的チェックボックス UI 同期
+function syncYutaiCheck(){
+  const cb = document.getElementById('tyutai');
+  const lbl = document.getElementById('yutaiCheckLabel');
+  if (!cb || !lbl) return;
+  if (cb.checked) lbl.classList.add('on');
+  else lbl.classList.remove('on');
+}
+function toggleYutaiCheck(){
+  const cb = document.getElementById('tyutai');
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  syncYutaiCheck();
+}
+
 function editBuyPrice(cd, tp) {
   const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
   if (!h) return;
@@ -799,18 +843,20 @@ function doTrade() {
     const memo = document.getElementById('tmemo').value.trim();
     const tdt = document.getElementById('tdt').value || TODAY;
     const ttype = document.getElementById('ttype').value || 'spot';
+    const isYutai = !!document.getElementById('tyutai')?.checked;
     // 🔧 修正: 銘柄コード + 取引区分（現物/信用）が同じ場合のみ合算
     const idx = H.findIndex(h => h.cd===cd && h.type===ttype);
     if (idx>=0) {
       const ex=H[idx], tot=ex.sh+sh;
-      H[idx]={...ex, sh:tot, bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10};
+      // 既存の is_yutai は保持、新規買いで明示チェックされていれば true 化
+      H[idx]={...ex, sh:tot, bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, is_yutai: ex.is_yutai || isYutai};
     } else {
-      H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p});
+      H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p,is_yutai:isYutai});
     }
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
     T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype}); sv(KT,T);
-    toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + '） 買い記録');
+    toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + (isYutai?'・🎁優待':'') + '） 買い記録');
   } else {
     const ttype = document.getElementById('ttype').value || 'spot';
     // 🔧 修正: 売り時も取引区分を考慮して対象を特定
@@ -830,6 +876,7 @@ function doTrade() {
     toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + '） 売り記録' + ps);
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
+  const yc = document.getElementById('tyutai'); if (yc) { yc.checked = false; syncYutaiCheck(); }
   rTH();
 }
 function rTH() {
