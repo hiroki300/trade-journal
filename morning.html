@@ -195,6 +195,43 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 .news-bulk-btn:active{transform:scale(.98);}
 .news-bulk-btn:disabled{opacity:.6;cursor:wait;}
 .news-bulk-cached{font-size:10px;color:rgba(255,255,255,0.7);font-weight:500;}
+
+/* ─── Phase 2 (v0.19): 🎯 3シナリオ判断材料 ─── */
+.scenario-section{
+  background:var(--s1);border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;margin:8px 0;
+}
+.scenario-hdr{
+  display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);
+  margin-bottom:6px;
+}
+.scenario-hdr b{color:var(--text);font-size:12px;}
+.scenario-fetch-btn{
+  width:100%;background:linear-gradient(135deg,#7c3aed,#9333ea);
+  border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;
+  padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;
+}
+.scenario-fetch-btn:active{transform:scale(.98);}
+.scenario-bulk-btn{
+  width:100%;background:linear-gradient(135deg,#7c3aed,#9333ea);
+  border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;
+  padding:11px 12px;cursor:pointer;margin-bottom:10px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.scenario-bulk-btn:active{transform:scale(.98);}
+.scenario-bulk-btn:disabled{opacity:.6;cursor:wait;}
+.scenario-body{
+  font-size:11.5px;line-height:1.6;color:#cbd5e1;padding:2px 0;
+}
+.scn-h{
+  display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;
+  padding:6px 8px;border-radius:5px;margin:6px 0 4px;
+}
+.scn-h span{font-size:14px;}
+.scn-hold{background:rgba(34,197,94,0.10);color:#86efac;}
+.scn-take{background:rgba(59,130,246,0.10);color:#93c5fd;}
+.scn-cut {background:rgba(239,68,68,0.10);color:#fca5a5;}
+.scn-li{padding:2px 0 2px 14px;font-size:11.5px;color:#cbd5e1;line-height:1.6;}
 .news-loading{
   font-size:11px;color:var(--t2);padding:6px 4px;display:flex;align-items:center;gap:8px;
 }
@@ -1652,6 +1689,7 @@ const K = {
   chat_ctx_flags:   "tjm_chat_ctx_flags",   // v0.13: チャット文脈の選択チップ状態
   skip_log:         "tjm_skip_log",         // v0.17: 見送り記録（非保有銘柄、日付別）
   news_cache_today: "tjm_news_cache_today", // v0.18 Phase 1: 当日のニュースキャッシュ (code → {text, fetched_at})
+  scenarios_cache_today: "tjm_scenarios_cache_today", // v0.19 Phase 2: 当日の3シナリオキャッシュ
 };
 
 // ── Phase 5.3: リスク管理の閾値・定数 ──
@@ -1867,6 +1905,9 @@ let JUDGMENTS = LS.get(K.judgments, {_date: TODAY});
 //   当日中のみ有効。日付が変わったら自動クリア。
 let NEWS_CACHE = LS.get(K.news_cache_today, {_date: TODAY});
 if (NEWS_CACHE._date !== TODAY) NEWS_CACHE = {_date: TODAY};
+// v0.19 Phase 2: 🎯 3シナリオキャッシュ (code → {text, fetched_at, loading?, error?})
+let SCENARIOS_CACHE = LS.get(K.scenarios_cache_today, {_date: TODAY});
+if (SCENARIOS_CACHE._date !== TODAY) SCENARIOS_CACHE = {_date: TODAY};
 let PLAN_TEXT = "";
 let SESSION_COMPLETED = false;
 let WATCH_ITEMS = [];        // v0.5: 表示対象の接近銘柄リスト
@@ -2289,6 +2330,14 @@ function renderHoldings(){
           ${cachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${cachedCount}/${targets.length}）</span>` : ''}
         </button>
       `;
+      // v0.19 Phase 2: 🎯 全銘柄の3シナリオを一括取得ボタン
+      const scnCachedCount = targets.filter(h => SCENARIOS_CACHE[h.code]?.text).length;
+      html += `
+        <button class="scenario-bulk-btn" onclick="fetchAllScenarios()" id="scenarioBulkBtn">
+          🎯 保有銘柄${targets.length}件の3シナリオ判断材料を一括取得
+          ${scnCachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${scnCachedCount}/${targets.length}）</span>` : ''}
+        </button>
+      `;
     }
   }
 
@@ -2438,6 +2487,7 @@ function renderHoldingCard(h){
       </div>
       ${fundChips}
       ${renderNewsSection(h.code, h.name)}
+      ${renderScenarioSection(h.code, h.name)}
       ${judgeHtml}
     </div>
   `;
@@ -2491,6 +2541,75 @@ function formatNewsBody(text){
   return escapeHtml(text)
     .replace(/\n/g, "<br>")
     .replace(/\*\*([^\*]+)\*\*/g, "<b>$1</b>");
+}
+
+// ─── Phase 2 (v0.19): 🎯 3シナリオ判断材料セクション ───
+//   各保有銘柄カードに表示。Claude に「結論を出さず3つの視点を並列提示」させる。
+//   セッション IndexedDB にキャッシュし、当日中の再展開時はキャッシュを使う。
+function renderScenarioSection(code, name){
+  const cached = SCENARIOS_CACHE[code];
+  if (cached && cached.text) {
+    return `
+      <div class="scenario-section">
+        <div class="scenario-hdr">
+          🎯 <b>3シナリオ判断材料</b>
+          <span class="news-meta">${formatJpDateTime(cached.fetched_at)}</span>
+          <button class="news-refresh-btn" onclick="fetchScenarioForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)" title="再取得">🔄</button>
+        </div>
+        <div class="scenario-body" id="scn-body-${escapeHtml(code)}">${formatScenarioBody(cached.text)}</div>
+      </div>`;
+  }
+  if (cached && cached.error) {
+    return `
+      <div class="scenario-section">
+        <div class="scenario-hdr">🎯 <b>3シナリオ判断材料</b></div>
+        <div class="news-error" id="scn-body-${escapeHtml(code)}">⚠️ ${escapeHtml(cached.error)}
+          <button class="news-fetch-btn" onclick="fetchScenarioForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)">🔄 再試行</button>
+        </div>
+      </div>`;
+  }
+  if (cached && cached.loading) {
+    return `
+      <div class="scenario-section">
+        <div class="scenario-hdr">🎯 <b>3シナリオ判断材料</b></div>
+        <div class="news-loading" id="scn-body-${escapeHtml(code)}">
+          <span class="loading"></span> Claude が3つの視点を整理中...
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="scenario-section">
+      <div class="scenario-hdr">🎯 <b>3シナリオ判断材料</b></div>
+      <button class="scenario-fetch-btn" onclick="fetchScenarioForHolding('${escapeHtml(code)}','${escapeHtml(name)}',false)">
+        🧠 ホールド/利確/損切 の判断材料を取得
+      </button>
+    </div>`;
+}
+
+function formatScenarioBody(text){
+  // 簡易マークダウン: ### 見出し、- 箇条書き、**太字**
+  let html = escapeHtml(text);
+  // 🟢 / 🔵 / 🔴 + 見出し行を装飾
+  html = html.replace(/^###\s*🟢\s*([^\n]+)$/gm,
+    '<div class="scn-h scn-hold"><span>🟢</span><b>$1</b></div>');
+  html = html.replace(/^###\s*🔵\s*([^\n]+)$/gm,
+    '<div class="scn-h scn-take"><span>🔵</span><b>$1</b></div>');
+  html = html.replace(/^###\s*🔴\s*([^\n]+)$/gm,
+    '<div class="scn-h scn-cut"><span>🔴</span><b>$1</b></div>');
+  // 念のため絵文字なし版もカバー
+  html = html.replace(/^###\s*ホールド([^\n]*)$/gm,
+    '<div class="scn-h scn-hold"><span>🟢</span><b>ホールド$1</b></div>');
+  html = html.replace(/^###\s*利確([^\n]*)$/gm,
+    '<div class="scn-h scn-take"><span>🔵</span><b>利確$1</b></div>');
+  html = html.replace(/^###\s*損切([^\n]*)$/gm,
+    '<div class="scn-h scn-cut"><span>🔴</span><b>損切$1</b></div>');
+  // 箇条書き
+  html = html.replace(/^-\s+(.+)$/gm, '<div class="scn-li">• $1</div>');
+  // 太字
+  html = html.replace(/\*\*([^\*]+)\*\*/g, "<b>$1</b>");
+  // 残った改行
+  html = html.replace(/\n/g, "<br>");
+  return html;
 }
 
 // ─── 優待保有銘柄の表示（分析対象外、淡色） ───
@@ -2630,6 +2749,162 @@ function buildHoldingNewsPrompt(code, name){
 - 日本語、最後まで書き切ること`;
 }
 
+// ─── Phase 2 (v0.19): 🎯 3シナリオ判断材料の取得 (Claude) ───
+//   force=true で強制再取得。code は v1 の 4桁/英数字コード。
+async function fetchScenarioForHolding(code, name, force){
+  const claudeKey = (LS.raw(K.api_claude) || "").trim();
+  if (!claudeKey) {
+    toast("⚠️ Claude APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  if (!force && SCENARIOS_CACHE[code] && SCENARIOS_CACHE[code].text) return;
+
+  SCENARIOS_CACHE[code] = {loading: true};
+  const _refreshOne = () => {
+    const card = document.getElementById(`card-${code}`);
+    if (!card) return;
+    const sec = card.querySelector(".scenario-section");
+    if (sec) sec.outerHTML = renderScenarioSection(code, name);
+  };
+  _refreshOne();
+
+  const prompt = buildHoldingScenarioPrompt(code, name);
+  try {
+    const text = await callClaude(claudeKey, prompt, {maxTokens: 800});
+    SCENARIOS_CACHE[code] = {
+      text: (text || "").trim(),
+      fetched_at: new Date().toISOString(),
+    };
+  } catch(e) {
+    console.warn("[scenario] fetch failed:", code, e);
+    SCENARIOS_CACHE[code] = {
+      error: e.message || String(e),
+      fetched_at: new Date().toISOString(),
+    };
+  }
+  try { LS.set(K.scenarios_cache_today, {...SCENARIOS_CACHE, _date: TODAY}); } catch(_) {}
+  _refreshOne();
+}
+
+// ─── Phase 2: 全保有銘柄の3シナリオを並列一括取得 ───
+async function fetchAllScenarios(){
+  const claudeKey = (LS.raw(K.api_claude) || "").trim();
+  if (!claudeKey) {
+    toast("⚠️ Claude APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  const targets = HOLDINGS.filter(h => !h.is_yutai);
+  if (targets.length === 0) {
+    toast("対象銘柄なし"); return;
+  }
+  const todo = targets.filter(h => !(SCENARIOS_CACHE[h.code]?.text));
+  if (todo.length === 0) {
+    toast("✅ 全銘柄取得済み（個別の🔄で再取得可）"); return;
+  }
+  const btn = document.getElementById("scenarioBulkBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="loading"></span> ${todo.length}件の3シナリオ生成中...`;
+  }
+  toast(`🎯 ${todo.length}件の3シナリオを並列取得開始`);
+  const results = await Promise.allSettled(
+    todo.map(h => fetchScenarioForHolding(h.code, h.name, false))
+  );
+  const ok = results.filter(r => r.status === "fulfilled").length;
+  toast(`🎯 3シナリオ取得完了: ${ok}/${todo.length} 件`);
+  if (btn) { btn.disabled = false; }
+  renderHoldings();
+}
+
+// ─── Phase 2: 3シナリオ判断材料 プロンプト ───
+//   保有情報・直近ニュース・需給・テクニカルを束ねて Claude に投げる。
+//   結論を出させず、3 つの視点を並列に提示させるのがキモ。
+function buildHoldingScenarioPrompt(code, name){
+  const h = HOLDINGS.find(x => x.code === code) || {};
+  const price = getPrice(code);
+  const cur = price?.close ?? null;
+  const chg = price?.change_pct ?? null;
+  const bp = h.buy_price ?? null;
+  const pnlPct = (cur && bp) ? ((cur / bp - 1) * 100).toFixed(2) : null;
+
+  // 保有日数
+  let daysHeld = null;
+  if (h.entry_date) {
+    try {
+      const d1 = new Date(h.entry_date);
+      const d2 = new Date(TODAY);
+      daysHeld = Math.max(0, Math.round((d2 - d1) / 86400000));
+    } catch(_) {}
+  }
+
+  // 当日のニュース (B が取得済みなら付ける)
+  const newsText = NEWS_CACHE[code]?.text || "（未取得 — Bセクションでニュースを取得すると判断材料が増えます）";
+
+  // 需給・ファンダ (HOLDINGS にあれば)
+  const fundLines = [];
+  if (h.margin_ratio != null) fundLines.push(`信用倍率: ${h.margin_ratio}倍`);
+  if (h.margin_buy != null && h.margin_sell != null) {
+    fundLines.push(`買い残: ${fmt(h.margin_buy, 0)} / 売り残: ${fmt(h.margin_sell, 0)}`);
+  }
+  if (h.pbr != null) fundLines.push(`PBR: ${h.pbr}`);
+  if (h.dividend_yield != null) fundLines.push(`配当利回り: ${h.dividend_yield}%`);
+  if (h.next_earnings_date) fundLines.push(`次回決算: ${h.next_earnings_date}`);
+
+  // テクニカル
+  const techLines = [];
+  if (h.atr != null) techLines.push(`ATR(14日): ${h.atr}`);
+
+  return `${buildStrategyContext()}
+
+## 銘柄情報
+- 銘柄: **${name} (${code})**
+- 約定価格: ${bp != null ? `¥${fmt(bp, 0)}` : '不明'}
+- 現在値: ${cur != null ? `¥${fmt(cur, 0)}` : '不明'} ${chg != null ? `(前日比 ${chg >= 0 ? '+' : ''}${fmt(chg, 2)}%)` : ''}
+- 含み損益: ${pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${pnlPct}%` : '不明'}
+${daysHeld != null ? `- 保有日数: ${daysHeld}日` : ''}
+${h.stop_loss != null ? `- 設定済み損切り: ¥${fmt(h.stop_loss, 0)}` : ''}
+${h.target != null ? `- 設定済み目標: ¥${fmt(h.target, 0)}` : ''}
+
+## 直近ニュース・材料
+${newsText}
+
+## 需給・ファンダ
+${fundLines.length ? fundLines.join("\n") : '（データ不足）'}
+
+## テクニカル
+${techLines.length ? techLines.join("\n") : '（データ不足）'}
+
+---
+
+# 指示
+
+ひろき様が**自分で判断するための材料**として、3 つのシナリオそれぞれの根拠を並列に提示してください。
+**結論を出さない**こと。3つの視点を公平に、それぞれ 2〜3 件の根拠を箇条書きで。
+
+回転重視戦略 (損切り -8% / RR 1:2 / 数日〜数週間保有) を踏まえること。
+
+## 出力フォーマット (必ず守る)
+
+### 🟢 ホールドする理由
+- (根拠1: 70字以内)
+- (根拠2: 70字以内)
+
+### 🔵 利確する理由
+- (根拠1: 70字以内)
+- (根拠2: 70字以内)
+
+### 🔴 損切る理由
+- (根拠1: 70字以内)
+- (根拠2: 70字以内)
+
+## 執筆ルール
+- 全体で 600字以内
+- 各根拠は具体的・数字付きで（漠然とした「相場が不安」等は不可）
+- 「〜すべき」「〜が良い」と推奨しない。事実と材料のみ
+- 直近ニュース・需給・テクニカル・含み損益・保有日数を必ず参照する
+- 該当する根拠が無いシナリオでも、最低1つは絞り出して書く（「材料なし」と書かない）`;
+}
+
 function setJudgment(code, judgment, extra){
   const h = HOLDINGS.find(x => x.code === code);
   if (!h) return;
@@ -2646,6 +2921,9 @@ function setJudgment(code, judgment, extra){
   // v0.18 Phase 1: 当日のニュースを判定に紐づけて保存（履歴・夕会レビュー・月次分析で参照可能に）
   const news = NEWS_CACHE[code];
   const briefNews = (news && news.text) ? news.text : null;
+  // v0.19 Phase 2: 当日の3シナリオも紐づけて保存
+  const scn = SCENARIOS_CACHE[code];
+  const briefScenarios = (scn && scn.text) ? scn.text : null;
 
   JUDGMENTS[code] = {
     code, name: h.name, judgment,
@@ -2657,6 +2935,7 @@ function setJudgment(code, judgment, extra){
     type: h.type ?? null,
     judged_at: new Date().toISOString(),
     ...(briefNews ? {brief_news: briefNews} : {}),
+    ...(briefScenarios ? {brief_scenarios: briefScenarios} : {}),
     // Phase 5.3: 見送り時の理由・メモを記録
     ...(extra ? {reasons: extra.reasons || [], memo: extra.memo || ""} : {}),
   };
