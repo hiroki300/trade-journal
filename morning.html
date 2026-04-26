@@ -245,6 +245,79 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   border-radius:5px;display:flex;flex-direction:column;gap:6px;
 }
 
+/* ─── Phase 2 (v0.20): 📈 テクニカル指標セクション ─── */
+.tech-section{
+  background:var(--s1);border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;margin:8px 0;
+}
+.tech-hdr{
+  display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);
+  margin-bottom:6px;
+}
+.tech-hdr b{color:var(--text);font-size:12px;}
+.tech-fetch-btn{
+  width:100%;background:linear-gradient(135deg,#0d9488,#15803d);
+  border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;
+  padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;
+}
+.tech-fetch-btn:active{transform:scale(.98);}
+.tech-body{font-size:11.5px;line-height:1.55;color:#cbd5e1;padding:2px 0;}
+.tech-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 6px;
+}
+.tech-cell{
+  background:rgba(255,255,255,0.03);border:1px solid var(--border);
+  border-radius:6px;padding:6px 8px;
+}
+.tech-cell-lbl{font-size:10px;color:var(--t3);letter-spacing:.04em;}
+.tech-cell-val{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);margin-top:2px;}
+.tech-cell-sub{font-size:10px;color:var(--t3);margin-top:1px;}
+.tech-cell.up   .tech-cell-val{color:#86efac;}
+.tech-cell.dn   .tech-cell-val{color:#fca5a5;}
+.tech-cell.warn .tech-cell-val{color:#fcd34d;}
+.tech-stops{
+  margin-top:6px;padding:6px 8px;background:rgba(220,38,38,0.06);
+  border:1px solid rgba(239,68,68,0.18);border-radius:6px;
+}
+.tech-stops-hdr{font-size:10px;color:#fca5a5;font-weight:700;margin-bottom:4px;letter-spacing:.04em;}
+.tech-stops-row{
+  display:flex;align-items:baseline;gap:6px;font-size:11px;color:#cbd5e1;
+  padding:2px 0;
+}
+.tech-stops-row .lbl{color:var(--t3);min-width:64px;font-size:10px;}
+.tech-stops-row .val{font-family:var(--mono);font-weight:700;color:#fca5a5;}
+.tech-stops-row .pct{color:var(--t3);font-size:10px;margin-left:auto;}
+.tech-meta{font-size:10px;color:var(--t3);margin-top:6px;}
+
+/* ─── Phase 2 (v0.20): 📊 注目度セクション ─── */
+.attention-section{
+  background:var(--s1);border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;margin:8px 0;
+}
+.attention-hdr{
+  display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);
+  margin-bottom:6px;
+}
+.attention-hdr b{color:var(--text);font-size:12px;}
+.attention-fetch-btn{
+  width:100%;background:linear-gradient(135deg,#ea580c,#d97706);
+  border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:700;
+  padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;
+}
+.attention-fetch-btn:active{transform:scale(.98);}
+.attention-bulk-btn{
+  width:100%;background:linear-gradient(135deg,#ea580c,#d97706);
+  border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;
+  padding:11px 12px;cursor:pointer;margin-bottom:10px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.attention-bulk-btn:active{transform:scale(.98);}
+.attention-bulk-btn:disabled{opacity:.6;cursor:wait;}
+.attention-body{
+  font-size:11.5px;line-height:1.7;color:#cbd5e1;white-space:normal;padding:4px 2px;
+}
+.attention-body b{color:#fbbf24;}
+
 /* ─── Phase 1 (v0.18): 🎁 優待保有銘柄セクション ─── */
 .yutai-section-hdr{
   font-size:11px;color:var(--t3);font-weight:700;letter-spacing:.04em;
@@ -1473,7 +1546,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
     <div class="modal-sec">
       <div class="modal-sec-title">ℹ️ アプリ情報</div>
       <div style="font-size:11px;color:var(--t2);line-height:1.6;">
-        <div>バージョン: <b style="color:var(--text);">v0.19</b></div>
+        <div>バージョン: <b style="color:var(--text);">v0.20</b></div>
         <div>v1: <a href="trading_journal.html" style="color:var(--acc);">trading_journal.html</a></div>
         <div>データソース: <a href="https://github.com/hiroki300/trade-journal-data" target="_blank" style="color:var(--acc);">trade-journal-data</a></div>
       </div>
@@ -1690,6 +1763,8 @@ const K = {
   skip_log:         "tjm_skip_log",         // v0.17: 見送り記録（非保有銘柄、日付別）
   news_cache_today: "tjm_news_cache_today", // v0.18 Phase 1: 当日のニュースキャッシュ (code → {text, fetched_at})
   scenarios_cache_today: "tjm_scenarios_cache_today", // v0.19 Phase 2: 当日の3シナリオキャッシュ
+  attention_cache_today: "tjm_attention_cache_today", // v0.20 Phase 2 A: 当日の注目度キャッシュ (Gemini)
+  tech_revealed_today:   "tjm_tech_revealed_today",   // v0.20 Phase 2 C: テクニカル展開済フラグ (code → true)
 };
 
 // ── Phase 5.3: リスク管理の閾値・定数 ──
@@ -1908,6 +1983,12 @@ if (NEWS_CACHE._date !== TODAY) NEWS_CACHE = {_date: TODAY};
 // v0.19 Phase 2: 🎯 3シナリオキャッシュ (code → {text, fetched_at, loading?, error?})
 let SCENARIOS_CACHE = LS.get(K.scenarios_cache_today, {_date: TODAY});
 if (SCENARIOS_CACHE._date !== TODAY) SCENARIOS_CACHE = {_date: TODAY};
+// v0.20 Phase 2 A: 📊 注目度キャッシュ (code → {text, fetched_at, loading?, error?})
+let ATTENTION_CACHE = LS.get(K.attention_cache_today, {_date: TODAY});
+if (ATTENTION_CACHE._date !== TODAY) ATTENTION_CACHE = {_date: TODAY};
+// v0.20 Phase 2 C: 📈 テクニカル展開済フラグ (code → true)
+let TECH_REVEALED = LS.get(K.tech_revealed_today, {_date: TODAY});
+if (TECH_REVEALED._date !== TODAY) TECH_REVEALED = {_date: TODAY};
 let PLAN_TEXT = "";
 let SESSION_COMPLETED = false;
 let WATCH_ITEMS = [];        // v0.5: 表示対象の接近銘柄リスト
@@ -2330,6 +2411,14 @@ function renderHoldings(){
           ${cachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${cachedCount}/${targets.length}）</span>` : ''}
         </button>
       `;
+      // v0.20 Phase 2 A: 📊 全銘柄の注目度を一括取得ボタン
+      const attCachedCount = targets.filter(h => ATTENTION_CACHE[h.code]?.text).length;
+      html += `
+        <button class="attention-bulk-btn" onclick="fetchAllAttention()" id="attentionBulkBtn">
+          📊 保有銘柄${targets.length}件の市場注目度を一括取得
+          ${attCachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${attCachedCount}/${targets.length}）</span>` : ''}
+        </button>
+      `;
       // v0.19 Phase 2: 🎯 全銘柄の3シナリオを一括取得ボタン
       const scnCachedCount = targets.filter(h => SCENARIOS_CACHE[h.code]?.text).length;
       html += `
@@ -2486,6 +2575,8 @@ function renderHoldingCard(h){
         </div>
       </div>
       ${fundChips}
+      ${renderTechnicalSection(h.code, h.name)}
+      ${renderAttentionSection(h.code, h.name)}
       ${renderNewsSection(h.code, h.name)}
       ${renderScenarioSection(h.code, h.name)}
       ${judgeHtml}
@@ -2610,6 +2701,280 @@ function formatScenarioBody(text){
   // 残った改行
   html = html.replace(/\n/g, "<br>");
   return html;
+}
+
+// ─── Phase 2 (v0.20): 📈 テクニカル指標セクション ───
+//   fundamentals.json に既に入っている ma25 / rsi14 / high_20d / low_20d / atr / cp から
+//   その場で計算してレンダリング（API 呼び出しなし、ボタン押下で展開）。
+//   損切り3案: ① ATR×0.5 ② 直近20日安値 ③ 25MA を提示し、ユーザーが選ぶ。
+const TECH_ATR_STOP_MULT = 0.5;  // config.py の ATR_STOP_MULT=0.5 と整合（短期回転戦略）
+
+function renderTechnicalSection(code, name){
+  const revealed = !!TECH_REVEALED[code];
+  if (revealed) return formatTechBody(code, name);
+  return `
+    <div class="tech-section">
+      <div class="tech-hdr">📈 <b>テクニカル指標</b></div>
+      <button class="tech-fetch-btn" onclick="revealTech('${escapeHtml(code)}','${escapeHtml(name)}')">
+        📈 25MA / RSI / 損切り3案 を表示
+      </button>
+    </div>`;
+}
+
+function revealTech(code, name){
+  TECH_REVEALED[code] = true;
+  try { LS.set(K.tech_revealed_today, {...TECH_REVEALED, _date: TODAY}); } catch(_) {}
+  const card = document.getElementById(`card-${code}`);
+  if (!card) return;
+  const sec = card.querySelector(".tech-section");
+  if (sec) sec.outerHTML = renderTechnicalSection(code, name);
+}
+
+// テクニカル本体: fundamentals.json + latest_prices.json から数値計算
+function formatTechBody(code, name){
+  const f = FUND[code4to5(code)] || {};
+  const price = getPrice(code);
+  const cp = price?.close ?? f.cp ?? null;  // 当日終値優先、無ければ collector 取得時の cp
+
+  const ma25      = f.ma25      != null ? Number(f.ma25)      : null;
+  const rsi14     = f.rsi14     != null ? Number(f.rsi14)     : null;
+  const hi20      = f.high_20d  != null ? Number(f.high_20d)  : null;
+  const lo20      = f.low_20d   != null ? Number(f.low_20d)   : null;
+  const atr       = f.atr       != null ? Number(f.atr)       : null;
+  const volAvg20  = f.vol_avg20 != null ? Number(f.vol_avg20) : null;
+
+  // データ全滅時のフォールバック
+  if (cp == null && ma25 == null && rsi14 == null && hi20 == null && lo20 == null) {
+    return `
+      <div class="tech-section">
+        <div class="tech-hdr">📈 <b>テクニカル指標</b></div>
+        <div class="news-error">⚠️ fundamentals.json にデータなし（未収録銘柄の可能性）</div>
+      </div>`;
+  }
+
+  // セル群
+  const cells = [];
+
+  // 25MA 乖離
+  if (cp != null && ma25 != null) {
+    const dev = (cp - ma25) / ma25 * 100;
+    const cls = Math.abs(dev) < 1 ? "" : (dev >= 0 ? "up" : "dn");
+    cells.push(`
+      <div class="tech-cell ${cls}">
+        <div class="tech-cell-lbl">25MA乖離</div>
+        <div class="tech-cell-val">${dev >= 0 ? '+' : ''}${fmt(dev,2)}%</div>
+        <div class="tech-cell-sub">25MA ¥${fmt(ma25,0)}</div>
+      </div>`);
+  } else {
+    cells.push(`<div class="tech-cell"><div class="tech-cell-lbl">25MA乖離</div><div class="tech-cell-val muted">—</div></div>`);
+  }
+
+  // RSI14（過熱感アイコン）
+  if (rsi14 != null) {
+    let icon = "", cls = "";
+    if (rsi14 >= 70)      { icon = "🔥 "; cls = "warn"; }
+    else if (rsi14 <= 30) { icon = "🧊 "; cls = "warn"; }
+    cells.push(`
+      <div class="tech-cell ${cls}">
+        <div class="tech-cell-lbl">RSI(14)</div>
+        <div class="tech-cell-val">${icon}${fmt(rsi14,1)}</div>
+        <div class="tech-cell-sub">${rsi14 >= 70 ? "過熱" : rsi14 <= 30 ? "売られ過ぎ" : "中立"}</div>
+      </div>`);
+  } else {
+    cells.push(`<div class="tech-cell"><div class="tech-cell-lbl">RSI(14)</div><div class="tech-cell-val muted">—</div></div>`);
+  }
+
+  // 20日レンジ位置
+  if (cp != null && hi20 != null && lo20 != null && hi20 > lo20) {
+    const pos = (cp - lo20) / (hi20 - lo20) * 100;
+    const cls = pos >= 80 ? "warn" : pos <= 20 ? "warn" : "";
+    cells.push(`
+      <div class="tech-cell ${cls}">
+        <div class="tech-cell-lbl">20日レンジ位置</div>
+        <div class="tech-cell-val">${fmt(pos,0)}%</div>
+        <div class="tech-cell-sub">¥${fmt(lo20,0)} 〜 ¥${fmt(hi20,0)}</div>
+      </div>`);
+  } else {
+    cells.push(`<div class="tech-cell"><div class="tech-cell-lbl">20日レンジ位置</div><div class="tech-cell-val muted">—</div></div>`);
+  }
+
+  // 損切り3案
+  const stopRows = [];
+  if (cp != null && atr != null) {
+    const v = Math.round(cp - atr * TECH_ATR_STOP_MULT);
+    const pct = (v / cp - 1) * 100;
+    stopRows.push(`<div class="tech-stops-row">
+      <span class="lbl">① ATR基準</span>
+      <span class="val">¥${fmt(v,0)}</span>
+      <span class="pct">cp - ATR×${TECH_ATR_STOP_MULT} (${fmt(pct,1)}%)</span>
+    </div>`);
+  }
+  if (cp != null && lo20 != null) {
+    const pct = (lo20 / cp - 1) * 100;
+    stopRows.push(`<div class="tech-stops-row">
+      <span class="lbl">② 直近安値</span>
+      <span class="val">¥${fmt(lo20,0)}</span>
+      <span class="pct">20日安値 (${fmt(pct,1)}%)</span>
+    </div>`);
+  }
+  if (cp != null && ma25 != null) {
+    const pct = (ma25 / cp - 1) * 100;
+    stopRows.push(`<div class="tech-stops-row">
+      <span class="lbl">③ 25MA</span>
+      <span class="val">¥${fmt(ma25,0)}</span>
+      <span class="pct">25日MA (${fmt(pct,1)}%)</span>
+    </div>`);
+  }
+  const stopsHtml = stopRows.length ? `
+    <div class="tech-stops">
+      <div class="tech-stops-hdr">🛡 損切り3案（cp ¥${fmt(cp,0)} 基準）</div>
+      ${stopRows.join("")}
+    </div>` : "";
+
+  // 出来高平均（参考表示）
+  const volMeta = volAvg20 != null
+    ? `20日平均出来高: ${fmt(volAvg20,0)} 株`
+    : "";
+
+  return `
+    <div class="tech-section">
+      <div class="tech-hdr">
+        📈 <b>テクニカル指標</b>
+        <span class="news-meta">fundamentals.json</span>
+      </div>
+      <div class="tech-body">
+        <div class="tech-grid">${cells.join("")}</div>
+        ${stopsHtml}
+        ${volMeta ? `<div class="tech-meta">${volMeta}</div>` : ""}
+      </div>
+    </div>`;
+}
+
+// ─── Phase 2 (v0.20): 📊 注目度セクション (Gemini Google検索) ───
+function renderAttentionSection(code, name){
+  const cached = ATTENTION_CACHE[code];
+  if (cached && cached.text) {
+    return `
+      <div class="attention-section">
+        <div class="attention-hdr">
+          📊 <b>市場注目度</b>
+          <span class="news-meta">${formatJpDateTime(cached.fetched_at)}</span>
+          <button class="news-refresh-btn" onclick="fetchAttentionForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)" title="再取得">🔄</button>
+        </div>
+        <div class="attention-body" id="att-body-${escapeHtml(code)}">${formatNewsBody(cached.text)}</div>
+      </div>`;
+  }
+  if (cached && cached.error) {
+    return `
+      <div class="attention-section">
+        <div class="attention-hdr">📊 <b>市場注目度</b></div>
+        <div class="news-error" id="att-body-${escapeHtml(code)}">⚠️ ${escapeHtml(cached.error)}
+          <button class="attention-fetch-btn" onclick="fetchAttentionForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)">🔄 再試行</button>
+        </div>
+      </div>`;
+  }
+  if (cached && cached.loading) {
+    return `
+      <div class="attention-section">
+        <div class="attention-hdr">📊 <b>市場注目度</b></div>
+        <div class="news-loading" id="att-body-${escapeHtml(code)}">
+          <span class="loading"></span> Gemini が直近1週間の注目度を Google検索中...
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="attention-section">
+      <div class="attention-hdr">📊 <b>市場注目度</b></div>
+      <button class="attention-fetch-btn" onclick="fetchAttentionForHolding('${escapeHtml(code)}','${escapeHtml(name)}',false)">
+        🔍 出来高/SNS/ニュース頻度から注目度を評価
+      </button>
+    </div>`;
+}
+
+async function fetchAttentionForHolding(code, name, force){
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  if (!geminiKey) {
+    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  if (!force && ATTENTION_CACHE[code] && ATTENTION_CACHE[code].text) return;
+
+  ATTENTION_CACHE[code] = {loading: true};
+  const _refreshOne = () => {
+    const card = document.getElementById(`card-${code}`);
+    if (!card) return;
+    const sec = card.querySelector(".attention-section");
+    if (sec) sec.outerHTML = renderAttentionSection(code, name);
+  };
+  _refreshOne();
+
+  const prompt = buildAttentionPrompt(code, name);
+  try {
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 600});
+    ATTENTION_CACHE[code] = {
+      text: (text || "").trim(),
+      fetched_at: new Date().toISOString(),
+    };
+  } catch(e) {
+    console.warn("[attention] fetch failed:", code, e);
+    ATTENTION_CACHE[code] = {
+      error: e.message || String(e),
+      fetched_at: new Date().toISOString(),
+    };
+  }
+  try { LS.set(K.attention_cache_today, {...ATTENTION_CACHE, _date: TODAY}); } catch(_) {}
+  _refreshOne();
+}
+
+async function fetchAllAttention(){
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  if (!geminiKey) {
+    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  const targets = HOLDINGS.filter(h => !h.is_yutai);
+  if (targets.length === 0) {
+    toast("対象銘柄なし"); return;
+  }
+  const todo = targets.filter(h => !(ATTENTION_CACHE[h.code]?.text));
+  if (todo.length === 0) {
+    toast("✅ 全銘柄取得済み（個別の🔄で再取得可）"); return;
+  }
+  const btn = document.getElementById("attentionBulkBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="loading"></span> ${todo.length}件の注目度評価中...`;
+  }
+  toast(`📊 ${todo.length}件の注目度を並列取得開始`);
+  const results = await Promise.allSettled(
+    todo.map(h => fetchAttentionForHolding(h.code, h.name, false))
+  );
+  const ok = results.filter(r => r.status === "fulfilled").length;
+  toast(`📊 注目度取得完了: ${ok}/${todo.length} 件`);
+  if (btn) { btn.disabled = false; }
+  renderHoldings();
+}
+
+// 注目度プロンプト: 出来高/SNS/ニュース頻度の3観点を簡潔に
+function buildAttentionPrompt(code, name){
+  const f = FUND[code4to5(code)] || {};
+  const volAvg20 = f.vol_avg20 != null ? `（20日平均出来高: ${fmt(Number(f.vol_avg20),0)} 株）` : "";
+  return `日本株「${name}（${code}）」の**直近1週間の市場注目度**を Google検索で簡潔に評価してください${volAvg20}。
+
+## 出力フォーマット（必ず守る）
+
+**🔥 注目度: [低 / 中 / 高 / 急騰中]**
+
+- **出来高動向**: (1〜2行: 平均比増減・特徴的な日)
+- **SNS言及**: (1〜2行: X/掲示板での話題化、急騰の煽り、空売り議論等)
+- **ニュース頻度**: (1〜2行: 直近1週間の報道本数の体感、テーマ性)
+
+## 執筆ルール
+- 全体で 250字以内
+- Google検索で裏取りできた事実のみ。推測は避ける
+- 注目度ランクは 4段階: 低 / 中 / 高 / 急騰中
+- 「買え」「売れ」等の推奨は書かない、観測される事実のみ
+- 該当情報が薄い場合は「（直近1週間で目立った話題なし）」と明記`;
 }
 
 // ─── 優待保有銘柄の表示（分析対象外、淡色） ───
@@ -2850,9 +3215,29 @@ function buildHoldingScenarioPrompt(code, name){
   if (h.dividend_yield != null) fundLines.push(`配当利回り: ${h.dividend_yield}%`);
   if (h.next_earnings_date) fundLines.push(`次回決算: ${h.next_earnings_date}`);
 
-  // テクニカル
+  // テクニカル (v0.20: fundamentals.json から拡張データを流し込み)
+  const f = FUND[code4to5(code)] || {};
   const techLines = [];
   if (h.atr != null) techLines.push(`ATR(14日): ${h.atr}`);
+  if (f.ma25 != null && cur != null) {
+    const dev = (cur - Number(f.ma25)) / Number(f.ma25) * 100;
+    techLines.push(`25日MA: ¥${fmt(Number(f.ma25),0)} (乖離 ${dev >= 0 ? '+' : ''}${fmt(dev,2)}%)`);
+  }
+  if (f.rsi14 != null) {
+    const r = Number(f.rsi14);
+    const tag = r >= 70 ? "(過熱)" : r <= 30 ? "(売られ過ぎ)" : "(中立)";
+    techLines.push(`RSI(14日): ${fmt(r,1)} ${tag}`);
+  }
+  if (f.high_20d != null && f.low_20d != null && cur != null) {
+    const hi = Number(f.high_20d), lo = Number(f.low_20d);
+    if (hi > lo) {
+      const pos = (cur - lo) / (hi - lo) * 100;
+      techLines.push(`20日レンジ位置: ${fmt(pos,0)}% (¥${fmt(lo,0)}〜¥${fmt(hi,0)})`);
+    }
+  }
+
+  // v0.20: 注目度 (取得済みなら付ける)
+  const attentionText = ATTENTION_CACHE[code]?.text || "（未取得 — 注目度セクションで取得すると判断材料が増えます）";
 
   return `${buildStrategyContext()}
 
@@ -2873,6 +3258,9 @@ ${fundLines.length ? fundLines.join("\n") : '（データ不足）'}
 
 ## テクニカル
 ${techLines.length ? techLines.join("\n") : '（データ不足）'}
+
+## 市場注目度
+${attentionText}
 
 ---
 
