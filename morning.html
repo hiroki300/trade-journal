@@ -2745,10 +2745,18 @@ function formatTechBody(code, name){
 
   // データ全滅時のフォールバック
   if (cp == null && ma25 == null && rsi14 == null && hi20 == null && lo20 == null) {
+    // v0.18+: HOLDINGS から type を引いて信用銘柄ならその旨を明示（仕様であることを伝える）
+    const h = HOLDINGS.find(x => x.code === code);
+    const hint = h?.type === "margin"
+      ? "信用銘柄は fundamentals.json の収録対象外です"
+      : "中小型株・新規上場・低流動性銘柄などは収録対象外の可能性があります";
     return `
       <div class="tech-section">
         <div class="tech-hdr">📈 <b>テクニカル指標</b></div>
-        <div class="news-error">⚠️ fundamentals.json にデータなし（未収録銘柄の可能性）</div>
+        <div class="news-error" style="background:rgba(148,163,184,0.08);color:var(--t2);">
+          ℹ️ <b>テクニカル指標は未収録</b>
+          <div style="font-size:10.5px;color:var(--t3);margin-top:4px;">${hint}（ニュース・市場注目度・3シナリオ判断材料は通常通り取得できます）</div>
+        </div>
       </div>`;
   }
 
@@ -3037,7 +3045,9 @@ async function fetchNewsForHolding(code, name, force){
 
   const prompt = buildHoldingNewsPrompt(code, name);
   try {
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 1200});
+    // v0.18+: Gemini 2.5 Flash + Google検索 では thinking tokens が消費されるため
+    //   1200 では出力が途中で切れる事象（例: ヤマダHD/稀元素）が報告された。2500 に拡大。
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 2500});
     NEWS_CACHE[code] = {
       text: (text || "").trim(),
       fetched_at: new Date().toISOString(),
@@ -3091,7 +3101,7 @@ async function fetchAllHoldingsNews(){
 // ─── Phase 1: ニュース取得プロンプト（個別銘柄） ───
 function buildHoldingNewsPrompt(code, name){
   return `日本株「${name}（${code}）」の直近72時間のニュース・材料を Google検索で調べて、
-箇条書きで最大5件に絞って提示してください。
+箇条書きで最大3件に絞って提示してください。
 
 ## 出力フォーマット（必ず守る）
 
@@ -3105,12 +3115,13 @@ function buildHoldingNewsPrompt(code, name){
 - セクター全体に影響する規制・政策
 - 大株主の売買・注目度の高いニュース
 
-## 執筆ルール
-- 全体で 350字以内、各項目 2行以内
+## 執筆ルール（厳守）
+- **全体で 250字以内、各項目 1行・最大80字**（途中で切れないよう厳守）
 - 検索で裏取りできた情報のみ。推測・一般論は不要
-- 直近72時間でめぼしいニュースが無い場合は「（直近72時間で目立った材料なし）」と1行で明記
+- 直近72時間でめぼしいニュースが無い場合は「（直近72時間で目立った材料なし）」と1行で明記し、それ以上書かない
 - 売買の判断材料として有用な情報を優先（株価インパクトの大きさで選定）
 - 結論や推奨は書かない、事実とソースのみ
+- 思考プロセスや前置きは出力しない、本文のみ
 - 日本語、最後まで書き切ること`;
 }
 
@@ -4055,9 +4066,19 @@ async function callGemini(apiKey, prompt, options={}){
   }
 
   const data = await r.json();
-  const parts = data.candidates?.[0]?.content?.parts || [];
+  const cand = data.candidates?.[0];
+  const parts = cand?.content?.parts || [];
   // Google検索ツール使用時はparts内に複数ブロックが混在しうるため全textを結合
-  const text = parts.filter(p => p.text).map(p => p.text).join("\n").trim();
+  let text = parts.filter(p => p.text).map(p => p.text).join("\n").trim();
+  // v0.18+: finishReason をチェック。MAX_TOKENS で打ち切られた場合は警告を末尾に付与
+  //   (Gemini 2.5 Flash + Google検索 では thinking tokens が消費されて出力が途中で切れることがある)
+  const finishReason = cand?.finishReason;
+  if (text && finishReason && finishReason !== "STOP") {
+    const reasonNote = finishReason === "MAX_TOKENS"
+      ? `\n\n⚠️ （出力が上限トークン ${maxTokens} に達して途中で切れました。🔄 で再取得するか、設定からトークン上限を上げてください）`
+      : `\n\n⚠️ （出力が途中で停止: ${finishReason}）`;
+    text = text + reasonNote;
+  }
   if (text) return text;
 
   // フォールバック: Google検索で空応答のときは検索なしで再試行（v1と同じ対策）
@@ -4070,8 +4091,15 @@ async function callGemini(apiKey, prompt, options={}){
     });
     if (r2.ok) {
       const d2 = await r2.json();
-      const t2 = (d2.candidates?.[0]?.content?.parts || [])
+      const c2 = d2.candidates?.[0];
+      let t2 = (c2?.content?.parts || [])
         .filter(p => p.text).map(p => p.text).join("\n").trim();
+      const fr2 = c2?.finishReason;
+      if (t2 && fr2 && fr2 !== "STOP") {
+        t2 = t2 + (fr2 === "MAX_TOKENS"
+          ? `\n\n⚠️ （出力が上限トークン ${maxTokens} に達して途中で切れました）`
+          : `\n\n⚠️ （出力が途中で停止: ${fr2}）`);
+      }
       if (t2) return t2;
     }
   }
@@ -4370,16 +4398,31 @@ function renderWatchlist(){
   const badge = document.getElementById("badgeWatch");
   const preview = document.getElementById("previewWatch");
 
+  const settings = getWatchSettings();
+  // v0.18+: WATCH_RAW（LINEに送られる全件）と WATCH_ITEMS（フィルタ後）の差をユーザーに見せる
+  const totalRaw = WATCH_RAW.length;
+  const filtered = WATCH_ITEMS.length;
+
   badge.className = "sec-badge active";
-  badge.textContent = `${WATCH_ITEMS.length}件接近`;
-  preview.textContent = `${WATCH_ITEMS.length}銘柄が指値接近中`;
+  badge.textContent = `${filtered}件接近`;
+  preview.textContent = totalRaw > filtered
+    ? `${filtered}銘柄が接近中（監視 ${totalRaw} 件中）`
+    : `${filtered}銘柄が指値接近中`;
 
   if (WATCH_ITEMS.length === 0) {
     body.innerHTML = `<div class="w-empty">押し目候補なし</div>`;
     return;
   }
 
-  const settings = getWatchSettings();
+  // v0.18+: LINE と朝会UIの違いをカード上部に明記（混乱防止）
+  const filterNote = `
+    <div style="font-size:10.5px;color:var(--t2);background:var(--s1);border:1px solid var(--border);
+                border-radius:6px;padding:7px 10px;margin-bottom:8px;line-height:1.55;">
+      📌 <b>LINEとの違い</b>: LINEは監視中の<b>全${totalRaw}銘柄</b>を通知。
+      ここでは現在値が指値に近い<b>上位${filtered}件</b>のみ抜粋表示しています。
+      <span style="color:var(--t3);">（条件: ${settings.min_rank}+ / ¥${fmt(settings.max_price, 0)}以下 / ±${settings.max_distance_pct}%以内 / 最大${settings.max_items}件）</span>
+    </div>`;
+
   const cardsHtml = WATCH_ITEMS.map(it => {
     const c5 = code4to5(it.code);
     const distClass = it.nearest.distance_pct <= 1 ? "very-close" :
@@ -4418,12 +4461,11 @@ function renderWatchlist(){
 
   const settingsHint = `
     <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:right;">
-      ${settings.min_rank}+ / ¥${fmt(settings.max_price, 0)}以下 / ±${settings.max_distance_pct}%以内
-      <button onclick="openWatchSettings()" style="background:var(--s2);border:1px solid var(--border);color:var(--t2);padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px;">設定</button>
+      <button onclick="openWatchSettings()" style="background:var(--s2);border:1px solid var(--border);color:var(--t2);padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;">⚙️ フィルタ設定を変更</button>
     </div>
   `;
 
-  body.innerHTML = cardsHtml + settingsHint;
+  body.innerHTML = filterNote + cardsHtml + settingsHint;
 }
 
 // ウォッチリストの計画プロンプト用テキスト化
