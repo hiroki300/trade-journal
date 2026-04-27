@@ -1094,6 +1094,60 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
   opacity:.8;
 }
 
+/* ─── v0.18 Phase 3: 一日の総括 + 明日の注目ポイント ─── */
+.ev-meta-section{
+  background:linear-gradient(135deg,#1e293b,#0f172a);
+  border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;margin-bottom:12px;
+}
+.ev-meta-hdr{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin-bottom:8px;
+}
+.ev-meta-title{
+  font-size:12px;font-weight:700;color:var(--text);
+  display:flex;align-items:center;gap:6px;
+}
+.ev-meta-title .em-ico{font-size:14px;}
+.ev-meta-meta{
+  font-size:9px;color:var(--t3);font-family:var(--mono);
+}
+.ev-meta-fetch-btn{
+  width:100%;padding:9px 10px;border-radius:7px;border:none;
+  font-size:12px;font-weight:700;cursor:pointer;color:#fff;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.ev-meta-fetch-btn.day{background:linear-gradient(135deg,#7c3aed,#9333ea);}
+.ev-meta-fetch-btn.tomorrow{background:linear-gradient(135deg,#1d4ed8,#0891b2);}
+.ev-meta-fetch-btn:disabled{opacity:.6;cursor:wait;}
+.ev-meta-fetch-btn:active{transform:scale(.98);}
+.ev-meta-result{
+  font-size:11.5px;line-height:1.65;color:var(--text);
+  white-space:pre-wrap;word-break:break-word;
+  background:var(--s1);border:1px solid var(--border);border-radius:6px;
+  padding:9px 11px;
+}
+.ev-meta-result b{color:var(--acc);}
+.ev-meta-loading{
+  padding:9px 11px;background:var(--s1);border:1px dashed var(--border);
+  border-radius:6px;font-size:11px;color:var(--t2);
+  display:flex;align-items:center;gap:8px;
+}
+.ev-meta-error{
+  background:#3a1818;border:1px solid var(--red);border-radius:6px;
+  padding:8px 10px;color:#fca5a5;font-size:11px;line-height:1.4;
+  display:flex;flex-direction:column;gap:6px;
+}
+.ev-meta-actions{
+  display:flex;gap:6px;margin-top:8px;justify-content:flex-end;
+}
+.ev-meta-actions button{
+  background:transparent;border:1px solid var(--border);
+  color:var(--t2);font-size:11px;cursor:pointer;
+  padding:4px 8px;border-radius:5px;
+}
+.ev-meta-actions button:hover{color:var(--text);border-color:var(--t2);}
+
 /* ─── 対話チャット（Phase 4 Stage 4.1） ─── */
 /* チャットは他のモーダルと違い max-height を目一杯使う（100dvh - header余白） */
 #chatModal.modal-bg{align-items:stretch;}
@@ -1757,6 +1811,7 @@ const K = {
   watch_settings:   "tjm_watch_settings",  // v0.5: 指値ウォッチの設定
   monthly_analysis: "tjm_monthly_analysis", // v0.6: 月次Claude分析キャッシュ
   evening_draft:    "tjm_evening_draft",    // v0.7: 夕会のメモ下書き（Step2以降で使用）
+  evening_meta_today: "tjm_evening_meta_today", // v0.18 Phase 3: 一日の総括＋明日の注目ポイントの当日下書き
   journal_analysis: "tjm_journal_analysis", // v0.8 B-6: 売買分析キャッシュ（期間別、LRU 3件）
   journal_migrated: "tjm_journal_migrated_v010", // v0.10: LRU→IndexedDB 一度限りの移行フラグ
   chat_ctx_flags:   "tjm_chat_ctx_flags",   // v0.13: チャット文脈の選択チップ状態
@@ -6312,13 +6367,17 @@ function renderEveningBody(session, trades, matches){
   }
 
   // 何もない場合（朝会なし＆売買なし）
+  //   v0.18 Phase 3: matchesが0件でも明日の注目ポイントは有用なので、その入口を提供する
   if (matches.length === 0) {
+    const hasContext = (HOLDINGS && HOLDINGS.length > 0) || (WATCH_ITEMS && WATCH_ITEMS.length > 0);
     return warn + `
       <div class="ev-empty">
         <span class="ee-icon">🌙</span>
         今日は朝会判定も売買もありません。<br>
         お疲れ様でした。
-      </div>`;
+      </div>
+      ${hasContext ? renderTomorrowFocusCard(session) : ""}
+    `;
   }
 
   // Step2: 下書き or 保存済みからメモを取り出す
@@ -6383,10 +6442,360 @@ function renderEveningBody(session, trades, matches){
   }
 
   return warn + summary + `
+    ${renderDaySummaryCard(session)}
+    ${renderTomorrowFocusCard(session)}
     <div class="ev-section-title">🔍 銘柄別マッチング (${matches.length}件)</div>
     ${cards}
     ${saveBar}
   `;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  v0.18 Phase 3: 🌅 一日の総括 (Claude) + 🔭 明日の注目ポイント (Gemini)
+// ════════════════════════════════════════════════════════════════════
+
+// ── ストレージユーティリティ ──────────────────────────
+//   保存済み: session.evening.day_summary / session.evening.tomorrow_focus
+//   下書き  : LS[K.evening_meta_today] = {date, day_summary, tomorrow_focus}
+function loadEveningMeta(session){
+  // session 優先（保存済み）→ 下書き → null
+  const saved = session?.evening || {};
+  const draftRaw = LS.get(K.evening_meta_today, null);
+  const draft = (draftRaw && draftRaw.date === TODAY) ? draftRaw : {};
+  return {
+    day_summary:    saved.day_summary    || draft.day_summary    || null,
+    tomorrow_focus: saved.tomorrow_focus || draft.tomorrow_focus || null,
+  };
+}
+
+function saveEveningMetaDraft(patch){
+  const cur = LS.get(K.evening_meta_today, {}) || {};
+  if (cur.date !== TODAY) {
+    // 日が変わったらリセット
+    LS.set(K.evening_meta_today, {date: TODAY, ...patch});
+  } else {
+    LS.set(K.evening_meta_today, {...cur, date: TODAY, ...patch});
+  }
+}
+
+// ── 🌅 一日の総括カード ────────────────────────────────
+function renderDaySummaryCard(session){
+  const meta = loadEveningMeta(session);
+  const cur = meta.day_summary;
+  const id = "evDaySummary";
+
+  let body = "";
+  if (cur && cur.text) {
+    body = `
+      <div class="ev-meta-result" id="${id}-body">${formatNewsBody(cur.text)}</div>
+      <div class="ev-meta-actions">
+        <button onclick="copyEveningMetaText('day')">📋 コピー</button>
+        <button onclick="fetchDaySummary(true)">🔄 再生成</button>
+      </div>`;
+  } else if (cur && cur.error) {
+    body = `
+      <div class="ev-meta-error" id="${id}-body">⚠️ ${escapeHtml(cur.error)}
+        <button onclick="fetchDaySummary(true)" style="background:transparent;border:1px solid var(--red);color:#fca5a5;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;align-self:flex-start;">🔄 再試行</button>
+      </div>`;
+  } else if (cur && cur.loading) {
+    body = `<div class="ev-meta-loading" id="${id}-body"><span class="loading"></span> Claude が一日を振り返り中...</div>`;
+  } else {
+    body = `<button class="ev-meta-fetch-btn day" id="${id}-btn" onclick="fetchDaySummary(false)">🌅 一日の総括を生成（Claude）</button>`;
+  }
+
+  const meta_str = (cur && cur.generated_at) ? formatJpDateTime(cur.generated_at) : "";
+  return `
+    <div class="ev-meta-section" id="${id}">
+      <div class="ev-meta-hdr">
+        <div class="ev-meta-title"><span class="em-ico">🌅</span>一日の総括</div>
+        <div class="ev-meta-meta">${meta_str}</div>
+      </div>
+      ${body}
+    </div>`;
+}
+
+// ── 🔭 明日の注目ポイントカード ─────────────────────────
+function renderTomorrowFocusCard(session){
+  const meta = loadEveningMeta(session);
+  const cur = meta.tomorrow_focus;
+  const id = "evTomorrowFocus";
+
+  let body = "";
+  if (cur && cur.text) {
+    body = `
+      <div class="ev-meta-result" id="${id}-body">${formatNewsBody(cur.text)}</div>
+      <div class="ev-meta-actions">
+        <button onclick="copyEveningMetaText('tomorrow')">📋 コピー</button>
+        <button onclick="fetchTomorrowFocus(true)">🔄 再生成</button>
+      </div>`;
+  } else if (cur && cur.error) {
+    body = `
+      <div class="ev-meta-error" id="${id}-body">⚠️ ${escapeHtml(cur.error)}
+        <button onclick="fetchTomorrowFocus(true)" style="background:transparent;border:1px solid var(--red);color:#fca5a5;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;align-self:flex-start;">🔄 再試行</button>
+      </div>`;
+  } else if (cur && cur.loading) {
+    body = `<div class="ev-meta-loading" id="${id}-body"><span class="loading"></span> Gemini が明日の材料を Google検索中...</div>`;
+  } else {
+    body = `<button class="ev-meta-fetch-btn tomorrow" id="${id}-btn" onclick="fetchTomorrowFocus(false)">🔭 明日の注目ポイントを取得（Gemini + 検索）</button>`;
+  }
+
+  const meta_str = (cur && cur.generated_at) ? formatJpDateTime(cur.generated_at) : "";
+  return `
+    <div class="ev-meta-section" id="${id}">
+      <div class="ev-meta-hdr">
+        <div class="ev-meta-title"><span class="em-ico">🔭</span>明日の注目ポイント</div>
+        <div class="ev-meta-meta">${meta_str}</div>
+      </div>
+      ${body}
+    </div>`;
+}
+
+// ── 🌅 fetchDaySummary: Claude に一日の総括を作らせる ────
+async function fetchDaySummary(force){
+  const claudeKey = (LS.raw(K.api_claude) || "").trim();
+  if (!claudeKey) {
+    toast("⚠️ Claude APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  const session = await getTodaySession();
+  const meta = loadEveningMeta(session);
+  if (!force && meta.day_summary?.text) {
+    return;  // 既に取得済み
+  }
+
+  // ローディング表示
+  saveEveningMetaDraft({day_summary: {loading: true}});
+  refreshEveningMetaSection("day");
+
+  try {
+    // 文脈データを集める
+    const trades = loadV1Trades(TODAY);
+    const judgments = (session && session.judgments) || [];
+    const matches = matchTradesToJudgments(judgments, trades);
+    const summary = summarizeMatches(matches);
+
+    const prompt = buildDaySummaryPrompt({session, matches, summary, judgments});
+    const text = await callClaude(claudeKey, prompt, {maxTokens: 1500});
+
+    const result = {text: text.trim(), generated_at: new Date().toISOString()};
+    saveEveningMetaDraft({day_summary: result});
+    refreshEveningMetaSection("day");
+    toast("🌅 一日の総括 生成完了");
+  } catch(e) {
+    console.warn("[day_summary] failed:", e);
+    saveEveningMetaDraft({day_summary: {error: e.message || String(e), generated_at: new Date().toISOString()}});
+    refreshEveningMetaSection("day");
+    toast("⚠️ 一日の総括 生成失敗: " + (e.message || e));
+  }
+}
+
+// ── 🔭 fetchTomorrowFocus: Gemini + Google検索で明日の材料を集める ──
+async function fetchTomorrowFocus(force){
+  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
+  if (!geminiKey) {
+    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
+    return;
+  }
+  const session = await getTodaySession();
+  const meta = loadEveningMeta(session);
+  if (!force && meta.tomorrow_focus?.text) {
+    return;
+  }
+
+  saveEveningMetaDraft({tomorrow_focus: {loading: true}});
+  refreshEveningMetaSection("tomorrow");
+
+  try {
+    const prompt = buildTomorrowFocusPrompt();
+    // Gemini 2.5 Flash + Google検索: thinking tokens を消費するため maxTokens は厚めに
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 3000});
+
+    const result = {text: text.trim(), generated_at: new Date().toISOString()};
+    saveEveningMetaDraft({tomorrow_focus: result});
+    refreshEveningMetaSection("tomorrow");
+    toast("🔭 明日の注目ポイント 生成完了");
+  } catch(e) {
+    console.warn("[tomorrow_focus] failed:", e);
+    saveEveningMetaDraft({tomorrow_focus: {error: e.message || String(e), generated_at: new Date().toISOString()}});
+    refreshEveningMetaSection("tomorrow");
+    toast("⚠️ 明日の注目ポイント 生成失敗: " + (e.message || e));
+  }
+}
+
+// 部分再描画（夕会全体は再構築せず、対象セクションだけ差し替え）
+async function refreshEveningMetaSection(which){
+  const session = await getTodaySession();
+  const targetId = which === "day" ? "evDaySummary" : "evTomorrowFocus";
+  const cur = document.getElementById(targetId);
+  if (!cur) return;
+  const html = which === "day" ? renderDaySummaryCard(session) : renderTomorrowFocusCard(session);
+  cur.outerHTML = html;
+}
+
+// ── プロンプトビルダー ─────────────────────────────────
+
+function buildDaySummaryPrompt({session, matches, summary, judgments}){
+  const lines = [];
+  lines.push(`今日（${TODAY}）の取引・判断を振り返ってください。`);
+  lines.push("");
+  lines.push("# 文脈データ");
+  lines.push("");
+
+  // マクロ
+  if (MACRO) {
+    const info = REGIME_INFO[MACRO.regime] || {};
+    lines.push(`## 今朝のマクロ`);
+    lines.push(`- レジーム: ${MACRO.regime} (${info.name || ''})`);
+    if (MACRO.hv_20d != null) lines.push(`- 日経HV20: ${MACRO.hv_20d.toFixed(1)}%`);
+    if (MACRO.ma25_dev != null) lines.push(`- 日経MA25乖離: ${MACRO.ma25_dev >= 0 ? '+' : ''}${MACRO.ma25_dev.toFixed(1)}%`);
+    if (MACRO.trend) lines.push(`- 一言: ${MACRO.trend}`);
+    lines.push("");
+  }
+
+  // 集計
+  lines.push(`## 当日サマリー`);
+  lines.push(`- 朝会で判定: ${summary.judged_count}銘柄`);
+  lines.push(`  - ✅ 一致: ${summary.consistent} / ⚠️ 先送り: ${summary.postponed} / ⚡ 方針変更: ${summary.changed}`);
+  lines.push(`- 朝会判定外の売買: ${summary.unjudged_actions}件`);
+  const pnlSign = summary.realized_pnl_today > 0 ? '+' : (summary.realized_pnl_today < 0 ? '-' : '±');
+  lines.push(`- 当日確定損益: ${pnlSign}¥${Math.abs(Math.round(summary.realized_pnl_today || 0)).toLocaleString()}`);
+  lines.push("");
+
+  // 銘柄別（matchesから抜粋。長すぎるとトークン無駄なので20件まで）
+  if (matches.length > 0) {
+    lines.push(`## 銘柄別マッチング (上位${Math.min(matches.length, 20)}件)`);
+    const order = ["postponed", "changed", "unjudged", "consistent"];
+    const sorted = [...matches].sort((a,b) =>
+      order.indexOf(a.match_type) - order.indexOf(b.match_type)
+    ).slice(0, 20);
+    for (const m of sorted) {
+      const pnl = (m.executed_pnl != null)
+        ? `${m.executed_pnl >= 0 ? '+' : ''}¥${Math.round(m.executed_pnl).toLocaleString()}`
+        : (m.change_pct != null ? `${m.change_pct >= 0 ? '+' : ''}${m.change_pct.toFixed(2)}%` : '-');
+      const judgeText = m.judgment ? (JUDGE_LABELS[m.judgment] || m.judgment) : '(朝会判定なし)';
+      const actionText = ACTION_LABELS[m.action] || m.action;
+      lines.push(`- [${EV_LABELS[m.match_type]}] ${m.name || ''} (${m.code4}) | 朝判定:${judgeText} → 行動:${actionText} | 損益/変化:${pnl}`);
+    }
+    lines.push("");
+  }
+
+  // 現在の保有状況
+  if (HOLDINGS && HOLDINGS.length > 0) {
+    lines.push(`## 引け後の保有銘柄 (${HOLDINGS.length}件)`);
+    for (const h of HOLDINGS) {
+      if (h.is_yutai) continue;
+      const cur = (getPrice(h.code)?.close ?? null);
+      const pnlPct = (h.buy_price && cur) ? ((cur - h.buy_price) / h.buy_price * 100).toFixed(2) : '-';
+      const days = (h.holding_days != null) ? `${h.holding_days}日` : '?';
+      lines.push(`- ${h.name} (${h.code}) | 買付:¥${h.buy_price || '-'} 現在:¥${cur ?? '-'} | 含損益:${pnlPct}% | 保有${days} | ${h.type === 'margin' ? '信用' : '現物'}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(`# 出力フォーマット`);
+  lines.push("");
+  lines.push(`以下の3ブロックで、合計400〜600字に収めてください。簡潔に。`);
+  lines.push("");
+  lines.push(`## 🎯 今日の意思決定の質`);
+  lines.push(`- 朝の判定 vs 実際の行動の乖離（先送り・方針変更）に対するコメント`);
+  lines.push(`- ルール通り動けたか、感情で動いたかを 2〜3 行で`);
+  lines.push("");
+  lines.push(`## 📊 今日のポジション影響`);
+  lines.push(`- 当日損益と、保有銘柄の含み損益の主だった変化`);
+  lines.push(`- 特に反省すべき or 評価できる動きを 1〜2件`);
+  lines.push("");
+  lines.push(`## 💡 学び・改善点`);
+  lines.push(`- 明日以降の運用に活かす具体的な学びを 1〜2 行で`);
+  lines.push("");
+  lines.push(`## 執筆ルール（厳守）`);
+  lines.push(`- 結論先行、具体的な銘柄名・数値を引用してリアルに`);
+  lines.push(`- ユーザーの短期ローテ戦略（-8%損切 / RR1:2 / 数日〜数週間 / 勝率50%目標）に整合させて評価`);
+  lines.push(`- 慰めや励ましは不要。冷静で建設的に`);
+  lines.push(`- 字数厳守、最後まで書き切る`);
+  return lines.join("\n");
+}
+
+function buildTomorrowFocusPrompt(){
+  const lines = [];
+  // 翌営業日の見当（土日越え）
+  const next = nextBusinessDayJST(new Date());
+  lines.push(`明日（${next}）の日本株市場で注目すべきポイントを Google検索で調べて整理してください。`);
+  lines.push("");
+  lines.push("# ユーザーの保有・関心銘柄");
+  lines.push("");
+
+  // 保有
+  if (HOLDINGS && HOLDINGS.length > 0) {
+    lines.push("## 保有銘柄");
+    for (const h of HOLDINGS) {
+      if (h.is_yutai) continue;
+      // 決算日チップ付きで
+      const f = FUND[code4to5(h.code)] || {};
+      const ned = f.ned ? ` 次回決算:${f.ned}` : '';
+      lines.push(`- ${h.name} (${h.code})${ned}`);
+    }
+    lines.push("");
+  }
+
+  // 指値ウォッチ（接近上位5件）
+  if (WATCH_ITEMS && WATCH_ITEMS.length > 0) {
+    lines.push("## 指値ウォッチ（接近中・上位）");
+    for (const it of WATCH_ITEMS.slice(0, 5)) {
+      lines.push(`- ${it.name} (${code4to5(it.code)}) | 現在¥${Math.round(it.current_price)} / 指値¥${Math.round(it.nearest.price)} / +${it.nearest.distance_pct}% / ${it.rank}ランク`);
+    }
+    lines.push("");
+  }
+
+  lines.push("# 出力フォーマット（必ず守る）");
+  lines.push("");
+  lines.push("以下の4セクションを、合計800字以内で。検索で裏取りできた事実のみ。");
+  lines.push("");
+  lines.push("## 🌐 マクロイベント");
+  lines.push("- 明日の予定（米雇用統計・FOMC・日銀会合・要人発言など）を1〜3件、時刻付き");
+  lines.push("- 海外マーケット（米株引け・為替）の今晩〜早朝の動向");
+  lines.push("");
+  lines.push("## 📅 個別決算・適時開示");
+  lines.push("- 上記の保有・指値ウォッチ銘柄で、明日が決算日 or 直前の銘柄があれば必ず明記");
+  lines.push("- 関連セクター（同業他社）で明日決算がある銘柄を1〜2件");
+  lines.push("");
+  lines.push("## 📰 今夜のニュース・材料");
+  lines.push("- 保有・指値ウォッチ銘柄に関するニュース（直近24h）");
+  lines.push("- 関連セクター・テーマで明日寄付に効きそうなニュース 2〜3件");
+  lines.push("");
+  lines.push("## 🎯 寄付き戦略のヒント");
+  lines.push("- 上記材料を踏まえた、明日寄付きの注目銘柄 or 警戒銘柄 1〜2件");
+  lines.push("- ユーザー戦略（短期ローテ・-8%損切・RR1:2）に対する一言");
+  lines.push("");
+  lines.push("# 執筆ルール");
+  lines.push("- 検索で裏取りできた情報のみ。確認できないものは「確認できず」と明記");
+  lines.push("- 各項目1〜2行、箇条書き中心");
+  lines.push("- 推奨の文言は控えめに、判断はユーザーに任せる");
+  lines.push("- 思考プロセスは出力しない、本文のみ");
+  lines.push("- 最後まで書き切ること");
+  return lines.join("\n");
+}
+
+// 翌営業日（土日スキップ。祝日は対応しない簡易版）
+function nextBusinessDayJST(d){
+  const date = new Date(d);
+  date.setDate(date.getDate() + 1);
+  while (date.getDay() === 0 || date.getDay() === 6) {
+    date.setDate(date.getDate() + 1);
+  }
+  return ymdJST(date);
+}
+
+// メタ情報のテキストコピー
+async function copyEveningMetaText(which){
+  const session = await getTodaySession();
+  const meta = loadEveningMeta(session);
+  const target = which === "day" ? meta.day_summary : meta.tomorrow_focus;
+  if (!target?.text) {
+    toast("⚠️ コピー対象がありません");
+    return;
+  }
+  const title = which === "day" ? "🌅 一日の総括" : "🔭 明日の注目ポイント";
+  await copyMarkdown(`## ${title}\n\n${target.text}`, title);
 }
 
 function renderMatchCard(m, memoVal, geminiBrief, claudeReview){
@@ -6738,6 +7147,21 @@ function buildDailyDigestMarkdown(session, matches, planCached){
     lines.push(`- 当日確定損益: ${pnlYen}`);
     lines.push(``);
 
+    // v0.18 Phase 3: 一日の総括 / 明日の注目ポイント を含める
+    const meta = loadEveningMeta(session);
+    if (meta.day_summary?.text) {
+      lines.push(`## 🌅 一日の総括 (${CLAUDE_MODEL})`);
+      lines.push(``);
+      lines.push(meta.day_summary.text.trim());
+      lines.push(``);
+    }
+    if (meta.tomorrow_focus?.text) {
+      lines.push(`## 🔭 明日の注目ポイント (${GEMINI_MODEL} + Google検索)`);
+      lines.push(``);
+      lines.push(meta.tomorrow_focus.text.trim());
+      lines.push(``);
+    }
+
     // 銘柄別（ズレ銘柄を上、一致を下）
     const order = ["postponed", "changed", "unjudged", "consistent"];
     const sorted = [...matches].sort((a,b) =>
@@ -6932,6 +7356,10 @@ async function saveEveningSession(){
       trades_today: tradesSnapshot,
       matches: matchesWithMemo,
       summary: summary,
+      // v0.18 Phase 3: 一日の総括 / 明日の注目ポイントを永続化
+      //   下書き(LS) → session(IndexedDB) に昇格。既存のものは引き継ぐ
+      day_summary:    (loadEveningMeta(session).day_summary)    || (session.evening && session.evening.day_summary)    || null,
+      tomorrow_focus: (loadEveningMeta(session).tomorrow_focus) || (session.evening && session.evening.tomorrow_focus) || null,
     };
 
     await dbPut("daily_sessions", session);
