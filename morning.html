@@ -6607,8 +6607,9 @@ async function fetchTomorrowFocus(force){
 
   try {
     const prompt = buildTomorrowFocusPrompt();
-    // Gemini 2.5 Flash + Google検索: thinking tokens を消費するため maxTokens は厚めに
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 3000});
+    // Gemini 2.5 Flash + Google検索: thinking tokens を大量に消費するため maxTokens は十分に厚く
+    //   3000では本文冒頭で切れる事象が確認されたため 8000 に拡大（出力上限65,536の範囲内）
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 8000});
 
     const result = {text: text.trim(), generated_at: new Date().toISOString()};
     saveEveningMetaDraft({tomorrow_focus: result});
@@ -6768,10 +6769,11 @@ function buildTomorrowFocusPrompt(){
   lines.push("");
   lines.push("# 執筆ルール");
   lines.push("- 検索で裏取りできた情報のみ。確認できないものは「確認できず」と明記");
-  lines.push("- 各項目1〜2行、箇条書き中心");
+  lines.push("- 各項目1〜2行、箇条書き中心。ネストせず単一階層で書く");
+  lines.push("- ** や *** などの強調マークは使わない（プレーンテキスト）");
   lines.push("- 推奨の文言は控えめに、判断はユーザーに任せる");
   lines.push("- 思考プロセスは出力しない、本文のみ");
-  lines.push("- 最後まで書き切ること");
+  lines.push("- 最後まで書き切ること（途中で切れない）");
   return lines.join("\n");
 }
 
