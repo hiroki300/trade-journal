@@ -266,13 +266,14 @@ select.fi{appearance:none;-webkit-appearance:none;}
 <div class="page" id="page-trade">
   <div style="margin-bottom:14px">
     <div class="sec-lbl">📷 スクリーンショットから自動読み込み</div>
+    <div style="font-size:10px;color:var(--t3);margin-bottom:6px">※ 現物/信用は読み取り後、保有タブと振り返り（終値）に自動反映</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
-      <div class="ss-type on" id="sst-hold" onclick="setSsType('hold')">💼 保有銘柄</div>
+      <div class="ss-type on" id="sst-spot" onclick="setSsType('spot')">💴 現物保有</div>
+      <div class="ss-type" id="sst-margin" onclick="setSsType('margin')">📊 信用建玉</div>
       <div class="ss-type" id="sst-hist" onclick="setSsType('hist')">📋 約定履歴</div>
       <div class="ss-type" id="sst-pnl" onclick="setSsType('pnl')">💰 損益履歴</div>
       <div class="ss-type" id="sst-watch" onclick="setSsType('watch')">👁 ウォッチ</div>
       <div class="ss-type" id="sst-cash" onclick="setSsType('cash')">💴 余力・残金</div>
-      <div class="ss-type" id="sst-summary" onclick="setSsType('summary')">📊 評価損益</div>
     </div>
     <input type="file" accept="image/*" id="ssFileInput" style="display:none" multiple onchange="onFileSelect(event)">
     <div class="ss-zone" id="ssZone" onclick="document.getElementById('ssFileInput').click()"
@@ -396,23 +397,12 @@ select.fi{appearance:none;-webkit-appearance:none;}
 <div class="page" id="page-rev">
   <div class="cost-note"><span>🤖 Gemini: 相場分析　🧠 Claude: 明日の戦略</span></div>
 
-  <!-- 終値スクショアップロードエリア（タブ別） -->
-  <div style="background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:12px;margin-bottom:10px">
-    <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">📸 今日の終値スクショ（SBI証券 口座管理画面）</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-      <label style="background:var(--s2);border:1.5px dashed rgba(59,130,246,.5);border-radius:8px;padding:10px;text-align:center;cursor:pointer">
-        <div style="font-size:10px;color:#60a5fa;font-weight:700;margin-bottom:3px">💴 保有証券タブ</div>
-        <div style="font-size:11px;color:var(--t3)">📷 選択</div>
-        <input type="file" accept="image/*" id="revSsSpot" style="display:none" onchange="onRevSsSelectTab(event,'spot')">
-      </label>
-      <label style="background:var(--s2);border:1.5px dashed rgba(251,191,36,.5);border-radius:8px;padding:10px;text-align:center;cursor:pointer">
-        <div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:3px">📊 信用建玉タブ</div>
-        <div style="font-size:11px;color:var(--t3)">📷 選択</div>
-        <input type="file" accept="image/*" id="revSsMargin" style="display:none" onchange="onRevSsSelectTab(event,'margin')">
-      </label>
+  <!-- 終値データの状態表示（売買タブの「現物保有/信用建玉」スクショから自動連携） -->
+  <div id="revSsStatus" style="background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--t2);line-height:1.6">
+    <div style="font-weight:700;color:var(--t2);margin-bottom:3px">📸 今日の終値データ</div>
+    <div id="revSsStatusBody" style="font-size:11px;color:var(--t3)">
+      💡 売買タブの「💴 現物保有」「📊 信用建玉」スクショから自動連携されます
     </div>
-    <div id="revSsPreview" style="font-size:11px;color:var(--green);font-weight:700;min-height:16px"></div>
-    <div id="revSsReadResult" style="display:none;margin-top:8px;font-size:11px;color:var(--t2);background:var(--s2);border-radius:6px;padding:8px;line-height:1.9"></div>
   </div>
 
   <button class="rev-btn" id="revBtn" onclick="doRev()" style="background:linear-gradient(135deg,#1e3a5f,#3b1f5e)">
@@ -554,7 +544,7 @@ function go(id) {
   if (id==='watch') rWatch();
   if (id==='analyze') { rAnalyzeQuick(); rAzHistory(); }
   if (id==='morning') rMrnHistory();
-  if (id==='rev') rRevHistory();
+  if (id==='rev')   { rRevHistory(); updateRevSsStatus(); }
 }
 
 function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
@@ -1353,170 +1343,45 @@ function toggleRevCard(hdr) {
 }
 
 // ═══════════════════════════════════════════
-// 📸 振り返り用スクショ読み取り（タブ別）
+// 📸 振り返り用 終値データ（売買タブのスクショから連携）
 // ═══════════════════════════════════════════
-let revSsImages = [];
-let revSsPrices = {};  // {code: {code,name,shares,price,chg,chgPct,type}}
+// localStorageに保存して、タブ切替後やリロード後も保持
+const K_REV_SS = 'tj_rev_ss';   // 終値データ
+const K_REV_SS_DATE = 'tj_rev_ss_date'; // 保存日
 
-// タブ別の専用プロンプト
-const SS_PROMPTS = {
-  spot: `SBI証券アプリ「保有証券」タブのスクリーンショットです。
+let revSsPrices = loadRevSsPrices();  // {code: {code,name,shares,price,chg,chgPct,type}}
 
-画面の各銘柄行を読み取ります。
-各行の表示形式（例）:
-  銘柄名: ＶＲＡＩＮ  または  三菱重
-  コード行: 135A 特定  または  7011 特定  または  247A 特定
-  株数: 100株 または 200株
-  評価額: 269,300円
-  評価額前日比: +12,600円(+4.91%)
-
-【重要】コードは「特定」の直前の英数字部分のみ抽出（例: "135A 特定"→"135A", "7011 特定"→"7011"）
-
-以下のJSON配列のみ返してください（余分な文字一切不要）:
-[{"code":"135A","name":"VRAIN","shares":100,"eval":269300,"chg_amt":12600,"chg_pct":4.91}]
-
-ルール:
-- code: 特定の前の英数字のみ（例: 135A, 247A, 3660, 7011, 8306）
-- name: 銘柄名（全角→半角に変換不要、そのまま）
-- shares: 株数の数字のみ
-- eval: 評価額（カンマ・円なし）
-- chg_amt: 評価額前日比の円額（符号付き、カンマなし）
-- chg_pct: 評価額前日比の%（符号付き数字のみ）`,
-
-  margin: `SBI証券アプリ「信用建玉」タブのスクリーンショットです。
-
-各銘柄行の表示形式（例）:
-  銘柄名: カカクコム
-  コード行: 2371 買建/特定
-  返済期限: 6ヵ月
-  建株数: 100株
-  評価額: 227,400円
-  評価額前日比: +4,750円(+2.13%)
-
-以下のJSON配列のみ返してください（余分な文字一切不要）:
-[{"code":"2371","name":"カカクコム","shares":100,"eval":227400,"chg_amt":4750,"chg_pct":2.13}]
-
-ルール:
-- code: 買建/特定の前の数字のみ（例: 2371, 6196, 7011）
-- name: 銘柄名
-- shares: 建株数の数字のみ
-- eval: 評価額（カンマ・円なし）
-- chg_amt: 評価額前日比の円額（符号付き）
-- chg_pct: 評価額前日比の%（符号付き数字のみ）`
-};
-
-async function onRevSsSelectTab(e, tabType) {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (!GK) { toast('⚠️ Gemini APIキーを設定してください'); return; }
-
-  const preview = document.getElementById('revSsPreview');
-  const result  = document.getElementById('revSsReadResult');
-  const label   = tabType === 'spot' ? '💴保有証券' : '📊信用建玉';
-  preview.textContent = label + ' 読み取り中...';
-  preview.style.color = 'var(--t3)';
-  result.style.display = 'none';
-
-  // 画像をbase64に変換
-  const b64 = await new Promise(res => {
-    const reader = new FileReader();
-    reader.onload = ev => res(ev.target.result.split(',')[1]);
-    reader.readAsDataURL(file);
-  });
-  const mime = file.type || 'image/jpeg';
-
+function saveRevSsPrices() {
   try {
-    const body = {
-      contents: [{parts: [
-        {text: SS_PROMPTS[tabType]},
-        {inlineData: {mimeType: mime, data: b64}}
-      ]}],
-      generationConfig: {maxOutputTokens: 2000, temperature: 0.0}
-    };
-    const r = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
-      {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}
-    );
-    if (!r.ok) {
-      const e2 = await r.json().catch(()=>({}));
-      throw new Error(e2.error?.message || 'HTTP ' + r.status);
-    }
-    const d = await r.json();
-    let raw = (d.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json|```/g,'').trim();
-
-    // JSON抽出 + 不完全なJSONの自動修復
-    let s = raw.indexOf('[');
-    if (s < 0) {
-      result.style.display = 'block';
-      result.innerHTML = '<span style="color:var(--red)">❌ JSON開始位置なし</span><br>' +
-        '<span style="color:var(--t3);font-size:10px">' + raw.slice(0,300).replace(/</g,'&lt;') + '</span>';
-      preview.textContent = label + ' ❌ 読み取り失敗';
-      return;
-    }
-    let jsonStr = raw.slice(s);
-
-    // ']' がない場合 → 末尾の不完全オブジェクトを除去して閉じる
-    if (!jsonStr.includes(']')) {
-      // 末尾の ',' または不完全オブジェクトを削除して ']' を付ける
-      jsonStr = jsonStr.replace(/,\s*\{[^}]*$/, '').replace(/,?\s*$/, '') + ']';
-    }
-
-    let items;
-    try {
-      items = JSON.parse(jsonStr);
-    } catch(parseErr) {
-      // それでも失敗した場合はもう一度クリーンアップ
-      try {
-        const en2 = jsonStr.lastIndexOf('}');
-        items = JSON.parse(jsonStr.slice(0, en2 + 1) + ']');
-      } catch(e2) {
-        result.style.display = 'block';
-        result.innerHTML = '<span style="color:var(--red)">❌ JSONパース失敗</span><br>' +
-          '<span style="color:var(--t3);font-size:10px">' + raw.slice(0,300).replace(/</g,'&lt;') + '</span>';
-        preview.textContent = label + ' ❌ 読み取り失敗';
-        return;
-      }
-    }
-    let newCount = 0;
-    items.forEach(it => {
-      if (!it.code) return;
-      const cd = String(it.code).trim();
-      const shares = Number(it.shares) || 100;
-      const eval_  = Number(it.eval)    || 0;
-      const chgAmt = Number(it.chg_amt) || 0;
-      const chgPct = Number(it.chg_pct) || 0;
-      // 単価 = 評価額合計 ÷ 株数（JSで計算）
-      const price = eval_ > 0 ? Math.round(eval_ / shares) : 0;
-      const chg   = shares > 0 ? Math.round(chgAmt / shares) : 0;
-      if (price > 0) {
-        revSsPrices[cd] = {code:cd, name:it.name||cd, shares, price, chg, chgPct, type:tabType};
-        newCount++;
-      }
-    });
-
-    if (newCount > 0) {
-      preview.textContent = '✅ ' + Object.keys(revSsPrices).length + '銘柄読み取り済み';
-      preview.style.color = 'var(--green)';
-      _renderSsPrices(result);
-      _applySsPricesToHoldings();
-    } else {
-      result.style.display = 'block';
-      result.innerHTML = '<span style="color:var(--red)">❌ 銘柄データなし</span><br>' +
-        '<span style="color:var(--t3);font-size:10px">応答: ' + raw.slice(0,200).replace(/</g,'&lt;') + '</span>';
-      preview.textContent = label + ' ❌ 読み取り失敗';
-    }
-
-  } catch(err) {
-    preview.textContent = label + ' ⚠️ ' + err.message;
-    preview.style.color = 'var(--red)';
-    console.error('スクショ読み取り:', err);
-  }
+    localStorage.setItem(K_REV_SS, JSON.stringify(revSsPrices));
+    localStorage.setItem(K_REV_SS_DATE, TODAY);
+  } catch(e) { console.error('saveRevSsPrices:', e); }
 }
 
-function _renderSsPrices(el) {
-  el.style.display = 'block';
-  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">読み取り結果（単価は評価額÷株数で計算）:</div>' +
-    Object.values(revSsPrices).map(it => {
+function loadRevSsPrices() {
+  try {
+    const savedDate = localStorage.getItem(K_REV_SS_DATE);
+    // 当日のデータのみ復元（日付が変わったらクリア）
+    if (savedDate === new Date().toISOString().slice(0,10)) {
+      return JSON.parse(localStorage.getItem(K_REV_SS) || '{}');
+    }
+  } catch(e) { console.error('loadRevSsPrices:', e); }
+  return {};
+}
+
+function updateRevSsStatus() {
+  const el = document.getElementById('revSsStatusBody');
+  if (!el) return;
+  const prices = Object.values(revSsPrices);
+  if (prices.length === 0) {
+    el.innerHTML = '💡 売買タブの「💴 現物保有」「📊 信用建玉」スクショから自動連携されます';
+    el.style.color = 'var(--t3)';
+    return;
+  }
+  el.style.color = 'var(--t2)';
+  el.innerHTML = '<div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:4px">✅ ' + prices.length + '銘柄の終値読み取り済み</div>' +
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">（売買タブのスクショ取込から連携）</div>' +
+    prices.map(it => {
       const clr = it.chg >= 0 ? 'var(--green)' : 'var(--red)';
       const tag  = it.type === 'margin'
         ? '<span style="font-size:9px;background:rgba(251,191,36,.15);color:#f59e0b;border-radius:3px;padding:0 4px">信用</span> '
@@ -1528,31 +1393,9 @@ function _renderSsPrices(el) {
     }).join('<br>');
 }
 
-function _applySsPricesToHoldings() {
-  let updated = 0;
-  H.forEach(h => {
-    // 1. コード完全一致
-    let p = revSsPrices[h.cd];
-    // 2. 銘柄名の先頭4文字で部分一致（救済）
-    if (!p && h.nm) {
-      const key = h.nm.replace(/[\s　]/g,'').slice(0,4);
-      p = Object.values(revSsPrices).find(it => {
-        const itKey = (it.name||'').replace(/[\s　]/g,'').slice(0,4);
-        return itKey && key && (itKey === key || it.code === h.cd);
-      });
-    }
-    if (p && p.price > 0) { h.cp = p.price; updated++; }
-  });
-  if (updated > 0) {
-    sv(KH, H);
-    calcS();
-    rHold(); // 保有タブの表示も更新
-    toast('✅ 保有タブの株価を ' + updated + '銘柄 更新しました');
-  }
-}
-
-// 後方互換（旧onRevSsSelectが呼ばれた場合の空関数）
+// 後方互換: 旧onRevSsSelect / onRevSsSelectTab が呼ばれても何もしない
 function onRevSsSelect(e) {}
+function onRevSsSelectTab(e, t) {}
 
 async function doRev() {
   const btn = document.getElementById('revBtn');
@@ -1599,7 +1442,7 @@ async function doRev() {
     ? `\n【本日の終値（スクショより）】\n` + Object.values(revSsPrices).map(p =>
         `${p.code} ${p.name}: ${p.price?.toLocaleString()}円 ${p.chg>=0?'+':''}${p.chg}円（${p.chgPct>=0?'+':''}${p.chgPct}%）`
       ).join('\n')
-    : '\n（終値スクショ未アップロード → Google検索で補完してください）';
+    : '\n（終値データなし → 売買タブの「💴 現物保有」「📊 信用建玉」スクショから取込、もしくはGoogle検索で補完してください）';
 
   const pfJq = `【本日の保有銘柄・終値・損益】${ssNote}\n\n【詳細データ（J-Quants付き）】\n${holdDetail}\n合計評価額: ${totalVal.toLocaleString()}円 ／ 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 ／ 残金: ${Math.round(cash).toLocaleString()}円`;
 
@@ -2311,11 +2154,14 @@ function saveKeys() {
 }
 
 // スクリーンショット読み込み
-let ssType='hold', ssImageList=[], parsedItems=[];
+let ssType='spot', ssImageList=[], parsedItems=[];
 
 function setSsType(t) {
   ssType=t;
-  ['hold','hist','pnl','watch','cash','summary'].forEach(x => { const el=document.getElementById('sst-'+x); if(el) el.classList.toggle('on',x===t); });
+  ['spot','margin','hist','pnl','watch','cash'].forEach(x => { const el=document.getElementById('sst-'+x); if(el) el.classList.toggle('on',x===t); });
+  // タイプ切替時はプレビュー＆結果をリセット
+  document.getElementById('ssResult').classList.remove('show');
+  document.getElementById('ssApplyBtn').style.display='none';
 }
 function onFileSelect(e) {
   const files=Array.from(e.target.files).slice(0,20);
@@ -2360,12 +2206,94 @@ async function analyzeScreenshots() {
   const btn=document.getElementById('ssAnalyzeBtn');
   btn.disabled=true;
   const prompts={
-    hold:'この画像はスマホのスクリーンショットです。SBI証券アプリの画面を想定していますが、画面の一部が切れていても読み取れる情報はすべて抽出してください。保有証券詳細・信用建玉詳細・保有証券一覧・信用建玉一覧のいずれかです。\n表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください。\n- 「取得単価」「建値」「平均建単価」→buy_price\n- 「保有株数」「建株数」→shares\n- 「現在値」→current_price\n- 「売買区分:買建」または「信用建玉」→type:"margin"、それ以外→type:"spot"\n[{"code":"証券コード","name":"銘柄名","shares":株数,"buy_price":取得単価,"current_price":現在値,"type":"spot"または"margin","buy_date":null}]\nJSONのみ返す。読み取れない項目はnull。',
-    hist:'この画像はSBI証券アプリの約定・取引履歴画面です。日付を必ず読み取ってください。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"または"margin"}]\nJSONのみ返す。',
-    pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
-    watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
-    cash:'この画像はSBI証券アプリの「余力」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"buying_power":買付余力の数値,"cash":委託保証金現金または現引可能額の数値,"margin_power":信用建余力の数値}\n数値のみ（円マーク・カンマなし）。読み取れない項目は0。',
-    summary:'この画像はSBI証券アプリの「評価損益」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"spot_value":現物時価評価額合計の数値,"spot_pnl":現物評価損益合計の数値,"margin_value":信用建玉評価総額の数値,"margin_pnl":建玉評価損益合計の数値}\n数値のみ（プラス・マイナス含む）。読み取れない項目は0。'
+    spot:`SBI証券アプリ「保有証券」タブのスクリーンショットです。画面の一部が切れていても、読み取れる情報をすべて抽出してください。
+表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
+
+各銘柄の表示形式（例）:
+  銘柄名: ＶＲＡＩＮ / 三菱重 / アイスタイル など
+  コード行: 「135A 特定」「7011 特定」「247A 特定」「3660 NISA」など
+  株数: 100株 / 200株 / 1000株
+  取得単価: 3,200円（表示されない画面もある）
+  評価額: 269,300円
+  評価額前日比: +12,600円(+4.91%) または -2,100円(-0.78%)
+
+[{"code":"135A","name":"VRAIN","shares":100,"buy_price":2700,"eval":269300,"chg_amt":12600,"chg_pct":4.91}]
+
+ルール:
+- code: 「特定」「NISA」「一般」の直前の英数字のみ（4桁数字 or 3桁数字+英字、例: 135A, 247A, 3660, 7011）
+- name: 銘柄名はそのまま（全角/半角は変換不要）
+- shares: 株数の数字のみ（カンマなし）
+- buy_price: 取得単価の数字のみ（カンマなし）。画面に表示がなければnull
+- eval: 評価額の数字のみ（カンマ・円なし）
+- chg_amt: 評価額前日比の円額（符号付き、カンマなし。マイナスは負数で）
+- chg_pct: 評価額前日比の％（符号付き、数字のみ）
+- 「買建」「信用建玉」が含まれる行は信用なので含めない（現物のみ）
+- 読み取れない項目はnull（推測禁止）`,
+
+    margin:`SBI証券アプリ「信用建玉」タブのスクリーンショットです。画面の一部が切れていても、読み取れる情報をすべて抽出してください。
+表示されているすべての建玉を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
+
+各建玉の表示形式（例）:
+  銘柄名: カカクコム / コーエーテクモ / 三菱重
+  コード行: 「2371 買建/特定」「3635 買建/特定」など
+  返済期限: 6ヵ月
+  建株数: 100株
+  建値（平均建単価）: 2,400円
+  評価額: 227,400円
+  評価額前日比: +4,750円(+2.13%)
+
+[{"code":"2371","name":"カカクコム","shares":100,"buy_price":2400,"eval":227400,"chg_amt":4750,"chg_pct":2.13}]
+
+ルール:
+- code: 「買建/特定」の直前の英数字のみ（例: 2371, 3635, 6196, 7011）
+- name: 銘柄名はそのまま
+- shares: 建株数の数字のみ
+- buy_price: 建値（平均建単価）の数字のみ。表示がなければnull
+- eval: 評価額の数字のみ
+- chg_amt: 評価額前日比の円額（符号付き）
+- chg_pct: 評価額前日比の％（符号付き）
+- 読み取れない項目はnull（推測禁止）`,
+
+    hist:`SBI証券アプリの約定履歴・取引履歴画面のスクリーンショットです。各約定行を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
+
+各約定の表示例:
+  日付: 26/04/28 / 2026/04/28 / 04/28
+  取引種別: 株式買付 / 現物買 / 信用新規買 / 株式売却 / 現物売 / 信用返済売 / 信買 / 信売 など
+  銘柄行: 3778 さくらインターネット / 247A Aiロボティクス
+  株数: 100株
+  約定単価: 2,850円
+
+[{"action":"buy","code":"3778","name":"さくらインターネット","shares":100,"price":2850,"date":"2026-04-28","type":"spot"}]
+
+ルール:
+- action: 「買付」「現物買」「信用新規買」「信買」「買」を含む → "buy"。「売却」「現物売」「信用返済売」「信売」「売」を含む → "sell"
+- code: 4桁数字または3桁数字+英字（例: 3778, 247A, 135A）
+- name: 銘柄名そのまま
+- shares: 約定株数の数字のみ
+- price: 約定単価の数字のみ（カンマ・円なし）
+- date: YYYY-MM-DD形式。年が表示されてない場合は今年（${new Date().getFullYear()}年）
+- type: 「信用」「建玉」「信買」「信売」を含めば "margin"、それ以外は "spot"
+- 注文中・約定待ちは除外（実際に約定した取引のみ）
+- 同じ銘柄の複数行はすべて別取引として記録
+- 読み取れない項目はnull（推測禁止）`,
+
+    pnl:`SBI証券アプリの損益履歴・実現損益画面のスクリーンショットです。各行を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止）。
+
+[{"code":"3778","name":"さくらインターネット","realized_pnl":15000,"shares":100,"sell_price":2850,"buy_price":2700,"date":"2026-04-28"}]
+
+ルール:
+- code: 4桁数字または3桁数字+英字
+- realized_pnl: 実現損益の数値（プラス/マイナス符号付き、カンマなし）
+- date: YYYY-MM-DD（年がなければ${new Date().getFullYear()}年）
+- 読み取れない項目はnull`,
+
+    watch:`この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください（前置き禁止）。
+[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]
+読み取れない項目はnull。`,
+
+    cash:`SBI証券アプリの「余力」「口座管理」画面のスクリーンショットです。以下のJSONのみ返してください（配列ではなくオブジェクト、前置き禁止）。
+{"buying_power":買付余力の数値,"cash":委託保証金現金または現引可能額の数値,"margin_power":信用建余力の数値}
+数値のみ（円マーク・カンマなし）。読み取れない項目は0。`
   };
   const resEl=document.getElementById('ssResult');
   resEl.classList.add('show');
@@ -2377,26 +2305,70 @@ async function analyzeScreenshots() {
     btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
     resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
     try{
-      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.0}};
+      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:4000,temperature:0.0}};
       const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(!r.ok){
-      const e=await r.json().catch(()=>({}));
-      throw new Error(e.error?.message || 'HTTP '+r.status+' - APIキー等を確認してください');
-    }
+        const e=await r.json().catch(()=>({}));
+        throw new Error(e.error?.message || 'HTTP '+r.status+' - APIキー等を確認してください');
+      }
       const d=await r.json();
       let raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json|```/g,'').trim();
-      // cash/summaryはオブジェクト、それ以外は配列
-      if(ssType==='cash'||ssType==='summary'){
+      // cashはオブジェクト、それ以外は配列
+      if(ssType==='cash'){
         const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
-        if(s<0||e<0)throw new Error('データを読み取れませんでした');
+        if(s<0||e<0){
+          resEl.textContent+='  ⚠️ データを読み取れませんでした\n  応答: '+raw.slice(0,150).replace(/[\n\r]/g,' ')+'\n';
+          continue;
+        }
         const obj=JSON.parse(raw.slice(s,e+1));
-        parsedItems=[obj]; // 単一オブジェクトを配列に包む
+        parsedItems=[obj];
         resEl.textContent+='  ✅ 読み取り成功\n';
       } else {
-        const s=raw.indexOf('['),e=raw.lastIndexOf(']');
-        if(s<0||e<0)throw new Error('銘柄情報を読み取れませんでした');
-        const items=JSON.parse(raw.slice(s,e+1));
+        // 配列のJSON抽出 + 不完全JSONの自動修復
+        const s=raw.indexOf('[');
+        if(s<0){
+          resEl.textContent+='  ⚠️ JSON開始位置なし\n  応答: '+raw.slice(0,150).replace(/[\n\r]/g,' ')+'\n';
+          continue;
+        }
+        let jsonStr=raw.slice(s);
+        // ']'がない or 不完全 → 末尾の不完全オブジェクトを削除して閉じる
+        if(!jsonStr.includes(']')){
+          jsonStr=jsonStr.replace(/,\s*\{[^}]*$/,'').replace(/,?\s*$/,'')+']';
+        }
+        let items;
+        try{
+          items=JSON.parse(jsonStr);
+        }catch(parseErr){
+          // 末尾の不完全オブジェクトを削除して再試行
+          try{
+            const lastClose=jsonStr.lastIndexOf('}');
+            if(lastClose>0){
+              items=JSON.parse(jsonStr.slice(0,lastClose+1).replace(/,\s*$/,'')+']');
+            }else{
+              throw parseErr;
+            }
+          }catch(e2){
+            resEl.textContent+='  ⚠️ JSONパース失敗: '+parseErr.message+'\n  応答: '+raw.slice(0,150).replace(/[\n\r]/g,' ')+'\n';
+            continue;
+          }
+        }
+        if(!Array.isArray(items)||items.length===0){
+          resEl.textContent+='  ⚠️ データなし（空の応答）\n';
+          continue;
+        }
         for(const item of items){
+          // spot/margin の場合、buy_price未取得なら eval/shares から逆算
+          if((ssType==='spot'||ssType==='margin') && !item.buy_price && item.eval && item.shares){
+            // eval は現在価額なので buy_price ではない。chg_amt がわかれば取得時の価額から逆算可能
+            // ただし正確ではないので、buy_priceがnullの場合は current_priceから推測
+            // → buy_price の推測はせず null のままにする（手動補完が必要）
+          }
+          // current_price を eval/shares から計算
+          if((ssType==='spot'||ssType==='margin') && item.eval && item.shares){
+            item.current_price = Math.round(item.eval / item.shares);
+            // type を明示的に設定
+            item.type = ssType;
+          }
           const exists=parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
           if(!exists)parsedItems.push(item);
         }
@@ -2414,13 +2386,15 @@ async function analyzeScreenshots() {
     resEl.textContent+='💴 買付余力: '+(o.buying_power?.toLocaleString()||'?')+'円\n';
     resEl.textContent+='   現金:     '+(o.cash?.toLocaleString()||'?')+'円\n';
     resEl.textContent+='   信用余力: '+(o.margin_power?.toLocaleString()||'?')+'円';
-  } else if(ssType==='summary'&&parsedItems.length>0){
-    const o=parsedItems[0];
-    const sp=o.spot_pnl||0, mp=o.margin_pnl||0;
-    resEl.textContent+='💴 現物評価額: '+(o.spot_value?.toLocaleString()||'?')+'円 損益'+(sp>=0?'+':'')+sp.toLocaleString()+'円\n';
-    resEl.textContent+='📊 信用建玉額: '+(o.margin_value?.toLocaleString()||'?')+'円 損益'+(mp>=0?'+':'')+mp.toLocaleString()+'円';
-  } else if(ssType==='hold'){
-    resEl.textContent+=parsedItems.map(i=>(i.type==='margin'?'📊信用 ':'💴現物 ')+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株 買値'+(i.buy_price?.toLocaleString()||'?')+'円 現値'+(i.current_price?.toLocaleString()||'?')+'円').join('\n');
+  } else if(ssType==='spot'||ssType==='margin'){
+    const tag = ssType==='margin' ? '📊信用 ' : '💴現物 ';
+    resEl.textContent+=parsedItems.map(i=>{
+      const cp = i.current_price || (i.eval && i.shares ? Math.round(i.eval/i.shares) : null);
+      const chg = i.chg_amt!=null ? ` 前日比${i.chg_amt>=0?'+':''}${i.chg_amt.toLocaleString()}円(${i.chg_pct>=0?'+':''}${i.chg_pct}%)` : '';
+      return tag+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株'+
+        (i.buy_price?' 取得'+i.buy_price.toLocaleString()+'円':'')+
+        (cp?' 現値'+cp.toLocaleString()+'円':'')+chg;
+    }).join('\n');
   }else if(ssType==='hist'){
     resEl.textContent+=parsedItems.map(i=>(i.action==='buy'?'🟢買':'🔴売')+' '+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株×'+(i.price?.toLocaleString()||'?')+'円 ('+(i.date||'日付不明')+')').join('\n');
   }else if(ssType==='pnl'){
@@ -2437,17 +2411,25 @@ function showImportModal() {
   if(!parsedItems.length)return;
   const el=document.getElementById('modalItems');
   const fmtItem=(item,i,l0,l1)=>'<div class="modal-item"><div class="modal-item-top"><div><div class="modal-item-name">'+l0+'</div><div class="modal-item-meta">'+l1+'</div></div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div></div>';
-  if(ssType==='hold'){
-    el.innerHTML=parsedItems.map((it,i)=>'<div class="modal-item">'+
-      '<div class="modal-item-top"><div>'+
-      '<div class="modal-item-name">'+(it.type==='margin'?'📊信用 ':'💴現物 ')+(it.code||'?')+' '+it.name+'</div>'+
-      '<div class="modal-item-meta">'+
-        (it.shares||'?')+'株 / 取得単価 '+(it.buy_price?.toLocaleString()||'?')+'円 / 現値 '+(it.current_price?.toLocaleString()||'?')+'円<br>'+
-        '取得金額: 約'+((it.buy_price&&it.shares)?Math.round(it.buy_price*it.shares).toLocaleString():'?')+'円'+
-      '</div>'+
-      '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
-      '</div>'
-    ).join('');
+  if(ssType==='spot'||ssType==='margin'){
+    const tag = ssType==='margin' ? '📊信用 ' : '💴現物 ';
+    el.innerHTML=parsedItems.map((it,i)=>{
+      const cp = it.current_price || (it.eval && it.shares ? Math.round(it.eval/it.shares) : null);
+      const chgStr = it.chg_amt!=null
+        ? '<span style="color:'+(it.chg_amt>=0?'var(--green)':'var(--red)')+'"> 前日比'+(it.chg_amt>=0?'+':'')+it.chg_amt.toLocaleString()+'円('+(it.chg_pct>=0?'+':'')+it.chg_pct+'%)</span>'
+        : '';
+      return '<div class="modal-item">'+
+        '<div class="modal-item-top"><div>'+
+        '<div class="modal-item-name">'+tag+(it.code||'?')+' '+it.name+'</div>'+
+        '<div class="modal-item-meta">'+
+          (it.shares||'?')+'株'+
+          (it.buy_price?' / 取得 '+it.buy_price.toLocaleString()+'円':' / 取得 未取得')+
+          (cp?' / 現値 '+cp.toLocaleString()+'円':'')+chgStr+
+          (it.eval?'<br>評価額: '+it.eval.toLocaleString()+'円':'')+
+        '</div>'+
+        '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
+        '</div>';
+    }).join('');
   }else if(ssType==='hist'){
     el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.action==='buy'?'🟢買':'🔴売')+' '+(it.code||'?')+' '+it.name,(it.shares||'?')+'株 × '+(it.price?.toLocaleString()||'?')+'円 / '+(it.date||'日付不明'))).join('');
   }else if(ssType==='pnl'){
@@ -2459,12 +2441,6 @@ function showImportModal() {
       '   現金:     <b>'+(o.cash?.toLocaleString()||'?')+'円</b><br>'+
       '   信用余力: <b>'+(o.margin_power?.toLocaleString()||'?')+'円</b><br><br>'+
       '「取り込む」で残金を更新します</div></div>';
-  }else if(ssType==='summary'&&parsedItems.length>0){
-    const o=parsedItems[0];
-    const sp=o.spot_pnl||0, mp=o.margin_pnl||0;
-    el.innerHTML='<div class="modal-item"><div style="font-size:13px;line-height:2;color:var(--text)">'+
-      '💴 現物評価額: <b>'+(o.spot_value?.toLocaleString()||'?')+'円</b> 損益<b style="color:'+(sp>=0?'var(--green)':'var(--red)')+'">'+( sp>=0?'+':'')+sp.toLocaleString()+'円</b><br>'+
-      '📊 信用建玉額: <b>'+(o.margin_value?.toLocaleString()||'?')+'円</b> 損益<b style="color:'+(mp>=0?'var(--green)':'var(--red)')+'">'+( mp>=0?'+':'')+mp.toLocaleString()+'円</b></div></div>';
   }else{
     el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,(it.current_price?it.current_price.toLocaleString()+'円 / ':'')+( it.tag||'メモなし'))).join('');
   }
@@ -2475,16 +2451,56 @@ function closeModal() { document.getElementById('importModal').classList.remove(
 function doImport() {
   const checked=parsedItems.filter((_,i)=>document.getElementById('mchk'+i)?.checked);
   let count=0;
-  if(ssType==='hold'){
+  if(ssType==='spot'||ssType==='margin'){
+    const itemType = ssType; // 'spot' or 'margin'
     for(const it of checked){
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
-      const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===(it.type||'spot'));
-      if(idx>=0){if(it.current_price)H[idx].cp=it.current_price;}
-      else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:it.type||'spot'});
+      const cp = it.current_price || (it.eval && it.shares ? Math.round(it.eval/it.shares) : 0);
+      // 保有銘柄に反映（同コード+同タイプで一致）
+      const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===itemType);
+      if(idx>=0){
+        // 既存: 現値（cp）と株数を更新。買値は手動設定が優先（buy_priceがあれば更新）
+        if(cp>0) H[idx].cp = cp;
+        if(it.shares>0) H[idx].sh = it.shares;
+        if(it.buy_price>0) H[idx].bp = it.buy_price;
+      } else {
+        // 新規: buy_price不明なら現値で代用
+        H.push({
+          cd: cd||nm,
+          nm,
+          sh: it.shares||0,
+          bp: it.buy_price || cp || 0,
+          cp: cp || it.buy_price || 0,
+          sl: null,
+          tgt: null,
+          memo: 'SS取込',
+          dt: TODAY,
+          type: itemType
+        });
+      }
+      // 振り返り（夕方分析）用の終値データにも保存
+      if(cp > 0){
+        const chgAmt = Number(it.chg_amt) || 0;
+        const chgPct = Number(it.chg_pct) || 0;
+        const chgPerShare = it.shares > 0 ? Math.round(chgAmt / it.shares) : 0;
+        revSsPrices[cd||nm] = {
+          code: cd||nm,
+          name: nm,
+          shares: it.shares||0,
+          price: cp,
+          chg: chgPerShare,
+          chgPct: chgPct,
+          type: itemType
+        };
+      }
       count++;
     }
     sv(KH,H);
+    // revSsPricesを保存（タブ切替後も保持）
+    saveRevSsPrices();
+    // 振り返りタブの表示を更新
+    updateRevSsStatus();
   }else if(ssType==='hist'){
     for(const it of checked){
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
@@ -2494,7 +2510,7 @@ function doImport() {
       if(it.action==='buy'){
         const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===(it.type||'spot'));
         if(idx>=0){const ex=H[idx],tot=ex.sh+(it.shares||0);H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+(it.price||0)*(it.shares||0))/tot*10)/10};}
-        else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:'SS取込',dt:it.date||TODAY});
+        else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:'SS取込',dt:it.date||TODAY,type:it.type||'spot'});
         sv(KH,H);
       }else{
         const h=H.find(h=>h.cd===(cd||nm));
@@ -2522,9 +2538,6 @@ function doImport() {
         count=1;
       }
     }
-  }else if(ssType==='summary'){
-    // 評価損益は参照情報のみ（保存不要）
-    count=1;
   }else{
     for(const it of checked){
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
@@ -2536,7 +2549,7 @@ function doImport() {
   }
   closeModal(); calcS(); rTH(); rHold(); rWatch();
   if(ssType==='cash'&&count>0) toast('💴 残金を'+cash.toLocaleString()+'円に更新しました');
-  else if(ssType==='summary') toast('📊 評価損益を確認しました');
+  else if(ssType==='spot'||ssType==='margin') toast('✅ '+count+'件を取り込み、終値も振り返りに連携しました');
   else toast('✅ '+count+'件を取り込みました');
   parsedItems=[]; ssImageList=[];
   document.getElementById('ssPreviewList').style.display='none';
