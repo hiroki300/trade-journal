@@ -2099,8 +2099,7 @@ rRevHistory();
 rAzHistory();
 
   // --- 損切り計算アシスタントロジック (Phase 5 v1.1 - 回転重視) ---
-let currentRisk = 8;       // デフォルト -8%
-let currentRRMult = 2;     // デフォルト RR1:2
+  // ※ currentRisk / currentRRMult は冒頭(L6-7)で宣言済み。ここで再宣言するとSyntaxErrorで全スクリプト停止。
 
 function isBuyMode() {
   const ta = document.getElementById('ta');
