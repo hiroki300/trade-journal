@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -162,7 +162,8 @@
   </div>
 </div>
 
-<div class="key-modal-overlay" id="keyModal" style="display:none">
+<!-- APIキー設定モーダル: CSSの.showクラスで制御、defaultはdisplay:none -->
+<div class="key-modal-overlay" id="keyModal">
   <div class="key-modal">
     <div class="key-modal-title">🔑 APIキーを設定</div>
     <div class="key-modal-sub">
@@ -184,7 +185,7 @@
 </div>
 
 <script src="trading_journal.js"></script>
-<!-- 🎁 優待詳細編集モーダル -->
+<!-- 🎁 優待詳細編集モーダル: showクラスで制御 -->
 <div class="ymodal-overlay" id="ymodalOverlay" onclick="if(event.target===this)closeYutaiEdit()">
   <div class="ymodal">
     <h3 id="ymodalTitle">🎁 優待詳細</h3>

@@ -1651,14 +1651,12 @@ function toast(m) { const e=document.getElementById('toast'); e.textContent=m; e
 // APIキー設定
 function openKeyModal() {
   const m = document.getElementById('keyModal');
-  m.style.display = 'flex';
-  m.style.pointerEvents = 'auto';
-  m.style.zIndex = '900';
+  m.classList.add('show');
   document.getElementById('keyGemini').value=GK;
   document.getElementById('keyAnthropic').value=CK;
 }
 function closeKeyModal() {
-  document.getElementById('keyModal').style.display = 'none';
+  document.getElementById('keyModal').classList.remove('show');
 }
 function saveKeys() {
   const gk=document.getElementById('keyGemini').value.trim();
@@ -2082,7 +2080,8 @@ function doImport() {
 
 // 初期化
 calcS(); rTH(); rWatch();
-if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
+// APIキー未設定ならモーダルを表示（.showクラス方式）
+if(!GK||!CK) document.getElementById('keyModal').classList.add('show');
 
 // 当日の保存済みレポートがあれば復元して表示
 const todayMrn = loadReport(K_MRN, TODAY);
