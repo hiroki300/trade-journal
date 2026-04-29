@@ -1934,12 +1934,13 @@ function showImportModal() {
       const chgStr = it.chg_amt!=null
         ? '<span style="color:'+(it.chg_amt>=0?'var(--green)':'var(--red)')+'"> 前日比'+(it.chg_amt>=0?'+':'')+it.chg_amt.toLocaleString()+'円('+(it.chg_pct>=0?'+':'')+it.chg_pct+'%)</span>'
         : '';
+      const bpStr = it.buy_price ? ' / 取得 '+it.buy_price.toLocaleString()+'円' : ` / 取得 <input type="number" id="mbp${i}" placeholder="買値を補完" style="width:80px;font-size:11px;padding:2px;background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:4px;color:var(--text);outline:none">円`;
       return '<div class="modal-item">'+
         '<div class="modal-item-top"><div>'+
         '<div class="modal-item-name">'+tag+(it.code||'?')+' '+it.name+'</div>'+
         '<div class="modal-item-meta">'+
           (it.shares||'?')+'株'+
-          (it.buy_price?' / 取得 '+it.buy_price.toLocaleString()+'円':' / 取得 未取得')+
+          bpStr+
           (cp?' / 現値 '+cp.toLocaleString()+'円':'')+chgStr+
           (it.eval?'<br>評価額: '+it.eval.toLocaleString()+'円':'')+
         '</div>'+
@@ -1965,11 +1966,15 @@ function showImportModal() {
 function closeModal() { document.getElementById('importModal').classList.remove('on'); }
 
 function doImport() {
-  const checked=parsedItems.filter((_,i)=>document.getElementById('mchk'+i)?.checked);
   let count=0;
   if(ssType==='spot'||ssType==='margin'){
     const itemType = ssType; // 'spot' or 'margin'
-    for(const it of checked){
+    for(let i=0; i<parsedItems.length; i++){
+      if(!document.getElementById('mchk'+i)?.checked) continue;
+      const it = parsedItems[i];
+      const bpInput = document.getElementById('mbp'+i);
+      if(bpInput && bpInput.value) it.buy_price = parseFloat(bpInput.value);
+      
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
       const cp = it.current_price || (it.eval && it.shares ? Math.round(it.eval/it.shares) : 0);
@@ -2135,10 +2140,28 @@ function runAssistant() {
     if (sh > 0) {
         const loss = Math.round((bp - rPrice) * sh);
         const profit = Math.round((tPrice - bp) * sh);
-        document.getElementById('suggestPnl').textContent =
-          `損失 -¥${loss.toLocaleString()} / 利益 +¥${profit.toLocaleString()}`;
+        let val = 0; for (const h of H) { val += (h.cp || h.bp) * h.sh; }
+        const totalFunds = cash + val;
+        const riskAmount = totalFunds * 0.015; // 資金の1.5%を最大許容リスクとする
+        const lossPerShare = bp - rPrice;
+        let suggestion = '';
+        if (lossPerShare > 0 && totalFunds > 0) {
+           const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
+           suggestion = `<div style="font-size:11px;color:var(--acc);margin-top:6px;border-top:1px dashed rgba(59,130,246,0.3);padding-top:6px">💡 資金1.5%リスク(${Math.round(riskAmount).toLocaleString()}円)の推奨株数: <b>${Math.max(100, recShares).toLocaleString()}株</b></div>`;
+        }
+        document.getElementById('suggestPnl').innerHTML =
+          `損失 -¥${loss.toLocaleString()} / 利益 +¥${profit.toLocaleString()}${suggestion}`;
     } else {
-        document.getElementById('suggestPnl').textContent = '株数を入力すると金額ベースで表示';
+        let val = 0; for (const h of H) { val += (h.cp || h.bp) * h.sh; }
+        const totalFunds = cash + val;
+        const riskAmount = totalFunds * 0.015;
+        const lossPerShare = bp - rPrice;
+        let suggestion = '';
+        if (lossPerShare > 0 && totalFunds > 0) {
+           const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
+           suggestion = `<div style="font-size:11px;color:var(--acc);margin-top:6px;border-top:1px dashed rgba(59,130,246,0.3);padding-top:6px">💡 資金1.5%リスク(${Math.round(riskAmount).toLocaleString()}円)の推奨株数: <b>${Math.max(100, recShares).toLocaleString()}株</b></div>`;
+        }
+        document.getElementById('suggestPnl').innerHTML = `株数を入力すると金額ベースで表示${suggestion}`;
     }
     updateRRCalc();
 }

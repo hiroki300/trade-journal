@@ -39,6 +39,8 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overscroll-behavior-y: none; }
+/* タッチデバイスのダブルタップズームを防止しつつタップを確実に受け付ける */
+a, button, [onclick], .tab, .btn, .btn-mini, .ss-type, .hdr-key-btn { touch-action: manipulation; }
 body {
   background: var(--bg); color: var(--text); font-family: var(--font);
   display: flex; flex-direction: column; -webkit-font-smoothing: antialiased;
@@ -56,23 +58,31 @@ header {
 
 nav {
   display: flex; background: rgba(19, 27, 44, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 90;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  /* z-indexはpageより高くするがheaderより低く */
+  position: relative; z-index: 50;
 }
 .tab {
   flex: 1; padding: 12px 2px 10px; text-align: center; font-size: 10px; font-weight: 700; color: var(--t3);
-  border-bottom: 3px solid transparent; cursor: pointer; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-bottom: 3px solid transparent; cursor: pointer;
+  /* モバイルでの遅延なしタップ */
+  touch-action: manipulation;
+  /* transformはtabのタップに干渉しないよう:activeのみ軽微に */
+  transition: color 0.25s, border-bottom-color 0.25s;
 }
 .tab .ti { font-size: 18px; display: block; margin-bottom: 4px; transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .tab.on { color: var(--acc); border-bottom-color: var(--acc); text-shadow: 0 0 10px var(--acc-glow); }
 .tab.on .ti { transform: translateY(-3px) scale(1.1); }
-.tab:active { opacity: 0.6; transform: scale(0.95); }
+.tab:active { opacity: 0.7; }
 
 /* 📱 Page Layout */
-.pages { flex: 1; overflow: hidden; position: relative; min-height: 0; z-index: 1; }
+.pages { flex: 1; overflow: hidden; position: relative; min-height: 0; }
 .page {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 16px 16px 80px; display: none; pointer-events: none; visibility: hidden;
   animation: fadeIn 0.3s ease;
+  /* モバイルスクロール用 */
+  scroll-behavior: smooth;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .page.on { display: block !important; pointer-events: auto !important; visibility: visible !important; }

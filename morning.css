@@ -42,6 +42,8 @@ body {
   background: var(--bg); color: var(--text); font-family: var(--font);
   display: flex; flex-direction: column; overflow-x: hidden;
 }
+/* モバイルダブルタップズーム防止とタップ応答性改善 */
+a, button, [onclick], .h-btn, .sec-btn, .day-tab, .ai-tab, .review-tab, .ss-type, .ai-action-btn { touch-action: manipulation; }
 button, input, textarea, select { font-family: inherit; }
 
 /* ─── ヘッダー (Glassmorphism) ─── */
@@ -59,9 +61,10 @@ header {
 .h-date { font-size: 12px; color: var(--t3); font-family: var(--mono); font-weight: 600; }
 .h-btn {
   background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); border-radius: 8px;
-  color: var(--t2); font-size: 16px; padding: 6px 12px; cursor: pointer; transition: 0.2s;
+  color: var(--t2); font-size: 16px; padding: 6px 12px; cursor: pointer; transition: background 0.2s;
+  touch-action: manipulation;
 }
-.h-btn:active { background: rgba(255, 255, 255, 0.1); transform: scale(0.95); }
+.h-btn:active { background: rgba(255, 255, 255, 0.1); }
 
 /* ─── メイン ─── */
 main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 100px;}
