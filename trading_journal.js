@@ -2141,42 +2141,85 @@ function setRR(val, btn) {
 function runAssistant() {
     const panel = document.getElementById('calcPanel');
     if (!panel) return;
-    // 売り時は計算アシスタントを表示しない
     if (!isBuyMode()) { panel.style.display = 'none'; updateRRCalc(); return; }
     const bp = parseFloat(document.getElementById('tp')?.value);
     const sh = parseInt(document.getElementById('tsh')?.value) || 0;
     if (!bp || bp <= 0) { panel.style.display = 'none'; updateRRCalc(); return; }
     panel.style.display = 'block';
+
     const rPrice = Math.round(bp * (1 - currentRisk / 100));
     const tPrice = Math.round(bp * (1 + (currentRisk * currentRRMult) / 100));
-    document.getElementById('suggestSl').textContent = '¥' + rPrice.toLocaleString();
-    document.getElementById('suggestTgt').textContent = '¥' + tPrice.toLocaleString();
-    if (sh > 0) {
-        const loss = Math.round((bp - rPrice) * sh);
-        const profit = Math.round((tPrice - bp) * sh);
-        let val = 0; for (const h of H) { val += (h.cp || h.bp) * h.sh; }
-        const totalFunds = cash + val;
-        const riskAmount = totalFunds * 0.015; // 資金の1.5%を最大許容リスクとする
-        const lossPerShare = bp - rPrice;
-        let suggestion = '';
-        if (lossPerShare > 0 && totalFunds > 0) {
-           const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
-           suggestion = `<div style="font-size:11px;color:var(--acc);margin-top:6px;border-top:1px dashed rgba(59,130,246,0.3);padding-top:6px">💡 資金1.5%リスク(${Math.round(riskAmount).toLocaleString()}円)の推奨株数: <b>${Math.max(100, recShares).toLocaleString()}株</b></div>`;
+    document.getElementById('suggestSl').textContent = '\u00a5' + rPrice.toLocaleString();
+    document.getElementById('suggestTgt').textContent = '\u00a5' + tPrice.toLocaleString();
+
+    // 資金計算
+    let evalTotal = 0;
+    for (const h of H) { evalTotal += (h.cp || h.bp) * h.sh; }
+    const totalFunds = cash + evalTotal;
+    const lossPerShare = bp - rPrice;
+    const riskAmount = totalFunds * 0.015; // 1.5%リスク基準
+
+    // ATRベース損切り提案（J-Quantsキャッシュから）
+    const code = document.getElementById('tc')?.value?.trim();
+    let atrHtml = '';
+    if (code && weeklyCache) {
+        const entry = findWeeklyEntry(weeklyCache, code);
+        if (entry && entry.atr) {
+            const atrSl = Math.round(bp - entry.atr * 1.5);
+            const atrSlPct = ((bp - atrSl) / bp * 100).toFixed(1);
+            atrHtml = `<div style="font-size:11px;margin-top:6px;padding:5px 8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:8px;color:#f59e0b">` +
+                `\u26a1 ATR\u30d9\u30fcSL: <b>\u00a5${atrSl.toLocaleString()}</b> <span style="opacity:.7">(\u00d71.5 = -${atrSlPct}% / ATR: \u00a5${entry.atr.toLocaleString()})</span></div>`;
         }
-        document.getElementById('suggestPnl').innerHTML =
-          `損失 -¥${loss.toLocaleString()} / 利益 +¥${profit.toLocaleString()}${suggestion}`;
-    } else {
-        let val = 0; for (const h of H) { val += (h.cp || h.bp) * h.sh; }
-        const totalFunds = cash + val;
-        const riskAmount = totalFunds * 0.015;
-        const lossPerShare = bp - rPrice;
-        let suggestion = '';
-        if (lossPerShare > 0 && totalFunds > 0) {
-           const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
-           suggestion = `<div style="font-size:11px;color:var(--acc);margin-top:6px;border-top:1px dashed rgba(59,130,246,0.3);padding-top:6px">💡 資金1.5%リスク(${Math.round(riskAmount).toLocaleString()}円)の推奨株数: <b>${Math.max(100, recShares).toLocaleString()}株</b></div>`;
-        }
-        document.getElementById('suggestPnl').innerHTML = `株数を入力すると金額ベースで表示${suggestion}`;
     }
+
+    // 信用金利コスト（信用かつ日付入力時）
+    let marginCostHtml = '';
+    const ttype = document.getElementById('ttype')?.value;
+    const tdt = document.getElementById('tdt')?.value;
+    if (ttype === 'margin' && tdt && sh > 0) {
+        const days = Math.max(0, Math.floor((new Date() - new Date(tdt)) / 86400000));
+        const marginCost = Math.round(bp * sh * 0.028 * days / 365);
+        if (days > 0) {
+            const dayColor = days >= 30 ? 'var(--red)' : days >= 14 ? 'var(--yellow)' : 'var(--t3)';
+            marginCostHtml = `<div style="font-size:11px;margin-top:6px;padding:5px 8px;background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.2);border-radius:8px;color:${dayColor}">` +
+                `\ud83d\udcb8 \u4fe1\u7528\u91d1\u5229(${days}\u65e5) \u30b3\u30b9\u30c8: \u76ee\u5b89 <b>\u00a5${marginCost.toLocaleString()}</b> <span style="opacity:.7">(2.8%/\u5e74)</span></div>`;
+        }
+    }
+
+    // 損益＆推奨株数＆ポジション比率
+    let pnlHtml = '';
+    let suggHtml = '';
+    let posWarnHtml = '';
+
+    if (sh > 0) {
+        const loss = Math.round(lossPerShare * sh);
+        const profit = Math.round((tPrice - bp) * sh);
+        pnlHtml = `\u640d\u5931 <b style="color:var(--red)">-\u00a5${loss.toLocaleString()}</b> / \u5229\u76ca <b style="color:var(--green)">+\u00a5${profit.toLocaleString()}</b>`;
+        if (loss > riskAmount && riskAmount > 0) {
+            pnlHtml += ` <span style="color:var(--red);font-size:10px">\u26a0\ufe0f \u8a31\u5bb9\u30ea\u30b9\u30af(${Math.round(riskAmount).toLocaleString()}\u5186)\u8d85\u904e</span>`;
+        }
+        // ポジション比率
+        const posVal = bp * sh;
+        if (totalFunds > 0) {
+            const posPct = (posVal / totalFunds * 100).toFixed(1);
+            const posColor = posVal / totalFunds > 0.30 ? 'var(--red)' : posVal / totalFunds > 0.20 ? 'var(--yellow)' : 'var(--t3)';
+            const posLabel = posVal / totalFunds > 0.30 ? ' \u26a0\ufe0f \u904e\u5927' : posVal / totalFunds > 0.20 ? ' \u26a0\ufe0f \u304d\u3064\u3044' : '';
+            posWarnHtml = `<div style="font-size:11px;margin-top:4px;color:${posColor}">\ud83d\udcca \u5168\u8cc7\u91d1\u6bd4: <b>${posPct}%</b>${posLabel} <span style="color:var(--t3)">(25%\u4e0a\u9650\u63a8\u5968)</span></div>`;
+        }
+    } else {
+        pnlHtml = `\u682a\u6570\u3092\u5165\u529b\u3059\u308b\u3068\u91d1\u984d\u3092\u8868\u793a`;
+    }
+
+    if (lossPerShare > 0 && totalFunds > 0) {
+        const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
+        const recVal = bp * Math.max(100, recShares);
+        const recPct = (recVal / totalFunds * 100).toFixed(1);
+        suggHtml = `<div style="font-size:11px;color:var(--acc);margin-top:6px;padding-top:6px;border-top:1px dashed rgba(59,130,246,0.3)">` +
+            `\ud83d\udca1 1.5%\u30ea\u30b9\u30af\u57fa\u6e96\u306e\u63a8\u5968\u682a\u6570: <b>${Math.max(100, recShares).toLocaleString()}\u682a</b> ` +
+            `<span style="color:var(--t3)">(${recPct}% \u4ed3\u5165 / \u6700\u5927\u640d\u5931 ${Math.round(riskAmount).toLocaleString()}\u5186)</span></div>`;
+    }
+
+    document.getElementById('suggestPnl').innerHTML = pnlHtml + suggHtml + atrHtml + marginCostHtml + posWarnHtml;
     updateRRCalc();
 }
 
@@ -2192,17 +2235,13 @@ function applySuggestions() {
 function updateRRCalc() {
     const disp = document.getElementById('rrDisplay');
     if (!disp) return;
-    // 売り時はRR表示も隠す
     if (!isBuyMode()) { disp.style.display = 'none'; return; }
     const bp = parseFloat(document.getElementById('tp')?.value);
     const sl = parseFloat(document.getElementById('tsl')?.value);
     const tgt = parseFloat(document.getElementById('ttgt')?.value);
-    // 買値未入力なら非表示
     if (!bp) { disp.style.display = 'none'; return; }
     disp.style.display = 'block';
 
-    // --- 損切りラインの決定 ---
-    // 明示入力がなければ現在のリスク率で仮置き
     const slUsed = (sl && sl > 0) ? sl : Math.round(bp * (1 - currentRisk / 100));
     const slIsActual = !!(sl && sl > 0);
 
@@ -2211,31 +2250,38 @@ function updateRRCalc() {
       return;
     }
 
-    // --- 目標価未入力: 必要目標価 (現在のRR倍率で達成) を案内 ---
+    // 損切りまでの距離バー
+    const slDistPct = (bp - slUsed) / bp * 100;
+    const barColor = slDistPct <= 3 ? 'var(--green)' : slDistPct <= 6 ? 'var(--yellow)' : 'var(--red)';
+    const barWidth = Math.min(slDistPct * 4, 100).toFixed(0);
+    const barHtml = `<div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin:5px 0 1px;overflow:hidden"><div style="height:100%;width:${barWidth}%;background:${barColor};border-radius:2px;transition:width 0.3s"></div></div>` +
+        `<div style="font-size:10px;color:${barColor};text-align:right">SLまで -${slDistPct.toFixed(1)}%</div>`;
+
     if (!tgt || tgt <= 0) {
       const need = Math.round(bp + (bp - slUsed) * currentRRMult);
-      const slNote = slIsActual ? '入力SL基準' : `-${currentRisk}%仮置`;
-      disp.innerHTML = `📐 RR 1:${currentRRMult} 目標価 <span style="color:var(--acc);font-weight:700">¥${need.toLocaleString()}</span> <span style="color:var(--t3);font-size:11px">（${slNote}）</span>`;
+      const slNote = slIsActual ? '入力SL基準' : `-${currentRisk}%仓置`;
+      disp.innerHTML = `📐 RR 1:${currentRRMult} 目標価 <span style="color:var(--acc);font-weight:700">¥${need.toLocaleString()}</span> <span style="color:var(--t3);font-size:11px">（${slNote}）</span>${barHtml}`;
       return;
     }
 
-    // --- 実RR算出 ---
     const rr = (tgt - bp) / (bp - slUsed);
     const rrText = rr.toFixed(2);
-    // 回転重視評価: 設定したRR倍率を基準に判定
     let color, label;
-    if (rr >= currentRRMult) { color = 'var(--green)'; label = `✅ RR 1:${currentRRMult} 達成`; }
+    if (rr >= currentRRMult)           { color = 'var(--green)';  label = `✅ RR 1:${currentRRMult} 達成`; }
     else if (rr >= currentRRMult * 0.7) { color = 'var(--yellow)'; label = '⚠️ RR やや低 (再検討)'; }
-    else if (rr > 0) { color = 'var(--red)'; label = '🚫 RR不足'; }
-    else { color = 'var(--red)'; label = '🚫 目標価が買値以下'; }
+    else if (rr > 0)                   { color = 'var(--red)';    label = '🚫 RR不足'; }
+    else                               { color = 'var(--red)';    label = '🚫 目標価が買値以下'; }
 
-    const slNote = slIsActual ? '' : ` <span style="color:var(--t3);font-size:10px">(SL仮置-${currentRisk}%)</span>`;
-    disp.innerHTML = `📐 RR 1 : ${rrText} <span style="color:${color};font-weight:700">${label}</span>${slNote}`;
+    const slNote = slIsActual ? '' : ` <span style="color:var(--t3);font-size:10px">(SL仓置-${currentRisk}%)</span>`;
+    disp.innerHTML = `📐 RR 1 : ${rrText} <span style="color:${color};font-weight:700">${label}</span>${slNote}${barHtml}`;
 }
 
 const setupAssistant = () => {
     ['tp', 'tsh'].forEach(id => document.getElementById(id)?.addEventListener('input', runAssistant));
     ['tsl', 'ttgt'].forEach(id => document.getElementById(id)?.addEventListener('input', updateRRCalc));
+    // 取引区分・日付変更時も再計算（信用金利コスト表示のため）
+    document.getElementById('ttype')?.addEventListener('change', runAssistant);
+    document.getElementById('tdt')?.addEventListener('change', runAssistant);
     // 売買モード切替時にも再評価
     document.getElementById('ta')?.addEventListener('change', () => {
       if (isBuyMode()) runAssistant();
