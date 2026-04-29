@@ -2302,14 +2302,14 @@ async function analyzeScreenshots() {
     btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
     resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
     try{
-      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:4000,temperature:0.0}};
+      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:4000,temperature:0.0,responseMimeType:"application/json"}};
       const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(!r.ok){
         const e=await r.json().catch(()=>({}));
         throw new Error(e.error?.message || 'HTTP '+r.status+' - APIキー等を確認してください');
       }
       const d=await r.json();
-      let raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json|```/g,'').trim();
+      let raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```(?:json)?\s*|```\s*/gi,'').trim();
       // cashはオブジェクト、それ以外は配列
       if(ssType==='cash'){
         const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
