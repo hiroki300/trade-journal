@@ -1723,50 +1723,61 @@ async function analyzeScreenshots() {
     spot:`SBI証券アプリ「保有証券」タブのスクリーンショットです。画面の一部が切れていても、読み取れる情報をすべて抽出してください。
 表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
 
-各銘柄の表示形式（例）:
-  銘柄名: ＶＲＡＩＮ / 三菱重 / アイスタイル など
-  コード行: 「135A 特定」「7011 特定」「247A 特定」「3660 NISA」など
-  株数: 100株 / 200株 / 1000株
-  取得単価: 3,200円（表示されない画面もある）
-  評価額: 269,300円
-  評価額前日比: +12,600円(+4.91%) または -2,100円(-0.78%)
+【画面レイアウト（1銘柄あたり3カラム×複数行）】
+■ 銘柄カラム（1〜2行）
+  1行目: 銘柄名（例: ＡｉロボティクスЕヤマダＨＤ／三菱ＵＦＪ／アイスタイル など、全角・カタカナ・漢字混在あり）
+  2行目: 「コード 特定」または「コード NISA」または「コード 一般」（例: 247A 特定 / 7011 特定 / 3660 NISA）
+■ 保有株数カラム（2行）
+  1行目: 「○○○株」← これが保有株数
+  2行目: 「(○○○)」← 注文中株数。これは絶対に shares に使わない
+■ 評価額カラム（2行）
+  1行目: 評価額「○○○,○○○円」
+  2行目: 評価額前日比「+○○○円(+○.○○%)」または「-○○○円(-○.○○%)」
 
-[{"code":"135A","name":"VRAIN","shares":100,"buy_price":2700,"eval":269300,"chg_amt":12600,"chg_pct":4.91}]
+【出力形式】
+[{"code":"247A","name":"Aiロボティクス","shares":100,"buy_price":null,"eval":128000,"chg_amt":4500,"chg_pct":3.64}]
 
-ルール:
-- code: 「特定」「NISA」「一般」の直前の英数字のみ（4桁数字 or 3桁数字+英字、例: 135A, 247A, 3660, 7011）
-- name: 銘柄名はそのまま（全角/半角は変換不要）
-- shares: 株数の数字のみ（カンマなし）
-- buy_price: 取得単価の数字のみ（カンマなし）。画面に表示がなければnull
+【ルール】
+- code: 「特定」「NISA」「一般」の直前の英数字（4桁数字 or 3桁数字+英字、例: 135A, 247A, 3660, 7011）
+- name: 銘柄名そのまま（全角/半角は変換不要、ひらがな・カタカナ・漢字いずれも忠実に）
+- shares: 保有株数カラム1行目の数字のみ（カンマ・株マークなし）。括弧内の注文数(0)等は絶対に使わない
+- buy_price: 取得単価。デフォルト画面では非表示の場合がほとんど → 表示が見当たらなければ必ず null（eval/shares から計算して埋めるのは禁止、推測も禁止）
 - eval: 評価額の数字のみ（カンマ・円なし）
-- chg_amt: 評価額前日比の円額（符号付き、カンマなし。マイナスは負数で）
+- chg_amt: 評価額前日比の円額（符号付き整数、カンマなし。マイナスは負数）
 - chg_pct: 評価額前日比の％（符号付き、数字のみ）
-- 「買建」「信用建玉」が含まれる行は信用なので含めない（現物のみ）
-- 読み取れない項目はnull（推測禁止）`,
+- 「買建」「売建」「信用建玉」が含まれる銘柄は信用なので絶対に含めない（このタブは現物のみ）
+- 「評価損益合計」「明細数」などのサマリー・ヘッダ行は含めない（個別銘柄行のみ）
+- 読み取れない項目は null（推測禁止）`,
 
     margin:`SBI証券アプリ「信用建玉」タブのスクリーンショットです。画面の一部が切れていても、読み取れる情報をすべて抽出してください。
 表示されているすべての建玉を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
 
-各建玉の表示形式（例）:
-  銘柄名: カカクコム / コーエーテクモ / 三菱重
-  コード行: 「2371 買建/特定」「3635 買建/特定」など
-  返済期限: 6ヵ月
-  建株数: 100株
-  建値（平均建単価）: 2,400円
-  評価額: 227,400円
-  評価額前日比: +4,750円(+2.13%)
+【画面レイアウト（1建玉あたり3カラム×複数行）】
+■ 銘柄カラム（通常3行）
+  1行目: 銘柄名（例: 稀元素／ミナトＨＤ／カカクコム／コーエーテクモ／三菱重 など）
+  2行目: 「コード 買建/特定」または「コード 売建/特定」（NISA・一般もありうる。例: 4082 買建/特定 / 6862 買建/特定 / 2371 買建/特定）
+  3行目: 「6ヵ月」または「1ヵ月」「無期限」等の返済期限ラベル ← 抽出対象外（無視）
+■ 建株数カラム（2行）
+  1行目: 「○○○株」← これが建株数
+  2行目: 「(○○○)」← 注文中株数。これは絶対に shares に使わない（200株 (200) の括弧内200は無視）
+■ 評価額カラム（2行）
+  1行目: 評価額「○○○,○○○円」
+  2行目: 評価額前日比「+○○○円(+○.○○%)」または「-○○○円(-○.○○%)」
 
-[{"code":"2371","name":"カカクコム","shares":100,"buy_price":2400,"eval":227400,"chg_amt":4750,"chg_pct":2.13}]
+【出力形式】
+[{"code":"4082","name":"稀元素","shares":200,"buy_price":null,"eval":471400,"chg_amt":20600,"chg_pct":4.57},{"code":"6862","name":"ミナトHD","shares":100,"buy_price":null,"eval":262200,"chg_amt":-7400,"chg_pct":-2.74}]
 
-ルール:
-- code: 「買建/特定」の直前の英数字のみ（例: 2371, 3635, 6196, 7011）
-- name: 銘柄名はそのまま
-- shares: 建株数の数字のみ
-- buy_price: 建値（平均建単価）の数字のみ。表示がなければnull
-- eval: 評価額の数字のみ
-- chg_amt: 評価額前日比の円額（符号付き）
-- chg_pct: 評価額前日比の％（符号付き）
-- 読み取れない項目はnull（推測禁止）`,
+【ルール】
+- code: 「買建/」または「売建/」の直前の英数字（4桁数字 or 3桁数字+英字、例: 4082, 6862, 2371, 3635, 7011, 247A）
+- name: 銘柄ブロックの1行目（全角/半角・漢字・カタカナそのまま）
+- shares: 建株数カラム1行目の数字のみ（カンマ・株マークなし）。括弧内の注文数(0)・(200)等は絶対に使わない
+- buy_price: 建値（平均建単価）。**デフォルト画面では右にスクロールしないと見えないため、ほぼ非表示** → 画面に直接表示されていなければ必ず null。eval/shares から計算して埋めるのは厳禁、chg_amt から推測するのも厳禁、推測一切禁止
+- eval: 評価額カラム1行目の数字のみ（カンマ・円なし）
+- chg_amt: 評価額前日比の円額（符号付き整数、カンマなし。マイナスは負数で）
+- chg_pct: 評価額前日比の％（符号付き、数字のみ）
+- 「評価損益合計」「明細数」「6ヵ月」「(注文数)」等のヘッダ・サマリー・ラベル行は絶対に含めない（個別建玉行のみ）
+- 売建（空売り）も同じ形式で出力（shares は正の数のまま）
+- 読み取れない項目は null（推測禁止）`,
 
     hist:`SBI証券アプリの約定履歴・取引履歴画面のスクリーンショットです。各約定行を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
 
@@ -1932,7 +1943,7 @@ function showImportModal() {
       const chgStr = it.chg_amt!=null
         ? '<span style="color:'+(it.chg_amt>=0?'var(--green)':'var(--red)')+'"> 前日比'+(it.chg_amt>=0?'+':'')+it.chg_amt.toLocaleString()+'円('+(it.chg_pct>=0?'+':'')+it.chg_pct+'%)</span>'
         : '';
-      const bpStr = it.buy_price ? ' / 取得 '+it.buy_price.toLocaleString()+'円' : ` / 取得 <input type="number" id="mbp${i}" placeholder="買値を補完" style="width:80px;font-size:11px;padding:2px;background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:4px;color:var(--text);outline:none">円`;
+      const bpStr = it.buy_price ? ' / 取得 '+it.buy_price.toLocaleString()+'円' : ` / 取得 <input type="number" inputmode="decimal" id="mbp${i}" placeholder="建値を入力" style="width:90px;font-size:12px;padding:3px 5px;background:rgba(239,68,68,0.15);border:1px solid var(--red);border-radius:4px;color:var(--text);outline:none">円<span style="font-size:10px;color:var(--t3);margin-left:4px">※画面外なので手動</span>`;
       return '<div class="modal-item">'+
         '<div class="modal-item-top"><div>'+
         '<div class="modal-item-name">'+tag+(it.code||'?')+' '+it.name+'</div>'+
@@ -1965,6 +1976,7 @@ function closeModal() { document.getElementById('importModal').classList.remove(
 
 function doImport() {
   let count=0;
+  let missingBpCount=0; // 建値未入力でcp代用した件数
   if(ssType==='spot'||ssType==='margin'){
     const itemType = ssType; // 'spot' or 'margin'
     for(let i=0; i<parsedItems.length; i++){
@@ -1984,7 +1996,8 @@ function doImport() {
         if(it.shares>0) H[idx].sh = it.shares;
         if(it.buy_price>0) H[idx].bp = it.buy_price;
       } else {
-        // 新規: buy_price不明なら現値で代用
+        // 新規: buy_price不明なら現値で代用（含み損益が0になるので要手動修正）
+        if(!(it.buy_price>0)) missingBpCount++;
         H.push({
           cd: cd||nm,
           nm,
@@ -1993,7 +2006,7 @@ function doImport() {
           cp: cp || it.buy_price || 0,
           sl: null,
           tgt: null,
-          memo: 'SS取込',
+          memo: it.buy_price>0 ? 'SS取込' : 'SS取込(建値未入力・要修正)',
           dt: TODAY,
           type: itemType
         });
@@ -2068,7 +2081,10 @@ function doImport() {
   }
   closeModal(); calcS(); rTH(); rHold(); rWatch();
   if(ssType==='cash'&&count>0) toast('💴 残金を'+cash.toLocaleString()+'円に更新しました');
-  else if(ssType==='spot'||ssType==='margin') toast('✅ '+count+'件を取り込み、終値も振り返りに連携しました');
+  else if(ssType==='spot'||ssType==='margin') {
+    if(missingBpCount>0) toast('⚠️ '+count+'件取込／'+missingBpCount+'件は建値未入力（保有タブで✏️編集してください）');
+    else toast('✅ '+count+'件を取り込み、終値も振り返りに連携しました');
+  }
   else toast('✅ '+count+'件を取り込みました');
   parsedItems=[]; ssImageList=[];
   document.getElementById('ssPreviewList').style.display='none';
