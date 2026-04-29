@@ -13,35 +13,52 @@
 <!-- PWA: manifest を inline data URL で埋め込み -->
 <link rel="manifest" id="pwaManifest">
 <style>
-:root{
-  --bg:#0b0f18;--s1:#111827;--s2:#1a2236;--border:#1e2d45;
-  --acc:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6;
-  --text:#e2e8f0;--t2:#94a3b8;--t3:#4b6088;
-  --font:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN',sans-serif;
-  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+:root {
+  --bg: #090e17;
+  --s1: #131b2c;
+  --s2: #1e293b;
+  --border: rgba(255, 255, 255, 0.08);
+  --acc: #3b82f6;
+  --acc-grad: linear-gradient(135deg, #3b82f6, #06b6d4);
+  --green: #10b981;
+  --green-grad: linear-gradient(135deg, #10b981, #059669);
+  --red: #ef4444;
+  --red-grad: linear-gradient(135deg, #ef4444, #b91c1c);
+  --yellow: #f59e0b;
+  --gem: #4285f4;
+  --cld: #d97706;
+  --t2: #94a3b8;
+  --t3: #475569;
+  --text: #f8fafc;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN', sans-serif;
+  --mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;}
-body{
-  background:var(--bg);color:var(--text);font-family:var(--font);
-  display:flex;flex-direction:column;overflow-x:hidden;
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--text); font-family: var(--font);
+  display: flex; flex-direction: column; overflow-x: hidden;
 }
-button,input,textarea,select{font-family:inherit;}
+button, input, textarea, select { font-family: inherit; }
 
-/* ─── ヘッダー ─── */
-header{
-  padding:12px 16px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;
-  background:var(--s1);flex-shrink:0;
+/* ─── ヘッダー (Glassmorphism) ─── */
+header {
+  padding: 16px;
+  background: rgba(19, 27, 44, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
 }
-.h-title{font-size:15px;font-weight:700;}
-.h-title span{color:var(--acc);}
-.h-date{font-size:11px;color:var(--t3);font-family:var(--mono);}
-.h-btn{
-  background:transparent;border:none;color:var(--t2);font-size:20px;
-  cursor:pointer;padding:4px 8px;
+.h-title { font-size: 18px; font-weight: 800; letter-spacing: -0.03em; }
+.h-title span { background: var(--acc-grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.h-date { font-size: 12px; color: var(--t3); font-family: var(--mono); font-weight: 600; }
+.h-btn {
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--t2); font-size: 16px; padding: 6px 12px; cursor: pointer; transition: 0.2s;
 }
-.h-btn:hover{color:var(--text);}
+.h-btn:active { background: rgba(255, 255, 255, 0.1); transform: scale(0.95); }
 
 /* ─── メイン ─── */
 main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 100px;}
@@ -64,9 +81,9 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 }
 
 /* ─── セクション（折りたたみ） ─── */
-.sec{
-  background:var(--s1);border:1px solid var(--border);border-radius:12px;
-  margin-bottom:10px;overflow:hidden;
+.sec {
+  background: var(--s1); border: 1px solid var(--border); border-radius: 16px;
+  margin-bottom: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
 }
 .sec-hdr{
   padding:13px 14px;display:flex;align-items:center;justify-content:space-between;
@@ -388,19 +405,21 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 1
 }
 
 /* ─── 完了ボタン ─── */
-.done-btn-wrap{
-  position:fixed;bottom:0;left:0;right:0;
-  padding:12px 16px env(safe-area-inset-bottom, 12px);
-  background:linear-gradient(to top, var(--bg) 65%, transparent);
-  z-index:90;
+.done-btn-wrap {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 12px 16px calc(env(safe-area-inset-bottom, 12px) + 12px);
+  background: linear-gradient(to top, rgba(9,14,23,0.95) 40%, rgba(9,14,23,0));
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  z-index: 90;
 }
-.done-btn{
-  width:100%;padding:14px;border-radius:12px;border:none;
-  background:var(--acc);color:#fff;font-size:14px;font-weight:700;
-  cursor:pointer;transition:opacity .2s;
+.done-btn {
+  width: 100%; padding: 16px; border-radius: 14px; border: none;
+  background: var(--acc-grad); color: #fff; font-size: 16px; font-weight: 800;
+  cursor: pointer; transition: 0.2s; box-shadow: 0 4px 15px rgba(59,130,246,0.3);
 }
-.done-btn:disabled{opacity:.4;cursor:not-allowed;}
-.done-btn.completed{background:var(--green);}
+.done-btn:active { transform: scale(0.97); }
+.done-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; background: var(--s2); color: var(--t3); }
+.done-btn.completed { background: var(--green-grad); box-shadow: 0 4px 15px rgba(16,185,129,0.3); }
 
 /* ─── トースト ─── */
 .toast{

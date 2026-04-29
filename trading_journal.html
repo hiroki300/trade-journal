@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="TradeJournal">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<<style>
+<style>
 /* 🎨 Premium Modern UI Variables */
 :root {
   --bg: #090e17;
@@ -325,10 +325,6 @@ select.fi { appearance: none; background-image: url('data:image/svg+xml;utf8,<sv
   <div class="tab" onclick="go('trade')"><span class="ti">💱</span>売買</div>
   <div class="tab" onclick="go('hold')"><span class="ti">💼</span>保有</div>
   <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
-  <div class="tab" onclick="go('morning')"><span class="ti">🌅</span>朝チェック</div>
-  <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
-  <div class="tab" onclick="go('analyze')"><span class="ti">🔬</span>銘柄分析</div>
-  <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
 </nav>
 <div class="pages">
 
@@ -450,85 +446,6 @@ select.fi { appearance: none; background-image: url('data:image/svg+xml;utf8,<sv
   <div id="watchList"></div>
 </div>
 
-
-<div class="page" id="page-morning">
-  <div class="cost-note"><span>🤖 Gemini: 需給・板情報　🧠 Claude: エントリー判断</span></div>
-
-  <!-- 分析モード切替 -->
-  <div class="mode-row" style="margin-bottom:10px">
-    <button class="mode-btn on" id="mrnAll" onclick="setMrnMode('all')">📋 全銘柄</button>
-    <button class="mode-btn" id="mrnHold" onclick="setMrnMode('hold')">💼 保有のみ</button>
-    <button class="mode-btn" id="mrnWatch" onclick="setMrnMode('watch')">👁 注目のみ</button>
-  </div>
-
-  <!-- 実行ボタン -->
-  <button class="rev-btn" id="mrnBtn" onclick="doMorning()" style="background:linear-gradient(135deg,#1e3a5f,#0f3460)">
-    🌅 朝の板チェックを開始<br>
-    <span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>
-  </button>
-
-  <!-- 結果表示エリア -->
-  <div id="mrnOut"></div>
-
-  <!-- 過去の履歴 -->
-  <div id="mrnHistory"></div>
-</div>
-
-<div class="page" id="page-rev">
-  <div class="cost-note"><span>🤖 Gemini: 相場分析　🧠 Claude: 明日の戦略</span></div>
-
-  <!-- 終値データの状態表示（売買タブの「現物保有/信用建玉」スクショから自動連携） -->
-  <div id="revSsStatus" style="background:var(--s1);border:1px solid var(--border);border-radius:11px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--t2);line-height:1.6">
-    <div style="font-weight:700;color:var(--t2);margin-bottom:3px">📸 今日の終値データ</div>
-    <div id="revSsStatusBody" style="font-size:11px;color:var(--t3)">
-      💡 売買タブの「💴 現物保有」「📊 信用建玉」スクショから自動連携されます
-    </div>
-  </div>
-
-  <button class="rev-btn" id="revBtn" onclick="doRev()" style="background:linear-gradient(135deg,#1e3a5f,#3b1f5e)">
-    🌆 夕方の振り返りを開始<br>
-    <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>
-  </button>
-  <div id="revOut"></div>
-  <div id="revHistory"></div>
-</div>
-
-
-<div class="page" id="page-analyze">
-  <div class="cost-note"><span>🤖 Gemini: テーマ・需給　🧠 Claude: テクニカル・判断</span></div>
-
-  <!-- 銘柄入力 -->
-  <div style="display:flex;gap:8px;margin-bottom:10px">
-    <input class="fi" id="azCode" type="text" inputmode="numeric" placeholder="コード例: 3778" maxlength="5"
-      style="width:90px;flex:none;margin:0;font-family:var(--mono)">
-    <input class="fi" id="azName" type="text" placeholder="銘柄名（任意）"
-      style="flex:1;margin:0">
-    <button class="btn btnb" style="width:52px;padding:0;font-size:18px;margin:0"
-      onclick="doAnalyze()">🔬</button>
-  </div>
-
-  <!-- クイック選択（保有・ウォッチから） -->
-  <div id="azQuickList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
-
-  <!-- 結果エリア -->
-  <div id="azOut"></div>
-  <div id="azHistory"></div>
-</div>
-
-<div class="page" id="page-chat">
-  <div class="mode-row">
-    <button class="mode-btn on" id="modeGC" onclick="setMode('gc')">🤝 合議</button>
-    <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini</button>
-    <button class="mode-btn" id="modeC" onclick="setMode('c')">🧠 Claude</button>
-  </div>
-  <div class="cscroll" id="cMsgs"></div>
-  <div class="cbar">
-    <textarea class="cin" id="cinp" placeholder="質問を入力…" rows="1"
-      oninput="autoH(this)"
-      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();doChat();}"></textarea>
-    <button class="csend" id="csend" onclick="doChat()">↑</button>
-  </div>
-</div>
 
 </div>
 <div class="toast" id="toast"></div>
