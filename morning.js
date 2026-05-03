@@ -1,4 +1,4 @@
-﻿// ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //  trade-journal morning.html  v0.17 (Phase 5.3: ファンダ・需給・見送り)
 //  - Phase 2 までの全機能
 //  - Phase 3 機能A（夕会）/ 機能B（売買分析 3段分業）
@@ -1239,7 +1239,11 @@ async function fetchAttentionForHolding(code, name, force){
 
   const prompt = buildAttentionPrompt(code, name);
   try {
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 600});
+    // v0.20: Gemini 2.5 Flash + Google検索 では thinking tokens が大量消費されるため
+    //   maxTokens=600 では本文がほぼ書き出される前に上限に達して切れていた
+    //   （三菱UFJで「直近1週間の出来高は」で切断する事象を確認）。
+    //   ニュース取得と同等の余裕（3000）に拡大。
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 3000});
     ATTENTION_CACHE[code] = {
       text: (text || "").trim(),
       fetched_at: new Date().toISOString(),
@@ -1368,7 +1372,9 @@ async function fetchNewsForHolding(code, name, force){
   try {
     // v0.18+: Gemini 2.5 Flash + Google検索 では thinking tokens が消費されるため
     //   1200 では出力が途中で切れる事象（例: ヤマダHD/稀元素）が報告された。2500 に拡大。
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 2500});
+    // v0.20: 2500 でもなお途中で切れる事象（三菱UFJ等で確認）。
+    //   売買分析(L4878)で実績のある 8000 まで引き上げて十分な余裕を確保する。
+    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 8000});
     NEWS_CACHE[code] = {
       text: (text || "").trim(),
       fetched_at: new Date().toISOString(),
