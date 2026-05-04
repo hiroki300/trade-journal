@@ -1,6969 +1,2297 @@
-// ════════════════════════════════════════════════════════════════════
-//  trade-journal morning.html  v0.17 (Phase 5.3: ファンダ・需給・見送り)
-//  - Phase 2 までの全機能
-//  - Phase 3 機能A（夕会）/ 機能B（売買分析 3段分業）
-//  - Phase 3.5 B-β（計画生成の Gemini 補完）/ A-α（夕会の Gemini 補完）
-//  - Phase 3.5+ (v0.10): 機能B の IndexedDB 永続アーカイブ、履歴閲覧UI、Markdownエクスポート
-//  - Phase 3.6 (v0.11): エクスポートを朝会計画・夕会にも展開、日次まとめボタン追加
-//  - Phase 4 Stage 4.1 (v0.12): Gemini × Claude 対話チャット移植
-//  - Phase 4 Stage 4.2 (v0.13): チャット文脈の選択式注入（6種チップ）
-//  - Phase 4 Stage 4.3 (v0.14): チャット履歴の IndexedDB 永続化
-//  - Phase 4 Stage 4.4 (v0.15): 朝会/夕会/機能B カードに「💬 深掘り」ボタン
-//  - Phase 5.1 (v0.16): Claude モデル切替 UI / 日付バグ修正
-//  - Phase 5.3 (v0.17) NEW:
-//    [1] 拡張データスキーマ（ATR / 保有日数 / 信用残 / PBR / 配当利回 / 決算日）
-//        - HOLDINGS / WATCH_ITEMS にフィールド追加（v1 と limit_watchlist 側の出力は別タスク）
-//        - データ未提供時は muted チップで構造を可視化
-//    [2] ファンダ・需給チップ表示（h-card / w-card 共通）
-//        - 決算日近接時は警告色（5日以内=黄、当日/翌日=赤）
-//        - 信用倍率5倍超で warn 色
-//    [3] 動的撤退ライン目安（ATR ベース）
-//        - 損切目安: 現在値 - ATR × 2
-//        - 目標目安: 現在値 + ATR × 6（RR1:3 相当）
-//        - 保有日数 > 10営業日 でタイムストップ ⏳ アイコン
-//    [4] 見送り（スルー）機能
-//        - 保有銘柄の判定: ✋ ⛔ 💰 ⏭️ の4ボタン化
-//        - 新規検討記録: 添加フォーム下に「⏭️ 検討スルーを記録」リンク
-//        - 理由はチェックボックス（複数選択可）+ 自由メモ
-//        - JUDGMENTS（保有）/ K.skip_log（非保有）に分けて保存
-// ════════════════════════════════════════════════════════════════════
+// APIキー（localStorageから）
+let GK = localStorage.getItem('tj_gk') || '';
+let CK = localStorage.getItem('tj_ck') || '';
 
-// ── データソース ──
-const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-data/main";
-const URLS = {
-  macro_state:     `${DATA_BASE}/macro_state.json`,
-  macro_history:   `${DATA_BASE}/macro_history.json`,
-  latest_prices:   `${DATA_BASE}/latest_prices.json`,
-  weekly_results:  `${DATA_BASE}/weekly_results.json`,
-  limit_watchlist: `${DATA_BASE}/limit_watchlist.json`,
-  fundamentals:    `${DATA_BASE}/fundamentals.json`,  // v0.18: Phase 5.3 ファンダ・需給データ
-};
+// 🎯 戦略・リスク管理設定
+let currentRisk = 8; // デフォルト損切り -8%
+let currentRRMult = 2; // デフォルトRR 1:2
 
-// ── Anthropic API ──
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-const CLAUDE_MODEL = "claude-haiku-4-5-20251001";  // 安価で十分な性能
-const CLAUDE_SONNET_MODEL = "claude-sonnet-4-6";   // v0.8 機能B 売買分析の統合戦略用
+// ストレージ
+const KH='tj_h5', KT='tj_t5', KC='tj_c5', KW='tj_w2';
+const K_MRN='tj_mrn', K_REV='tj_rev', K_AZ='tj_az';  // 朝チェック・振り返り・銘柄分析の保存キー
 
-// Gemini API (v0.8 機能B 売買分析の市場文脈・数値解釈用)
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = "gemini-2.5-flash";
-
-// ── キャッシュ ──
-const CACHE_TTL = 5 * 60 * 1000;
-const cache = new Map();
-async function fetchJSON(url){
-  const c = cache.get(url);
-  if (c && Date.now() - c.t < CACHE_TTL) return c.data;
-  const r = await fetch(url, {cache: "no-store"});
-  if (!r.ok) throw new Error(`fetch ${url} failed: ${r.status}`);
-  const data = await r.json();
-  cache.set(url, {data, t: Date.now()});
-  return data;
-}
-
-// ── localStorage ──
-const LS = {
-  get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
-  set: (k, v) => { localStorage.setItem(k, JSON.stringify(v)); },
-  raw: (k) => localStorage.getItem(k),
-};
-const K = {
-  judgments:        "tjm_judgments",
-  last_seen_macro:  "tjm_last_seen_macro",
-  manual_holdings:  "tjm_manual_holdings",
-  api_claude:       "tj_ck",
-  api_gemini:       "tj_gk",
-  last_plan:        "tjm_last_plan",
-  watch_settings:   "tjm_watch_settings",  // v0.5: 指値ウォッチの設定
-  monthly_analysis: "tjm_monthly_analysis", // v0.6: 月次Claude分析キャッシュ
-  evening_draft:    "tjm_evening_draft",    // v0.7: 夕会のメモ下書き（Step2以降で使用）
-  evening_meta_today: "tjm_evening_meta_today", // v0.18 Phase 3: 一日の総括＋明日の注目ポイントの当日下書き
-  journal_analysis: "tjm_journal_analysis", // v0.8 B-6: 売買分析キャッシュ（期間別、LRU 3件）
-  journal_migrated: "tjm_journal_migrated_v010", // v0.10: LRU→IndexedDB 一度限りの移行フラグ
-  chat_ctx_flags:   "tjm_chat_ctx_flags",   // v0.13: チャット文脈の選択チップ状態
-  skip_log:         "tjm_skip_log",         // v0.17: 見送り記録（非保有銘柄、日付別）
-  news_cache_today: "tjm_news_cache_today", // v0.18 Phase 1: 当日のニュースキャッシュ (code → {text, fetched_at})
-  scenarios_cache_today: "tjm_scenarios_cache_today", // v0.19 Phase 2: 当日の3シナリオキャッシュ
-  attention_cache_today: "tjm_attention_cache_today", // v0.20 Phase 2 A: 当日の注目度キャッシュ (Gemini)
-  tech_revealed_today:   "tjm_tech_revealed_today",   // v0.20 Phase 2 C: テクニカル展開済フラグ (code → true)
-};
-
-// ── Phase 5.3: リスク管理の閾値・定数 ──
-const RISK_CONFIG = {
-  ATR_STOP_MULT: 2.0,         // 損切目安 = 現在値 - ATR × N
-  ATR_TARGET_MULT: 6.0,       // 目標目安 = 現在値 + ATR × N (RR1:3 相当)
-  MAX_HOLDING_DAYS: 10,       // タイムストップ閾値（営業日）
-  EARNINGS_WARN_DAYS: 5,      // 決算日警告（黄チップ）
-  EARNINGS_DANGER_DAYS: 1,    // 決算日危険（赤チップ）
-  MARGIN_RATIO_WARN: 5.0,     // 信用倍率警告
-  PBR_HIGH: 3.0,              // PBR割高ライン
-  PBR_LOW: 1.0,               // PBR割安ライン
-};
-
-// 見送り理由のプリセット（複数選択可）
-const SKIP_REASONS = [
-  "地合い悪化", "信用残多い", "PBR割高", "決算前リスク",
-  "チャート形状不良", "資金枠不足", "出来高薄い", "材料出尽くし",
-];
-
-// v0.5: 指値ウォッチのデフォルト設定
-const WATCH_DEFAULTS = {
-  enabled: true,
-  max_distance_pct: 5,    // 指値±N%以内なら接近とみなす
-  max_price: 6000,        // 6,000円以下のみ表示
-  min_rank: "A",          // "S" | "A"
-  max_items: 10,          // 表示件数上限
-};
-
-// ── 日付 ──
-// v0.16: toISOString() は UTC 基準のため、JST 00:00-08:59 の間は前日扱いになる
-//   "sv-SE" (スウェーデン語) ロケールは YYYY-MM-DD を返すので、timeZone:"Asia/Tokyo"
-//   と組み合わせて JST ベースの日付文字列を取得する
-function ymdJST(date){
-  return (date || new Date()).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-}
-const D_NOW = new Date();
-const TODAY = ymdJST(D_NOW);
-const WD = ["日","月","火","水","木","金","土"][D_NOW.getDay()];
-document.getElementById("hDate").textContent = `${TODAY} (${WD})`;
-
-// ════════════════════════════════════════════════════════════════════
-//  IndexedDB (Dexie 不使用、素の API)
-// ════════════════════════════════════════════════════════════════════
-
-const DB_NAME = "trade-journal-morning";
-const DB_VERSION = 3;  // v0.10: 1→2 (journal_analyses) / v0.14: 2→3 (chat_sessions)
-let _dbPromise = null;
-
-function openDB(){
-  if (_dbPromise) return _dbPromise;
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => resolve(req.result);
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      // daily_sessions (v0.4〜): 朝会・夕会セッション
-      if (!db.objectStoreNames.contains("daily_sessions")) {
-        const store = db.createObjectStore("daily_sessions", {keyPath: "id", autoIncrement: true});
-        store.createIndex("date", "date", {unique: false});
-      }
-      // journal_analyses (v0.10): 売買分析の永続アーカイブ（無制限）
-      if (!db.objectStoreNames.contains("journal_analyses")) {
-        const store = db.createObjectStore("journal_analyses", {keyPath: "id", autoIncrement: true});
-        store.createIndex("generated_at", "generated_at", {unique: false});
-        store.createIndex("period_days", "period_days", {unique: false});
-      }
-      // chat_sessions (v0.14): 対話チャット履歴
-      // schema: {id, started_at, updated_at, title, mode, ctx_flags, messages, gem_history, cld_history}
-      if (!db.objectStoreNames.contains("chat_sessions")) {
-        const store = db.createObjectStore("chat_sessions", {keyPath: "id", autoIncrement: true});
-        store.createIndex("started_at", "started_at", {unique: false});
-        store.createIndex("updated_at", "updated_at", {unique: false});
-      }
-    };
-  });
-  return _dbPromise;
-}
-
-async function dbAdd(storeName, value){
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const req = tx.objectStore(storeName).add(value);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// v0.4: 既存レコードの更新用（autoIncrement keyPath "id" を保持して put）
-async function dbPut(storeName, value){
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const req = tx.objectStore(storeName).put(value);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbAll(storeName){
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly");
-    const req = tx.objectStore(storeName).getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbDeleteAll(storeName){
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const req = tx.objectStore(storeName).clear();
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// v0.10: 単一レコード取得（履歴詳細展開用）
-async function dbGet(storeName, id){
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly");
-    const req = tx.objectStore(storeName).get(id);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// v0.10: 単一レコード削除（履歴削除用）
-async function dbDelete(storeName, id){
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const req = tx.objectStore(storeName).delete(id);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  ユーティリティ
-// ════════════════════════════════════════════════════════════════════
-
-function toast(msg){
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.classList.add("on");
-  clearTimeout(toast._tm);
-  toast._tm = setTimeout(()=>t.classList.remove("on"), 2500);
-}
-
-function fmt(n, decimals=0){
-  if (n == null || isNaN(n)) return "-";
-  return Number(n).toLocaleString("ja-JP", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-function toggleSec(id){ document.getElementById(id).classList.toggle("open"); }
-
-function code4to5(cd){
-  const s = String(cd).trim();
-  if (s.length === 5) return s;
-  if (s.length === 4 && /^[\dA-Za-z]+$/.test(s)) return s + "0";
-  return s;
-}
-
-function escapeHtml(s){
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[c]));
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  PWA: manifest を inline 埋め込み
-// ════════════════════════════════════════════════════════════════════
-
-(function setupPWA(){
-  const manifest = {
-    name: "朝会 - Trade Journal",
-    short_name: "朝会",
-    description: "朝の意思決定支援アプリ",
-    start_url: "morning.html",
-    display: "standalone",
-    orientation: "portrait",
-    background_color: "#0b0f18",
-    theme_color: "#0b0f18",
-    icons: [
-      {src: "icon-192.png", sizes: "192x192", type: "image/png"},
-      {src: "icon-512.png", sizes: "512x512", type: "image/png"},
-    ],
-  };
-  const blob = new Blob([JSON.stringify(manifest)], {type: "application/json"});
-  const url = URL.createObjectURL(blob);
-  document.getElementById("pwaManifest").href = url;
-})();
-
-// ════════════════════════════════════════════════════════════════════
-//  グローバル状態
-// ════════════════════════════════════════════════════════════════════
-
-let HOLDINGS = [];
-let PRICES = {};
-let FUND = {};               // v0.18: Phase 5.3 ファンダ・需給データ(code5 → {pbr, dy, mb, ms, mr, ned})
-let MACRO = null;
-let JUDGMENTS = LS.get(K.judgments, {_date: TODAY});
-// v0.18 Phase 1: 📰 ニュースキャッシュ (code → {text, fetched_at, loading?, error?})
-//   当日中のみ有効。日付が変わったら自動クリア。
-let NEWS_CACHE = LS.get(K.news_cache_today, {_date: TODAY});
-if (NEWS_CACHE._date !== TODAY) NEWS_CACHE = {_date: TODAY};
-// v0.19 Phase 2: 🎯 3シナリオキャッシュ (code → {text, fetched_at, loading?, error?})
-let SCENARIOS_CACHE = LS.get(K.scenarios_cache_today, {_date: TODAY});
-if (SCENARIOS_CACHE._date !== TODAY) SCENARIOS_CACHE = {_date: TODAY};
-// v0.20 Phase 2 A: 📊 注目度キャッシュ (code → {text, fetched_at, loading?, error?})
-let ATTENTION_CACHE = LS.get(K.attention_cache_today, {_date: TODAY});
-if (ATTENTION_CACHE._date !== TODAY) ATTENTION_CACHE = {_date: TODAY};
-// v0.20 Phase 2 C: 📈 テクニカル展開済フラグ (code → true)
-let TECH_REVEALED = LS.get(K.tech_revealed_today, {_date: TODAY});
-if (TECH_REVEALED._date !== TODAY) TECH_REVEALED = {_date: TODAY};
-let PLAN_TEXT = "";
-let SESSION_COMPLETED = false;
-let WATCH_ITEMS = [];        // v0.5: 表示対象の接近銘柄リスト
-let WATCH_RAW = [];          // v0.5: limit_watchlist.json の生データ
-
-// 日跨ぎでリセット
-if (JUDGMENTS._date !== TODAY) {
-  JUDGMENTS = {_date: TODAY};
-  LS.set(K.judgments, JUDGMENTS);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  ① 地合い
-// ════════════════════════════════════════════════════════════════════
-
-const REGIME_INFO = {
-  normal:  {icon:"🟢", name:"NORMAL",  label:"平常運転", advice:"通常通りのエントリー基準で OK", level:"" },
-  caution: {icon:"🟡", name:"CAUTION", label:"警戒",     advice:"新規ポジションは慎重に。スコア基準を1段上げる",  level:"warn" },
-  storm:   {icon:"⛈",  name:"STORM",   label:"乱高下",   advice:"ポジションサイズ50%、最低スコア8以上の銘柄のみ",  level:"warn" },
-  halt:    {icon:"🔴", name:"HALT",    label:"停止",     advice:"新規エントリー禁止。保有のみ管理",                level:"danger" },
-};
-
-async function loadMacro(){
+// 日次レポートを保存（日付をキーにして最大30日分保持）
+function saveReport(baseKey, date, html) {
   try {
-    const macro = await fetchJSON(URLS.macro_state);
-    MACRO = macro;
-    const info = REGIME_INFO[macro.regime] || REGIME_INFO.normal;
+    const data = ld(baseKey, {});
+    data[date] = { html, savedAt: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'}) };
+    // 30日以上古いものを削除
+    const keys = Object.keys(data).sort().reverse();
+    keys.slice(30).forEach(k => delete data[k]);
+    sv(baseKey, data);
+  } catch(e) { console.warn('保存失敗:', e); }
+}
+function loadReport(baseKey, date) {
+  const data = ld(baseKey, {});
+  return data[date] || null;
+}
+function getReportDates(baseKey) {
+  return Object.keys(ld(baseKey, {})).sort().reverse();
+}
+const ld = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const sv = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+let H = ld(KH, []), T = ld(KT, []), cash = ld(KC, 0), W = ld(KW, []);
 
-    const badge = document.getElementById("badgeMacro");
-    badge.className = "sec-badge done";
-    badge.textContent = `${info.icon} ${info.name}`;
+const D = new Date(), TODAY = D.toISOString().slice(0, 10);
+const dow = ['日','月','火','水','木','金','土'][D.getDay()];
+document.getElementById('ds').textContent =
+  D.getFullYear() + '/' + String(D.getMonth()+1).padStart(2,'0') + '/' + String(D.getDate()).padStart(2,'0') + '(' + dow + ')';
+document.getElementById('cashIn').value = cash || '';
 
-    const num = document.getElementById("numMacro");
-    num.classList.remove("active");
-    num.classList.add("done");
-    num.textContent = "✓";
+// タブ
+function go(id) {
+  const ids = ['dash','trade','hold','watch','morning','rev','analyze','chat'];
+  // タブのon切替
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
+  // ページのon切替（inline styleを使わずクラスのみで制御）
+  document.querySelectorAll('.page').forEach(p => {
+    const active = p.id === 'page-' + id;
+    p.classList.toggle('on', active);
+    // inline styleをリセット（過去の設定を消す）
+    p.style.display = '';
+    p.style.pointerEvents = '';
+    p.style.zIndex = '';
+    p.style.visibility = '';
+    p.style.flexDirection = '';
+  });
+  if (id==='dash')  rDash();
+  if (id==='hold')  rHold();
+  if (id==='trade') rTH();
+  if (id==='watch') rWatch();
+  if (id==='analyze') { rAnalyzeQuick(); rAzHistory(); }
+  if (id==='morning') rMrnHistory();
+  if (id==='rev')   { rRevHistory(); updateRevSsStatus(); }
+}
 
-    document.getElementById("previewMacro").innerHTML =
-      `${info.icon} ${info.label} / HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}%`;
+function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
 
-    document.getElementById("bodyMacro").innerHTML = `
-      <div class="regime-card">
-        <div class="regime-icon">${info.icon}</div>
-        <div class="regime-info">
-          <div class="regime-name ${macro.regime}">${info.name}</div>
-          <div class="regime-meta">
-            日経HV ${fmt(macro.hv_20d, 1)}% / MA25乖離 ${fmt(macro.ma25_dev, 1)}% / ${escapeHtml(macro.trend || "-")}
-          </div>
-        </div>
-      </div>
-      <div class="regime-advice ${info.level}">
-        💡 ${escapeHtml(info.advice)}
-      </div>
-      ${macro.reasons && macro.reasons.length ? `
-        <div style="font-size:11px;color:var(--t3);margin-top:8px;line-height:1.5;">
-          ${macro.reasons.map(r => `・${escapeHtml(r)}`).join("<br>")}
-        </div>
-      ` : ""}
-      <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:right;">
-        評価: ${escapeHtml(macro.evaluated_at || "-")}
-      </div>
-    `;
+function calcS() {
+  let cost = 0, val = 0;
+  for (const h of H) { cost += h.bp * h.sh; val += (h.cp || h.bp) * h.sh; }
+  const pnl = val - cost, pct = cost > 0 ? pnl / cost * 100 : 0;
+  const rel = T.filter(t => t.a === 'sell').reduce((s, t) => s + (t.pnl || 0), 0);
+  const f = v => (v >= 0 ? '¥' : '-¥') + Math.abs(Math.round(v)).toLocaleString();
+  const c = v => v >= 0 ? 'up' : 'dn';
+  set('sv', f(val), c(val)); set('sct', H.length + '銘柄', '');
+  set('sp', f(pnl), c(pnl)); set('spp', (pnl>=0?'+':'') + pct.toFixed(2) + '%', c(pnl));
+  set('sr', f(rel), c(rel)); document.getElementById('stc').textContent = T.length + '件';
+}
+function set(id, v, cls) { const e = document.getElementById(id); e.textContent = v; e.className = 'sv' + (cls ? ' ' + cls : ''); }
 
-    setTimeout(() => {
-      document.getElementById("secMacro").classList.remove("open");
-      document.getElementById("secHoldings").classList.add("open");
-      document.getElementById("numHoldings").classList.add("active");
-    }, 400);
+function rDash() {
+  calcS();
+  const he = document.getElementById('dh');
+  he.innerHTML = H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map(h => hHTML(h, true)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>';
+  const te = document.getElementById('dt');
+  const rec = [...T].reverse().slice(0, 3);
+  te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
+}
 
-    return macro;
-  } catch(e) {
-    document.getElementById("bodyMacro").innerHTML =
-      `<div class="error">マクロ状態の取得に失敗: ${escapeHtml(e.message)}<br>
-       <a href="${URLS.macro_state}" target="_blank">直接URL</a> を確認してください。</div>`;
-    document.getElementById("badgeMacro").className = "sec-badge error";
-    document.getElementById("badgeMacro").textContent = "❌";
-    return null;
+function hHTML(h, compact) {
+  const cp = h.cp || h.bp, pnl = (cp - h.bp) * h.sh, pct = (cp - h.bp) / h.bp * 100;
+  const cls = pnl >= 0 ? 'up' : 'dn';
+  const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
+  const isYutai = !!h.is_yutai;
+  let al = '';
+  if (!isYutai) {
+    if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
+    else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
+    else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
   }
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  マクロ遷移アラート
-// ════════════════════════════════════════════════════════════════════
-
-const REGIME_ADVICE_TRANSITION = {
-  "normal->caution": {icon:"⚠️", title:"NORMAL → CAUTION", text:"地合いが警戒モードに移行。新規ポジションは慎重に。", level:"info"},
-  "caution->storm":  {icon:"⛈",  title:"CAUTION → STORM",  text:"乱高下相場入り。利確検討、損切ライン死守。",       level:"warn"},
-  "storm->halt":     {icon:"🚨", title:"STORM → HALT",     text:"全保有見直し、新規エントリー禁止推奨。",           level:"warn"},
-  "caution->normal": {icon:"✅", title:"CAUTION → NORMAL", text:"平常運転に復帰。",                                  level:"info"},
-  "storm->normal":   {icon:"✅", title:"STORM → NORMAL",   text:"乱高下が落ち着き、平常運転に復帰。",               level:"info"},
-  "halt->storm":     {icon:"🌀", title:"HALT → STORM",     text:"段階的にエントリー再開可。慎重に。",               level:"info"},
-  "halt->caution":   {icon:"🔄", title:"HALT → CAUTION",   text:"地合い回復傾向。少額で打診から。",                 level:"info"},
-  "halt->normal":    {icon:"🌅", title:"HALT → NORMAL",    text:"完全に平常運転に復帰。",                           level:"info"},
-  "normal->storm":   {icon:"⛈",  title:"NORMAL → STORM",   text:"急激な悪化。ポジション縮小を強く推奨。",           level:"warn"},
-  "normal->halt":    {icon:"🚨", title:"NORMAL → HALT",    text:"暴落級の急変。新規禁止、損切ライン厳守。",         level:"warn"},
-  "caution->halt":   {icon:"🚨", title:"CAUTION → HALT",   text:"警戒から停止へ悪化。全保有見直し。",               level:"warn"},
-  "storm->caution":  {icon:"📉", title:"STORM → CAUTION",  text:"乱高下から警戒レベルに緩和。",                     level:"info"},
-};
-
-async function loadMacroAlert(){
-  try {
-    const history = await fetchJSON(URLS.macro_history);
-    if (!Array.isArray(history) || history.length === 0) return;
-
-    const lastSeen = LS.get(K.last_seen_macro, "1970-01-01T00:00:00+09:00");
-    const newChanges = history.filter(h =>
-      h.changed_at && h.changed_at > lastSeen && h.from
-    );
-    if (newChanges.length === 0) return;
-
-    const latest = newChanges[newChanges.length - 1];
-    const key = `${latest.from}->${latest.regime}`;
-    const advice = REGIME_ADVICE_TRANSITION[key] || {
-      icon: "🔔", title: `${latest.from?.toUpperCase()} → ${latest.regime?.toUpperCase()}`,
-      text: latest.summary || "マクロレジームが変化しました。",
-      level: "info"
-    };
-
-    const dt = new Date(latest.changed_at);
-    const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-
-    document.getElementById("alertArea").innerHTML = `
-      <div class="macro-alert ${advice.level}">
-        <div class="a-icon">${advice.icon}</div>
-        <div class="a-body">
-          <div class="a-title">${escapeHtml(advice.title)}</div>
-          <div class="a-text">${escapeHtml(advice.text)}</div>
-          <div class="a-text" style="font-size:10px;margin-top:4px;opacity:.7;">変化: ${dtStr}</div>
-          <button class="a-dismiss" onclick="dismissAlert()">理解した</button>
-        </div>
-      </div>
-    `;
-  } catch(e) {
-    console.warn("macro_history fetch failed:", e);
-  }
-}
-
-function dismissAlert(){
-  LS.set(K.last_seen_macro, new Date().toISOString());
-  document.getElementById("alertArea").innerHTML = "";
-  toast("✅ アラートを閉じました");
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  ② 保有銘柄
-// ════════════════════════════════════════════════════════════════════
-
-// ── Phase 5.3: ファンダ・需給・ATR・保有日数のヘルパー群 ──
-
-// JSTの YYYY-MM-DD 文字列を Date(JST 0:00 相当, ローカル) に変換
-function parseYmdJST(ymd){
-  if (!ymd) return null;
-  const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return null;
-  return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
-}
-
-// 営業日カウント（土日のみ除外、祝日は無視）
-//   from と to の差を、土日を除いた日数で返す。to を含む。
-function businessDaysBetween(fromYmd, toYmd){
-  const a = parseYmdJST(fromYmd);
-  const b = parseYmdJST(toYmd);
-  if (!a || !b) return null;
-  if (a > b) return 0;
-  let count = 0;
-  const cur = new Date(a);
-  while (cur <= b){
-    const dow = cur.getDay();
-    if (dow !== 0 && dow !== 6) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
-}
-
-// 保有日数（営業日）。entry_date が無ければ null
-function calcHoldingDays(entryDate){
-  if (!entryDate) return null;
-  return businessDaysBetween(entryDate, TODAY);
-}
-
-// 暦日数（決算日までのカウントダウン用）
-function daysUntil(targetYmd){
-  const t = parseYmdJST(targetYmd);
-  if (!t) return null;
-  const today = parseYmdJST(TODAY);
-  const ms = t - today;
-  return Math.round(ms / (1000 * 60 * 60 * 24));
-}
-
-// ATR ベースの撤退/目標目安
-function calcAtrStop(price, atr){
-  if (!price || !atr) return null;
-  return Math.round(price - atr * RISK_CONFIG.ATR_STOP_MULT);
-}
-function calcAtrTarget(price, atr){
-  if (!price || !atr) return null;
-  return Math.round(price + atr * RISK_CONFIG.ATR_TARGET_MULT);
-}
-
-// 信用倍率を margin_buy/margin_sell から自動計算（数値が直接あればそれを優先）
-function calcMarginRatio(meta){
-  if (!meta) return null;
-  if (meta.margin_ratio != null && !isNaN(meta.margin_ratio)) return Number(meta.margin_ratio);
-  if (meta.margin_buy && meta.margin_sell && meta.margin_sell > 0){
-    return meta.margin_buy / meta.margin_sell;
-  }
-  return null;
-}
-
-// ファンダ・需給チップ HTML を生成（meta = HOLDINGS要素 or WATCH_ITEMS要素）
-//   showMuted=true の場合はデータ無しでも"—"プレースホルダを出す
-function formatFundChips(meta, showMuted=true){
-  const chips = [];
-
-  // PBR
-  if (meta.pbr != null && !isNaN(meta.pbr)){
-    const pbr = Number(meta.pbr);
-    let cls = "";
-    if (pbr >= RISK_CONFIG.PBR_HIGH) cls = "warn";
-    else if (pbr <= RISK_CONFIG.PBR_LOW) cls = "good";
-    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">PBR</span>${fmt(pbr,2)}</span>`);
-  } else if (showMuted){
-    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">PBR</span>—</span>`);
-  }
-
-  // 配当利回り
-  if (meta.dividend_yield != null && !isNaN(meta.dividend_yield)){
-    const dy = Number(meta.dividend_yield);
-    chips.push(`<span class="fund-chip"><span class="fund-chip-lbl">配当</span>${fmt(dy,2)}%</span>`);
-  } else if (showMuted){
-    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">配当</span>—</span>`);
-  }
-
-  // 信用倍率
-  //   v0.19: ETF等の売残ほぼゼロ銘柄で 700倍 など意味のない大きな値が出る対策
-  //   - 20倍超は "N倍超" と整数表記(小数に意味なし)
-  //   - 50倍超は警告色を外す(ETF等で需給悪化のサインとして誤検知するため)
-  const ratio = calcMarginRatio(meta);
-  if (ratio != null){
-    const displayText = ratio >= 20 ? `${Math.floor(ratio)}倍超` : `${fmt(ratio,1)}倍`;
-    const cls = (ratio >= RISK_CONFIG.MARGIN_RATIO_WARN && ratio < 50) ? "warn" : "";
-    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">信用</span>${displayText}</span>`);
-  } else if (showMuted){
-    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">信用</span>—</span>`);
-  }
-
-  // 次回決算日（近接時は警告）
-  if (meta.next_earnings_date){
-    const days = daysUntil(meta.next_earnings_date);
-    let cls = "", suffix = "";
-    if (days != null){
-      if (days < 0) {
-        // 既に過去の決算日（データ更新漏れの可能性、muted扱い）
-        cls = "muted"; suffix = "";
-      } else if (days <= RISK_CONFIG.EARNINGS_DANGER_DAYS){
-        cls = "danger"; suffix = days === 0 ? " (本日!)" : ` (${days}日後!)`;
-      } else if (days <= RISK_CONFIG.EARNINGS_WARN_DAYS){
-        cls = "warn"; suffix = ` (${days}日後)`;
-      } else {
-        suffix = ` (${days}日後)`;
-      }
+  const tp = h.type || 'spot';
+  const yutaiBadge = '<span class="yutai-badge ' + (isYutai?'':'off') + '" onclick="toggleYutai(\'' + h.cd + '\',\'' + tp + '\')" title="タップで優待枠を切替">' + (isYutai?'🎁 優待枠':'🎁 通常枠') + '</span>';
+  let html = '<div class="hrow ' + (isYutai?'yutai':'') + '" id="hrow-' + h.cd + '">' + al +
+    '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
+    '<div><div class="hpnl ' + cls + '">' + (pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString() + '</div>' +
+    '<div class="hpct ' + cls + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</div></div></div>' +
+    '<div class="hmeta">' +
+    '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
+    yutaiBadge +
+    '<span class="hbg">' + h.sh + '株</span>' +
+    '<span class="hbg" onclick="editBuyPrice(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="cursor:pointer;border:1px dashed var(--acc);color:var(--acc)">✏️ 買 ' + h.bp.toLocaleString() + '円</span>' +
+    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',\'' + (h.type||'spot') + '\',this.value)">円</span>' +
+    (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
+    '</div>';
+  if (!compact) {
+    if (isYutai) {
+      const ym = h.yutai_month;
+      const yc = h.yutai_content || "";
+      const hasInfo = !!(ym || yc);
+      html += '<div class="yutai-info ' + (hasInfo?'':'empty') + '">' +
+        (ym ? '<span class="yutai-info-month">' + ym + '月権利</span>' : '') +
+        '<span class="yutai-info-content">' + (yc ? escHtml(yc) : '優待内容を記録') + '</span>' +
+        '<button class="yutai-info-edit" onclick="openYutaiEdit(\'' + h.cd + '\',\'' + tp + '\')">' + (hasInfo?'✏️ 編集':'＋ 入力') + '</button>' +
+        '</div>';
     }
-    // YYYY-MM-DD → M/D 短縮表示
-    const m = String(meta.next_earnings_date).match(/-(\d{2})-(\d{2})/);
-    const shortDate = m ? `${parseInt(m[1])}/${parseInt(m[2])}` : meta.next_earnings_date;
-    chips.push(`<span class="fund-chip ${cls}"><span class="fund-chip-lbl">決算</span>${shortDate}${suffix}</span>`);
-  } else if (showMuted){
-    chips.push(`<span class="fund-chip muted"><span class="fund-chip-lbl">決算</span>—</span>`);
+    html += '<div class="hlines">' +
+      '<div class="hl s"><div class="hll">損切り</div><div class="hlv">' + (h.sl ? h.sl.toLocaleString()+'円' : '－') + '</div></div>' +
+      '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
+      '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
+      (h.memo ? '<div style="font-size:11px;color:var(--t3);margin-top:5px">📝' + h.memo + '</div>' : '') +
+      '<div style="display:flex;gap:6px;margin-top:8px">'+
+      '<button class="delbtn" onclick="delH(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="flex:none">🗑 削除</button>'+
+      '<button onclick="analyzeHolding(\'' + h.cd + '\',\'' + (h.type||'spot') + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 ' + (h.type==='margin'?'📊 信用建玉を分析':'💴 現物を分析') + '</button>'+
+      '</div>'+
+      '<div id="ai-'+h.cd+'-'+(h.type||'spot')+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>';
   }
-
-  if (chips.length === 0) return "";
-  return `<div class="fund-chips">${chips.join("")}</div>`;
+  return html + '</div>';
 }
 
-// タイムストップ警告アイコンの HTML（保有日数が閾値を超えている場合）
-function formatTimeStopIcon(holdingDays){
-  if (holdingDays == null) return "";
-  if (holdingDays < RISK_CONFIG.MAX_HOLDING_DAYS) return "";
-  const overDays = holdingDays - RISK_CONFIG.MAX_HOLDING_DAYS;
-  const cls = overDays >= 5 ? "danger" : "";
-  return `<span class="time-stop-icon ${cls}" title="保有 ${holdingDays}営業日 / タイムストップ閾値 ${RISK_CONFIG.MAX_HOLDING_DAYS}日 超過">⏳ ${holdingDays}日</span>`;
+function tHTML(t) {
+  const ib = t.a === 'buy';
+  const ps = t.pnl != null ? (t.pnl>=0?'+¥':'-¥') + Math.abs(Math.round(t.pnl)).toLocaleString() : '';
+  return '<div class="trow"><div class="tside ' + (ib?'tb':'ts') + '">' + (ib?'買':'売') + '</div>' +
+    '<div class="tinfo"><div class="tnm">' + t.nm + ' <span style="color:var(--t3)">' + t.cd + '</span></div>' +
+    '<div class="tmeta">' + t.p.toLocaleString() + '円×' + t.sh + '株　' + t.dt + '</div></div>' +
+    '<div class="tpnl ' + (t.pnl==null?'':(t.pnl>=0?'up':'dn')) + '">' + ps + '</div></div>';
 }
 
-// ATR ベースの撤退ライン目安 HTML
-function formatAtrHint(price, atr, kind){
-  // kind: "stop" | "target"
-  if (!price || !atr) return `<span class="atr-hint"><span class="atr-lbl">目安:</span> —</span>`;
-  const val = kind === "stop" ? calcAtrStop(price, atr) : calcAtrTarget(price, atr);
-  const mult = kind === "stop" ? RISK_CONFIG.ATR_STOP_MULT : RISK_CONFIG.ATR_TARGET_MULT;
-  return `<span class="atr-hint has-data"><span class="atr-lbl">目安:</span> ¥${fmt(val,0)} <span class="atr-lbl">(ATR×${mult})</span></span>`;
-}
-
-async function loadHoldings(){
-  let v1Data = [];
-  try {
-    const raw = LS.raw("tj_h5");
-    if (raw) v1Data = JSON.parse(raw) || [];
-  } catch(e) {
-    console.warn("v1 holdings parse error:", e);
-  }
-
-  // v0.18: Phase 5.3 ファンダ・需給データを先に fetch（HOLDINGS 構築時にマージするため）
-  try {
-    FUND = await fetchJSON(URLS.fundamentals) || {};
-  } catch(e) {
-    console.warn("fundamentals fetch failed (未デプロイなら正常):", e);
-    FUND = {};
-  }
-
-  const manualData = LS.get(K.manual_holdings, []);
-  const seen = new Set();
-  HOLDINGS = [];
-  for (const h of v1Data) {
-    if (!h || !h.cd) continue;
-    if (seen.has(h.cd)) continue;
-    seen.add(h.cd);
-    // v0.18: fundamentals.json から code5 で lookup（h.* > fundamentals の優先順位）
-    const f = FUND[code4to5(h.cd)] || {};
-    HOLDINGS.push({
-      code: h.cd, name: h.nm || h.name || `(${h.cd})`,
-      buy_price: h.bp, shares: h.sh, stop_loss: h.sl, target: h.tgt,
-      type: h.type || "spot", source: "v1",
-      is_yutai: !!h.is_yutai,  // v0.18 Phase 1: 優待枠フラグ（朝会の分析対象から除外）
-      yutai_month:        h.yutai_month   || null,  // v0.19: 権利確定月 (1-12)
-      yutai_content:      h.yutai_content || null,  // v0.19: 優待内容 (自由記述)
-      // Phase 5.3: v1 が将来出力する想定の拡張フィールド（無くても OK）
-      entry_date:         h.ed  || h.entry_date         || null,
-      atr:                h.atr || f.atr               || null,
-      margin_buy:         h.mb  || h.margin_buy         || f.mb  || null,
-      margin_sell:        h.ms  || h.margin_sell        || f.ms  || null,
-      margin_ratio:       h.mr  || h.margin_ratio       || f.mr  || null,
-      pbr:                h.pbr || f.pbr               || null,
-      dividend_yield:    (h.dy  != null ? h.dy  : (h.dividend_yield     != null ? h.dividend_yield     : (f.dy  != null ? f.dy  : null))),
-      next_earnings_date: h.ned || h.next_earnings_date || f.ned || null,
-    });
-  }
-  for (const h of manualData) {
-    if (!h || !h.code) continue;
-    if (seen.has(h.code)) continue;
-    seen.add(h.code);
-    // manual_holdings は元から spread で全フィールド保存される
-    // v0.18: 足りないファンダ値を fundamentals.json から補完
-    const f = FUND[code4to5(h.code)] || {};
-    HOLDINGS.push({
-      ...h, source: "manual",
-      is_yutai: !!h.is_yutai,  // v0.18 Phase 1: 優待枠フラグ
-      yutai_month:        h.yutai_month   || null,
-      yutai_content:      h.yutai_content || null,
-      pbr:                h.pbr                != null ? h.pbr                : (f.pbr != null ? f.pbr : null),
-      dividend_yield:     h.dividend_yield     != null ? h.dividend_yield     : (f.dy  != null ? f.dy  : null),
-      margin_buy:         h.margin_buy         != null ? h.margin_buy         : (f.mb  != null ? f.mb  : null),
-      margin_sell:        h.margin_sell        != null ? h.margin_sell        : (f.ms  != null ? f.ms  : null),
-      margin_ratio:       h.margin_ratio       != null ? h.margin_ratio       : (f.mr  != null ? f.mr  : null),
-      next_earnings_date: h.next_earnings_date || f.ned || null,
-    });
-  }
-
-  try {
-    PRICES = await fetchJSON(URLS.latest_prices);
-  } catch(e) {
-    console.warn("prices fetch failed:", e);
-    PRICES = {};
-  }
-
-  renderHoldings();
-}
-
-function getPrice(code){
-  const c5 = code4to5(code);
-  return PRICES[c5] || PRICES[code] || null;
-}
-
-function renderHoldings(){
-  const body = document.getElementById("bodyHoldings");
-  // v0.18 Phase 1: 優待枠は判定対象外として総数からも除外
-  const target = HOLDINGS.filter(h => !h.is_yutai);
-  const yutai  = HOLDINGS.filter(h =>  h.is_yutai);
-  const total = target.length;
-  const judged = target.filter(h => JUDGMENTS[h.code]).length;
-  const allFromV1 = HOLDINGS.length > 0 && HOLDINGS.every(h => h.source === "v1");
-
-  const badge = document.getElementById("badgeHoldings");
-  if (total === 0) {
-    badge.className = "sec-badge"; badge.textContent = HOLDINGS.length === 0 ? "0件" : `🎁${yutai.length}`;
-  } else if (judged === total) {
-    badge.className = "sec-badge done";
-    badge.textContent = `✓ ${judged}/${total}`;
-    document.getElementById("numHoldings").classList.remove("active");
-    document.getElementById("numHoldings").classList.add("done");
-    document.getElementById("numHoldings").textContent = "✓";
-  } else {
-    badge.className = "sec-badge active";
-    badge.textContent = `${judged}/${total}`;
-    document.getElementById("numHoldings").classList.add("active");
-    document.getElementById("numHoldings").classList.remove("done");
-    document.getElementById("numHoldings").textContent = "2";
-  }
-
-  const yutaiNote = yutai.length > 0 ? ` / 🎁${yutai.length}銘柄は優待枠` : "";
-  document.getElementById("previewHoldings").textContent =
-    HOLDINGS.length === 0 ? "保有銘柄なし" : `${total}銘柄 / 判定済 ${judged}${yutaiNote}`;
-
-  let html = "";
-
-  if (HOLDINGS.length > 0) {
-    html += `
-      <div class="h-source-note">
-        ${allFromV1 ? "📦 v1 の保有データから自動取得" :
-          HOLDINGS.some(h => h.source === "v1") ? "📦 v1 + 手動入力" : "✏️ 手動入力"}
-        <button onclick="syncFromV1()" style="margin-left:auto;">🔄 再読込</button>
-      </div>
-    `;
-    // v0.18 Phase 1: 📰 全保有銘柄のニュースを一括取得ボタン
-    const targets = HOLDINGS.filter(h => !h.is_yutai);
-    const cachedCount = targets.filter(h => NEWS_CACHE[h.code]?.text).length;
-    if (targets.length > 0) {
-      html += `
-        <button class="news-bulk-btn" onclick="fetchAllHoldingsNews()" id="newsBulkBtn">
-          📰 保有銘柄${targets.length}件のニュースを一括取得
-          ${cachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${cachedCount}/${targets.length}）</span>` : ''}
-        </button>
-      `;
-      // v0.20 Phase 2 A: 📊 全銘柄の注目度を一括取得ボタン
-      const attCachedCount = targets.filter(h => ATTENTION_CACHE[h.code]?.text).length;
-      html += `
-        <button class="attention-bulk-btn" onclick="fetchAllAttention()" id="attentionBulkBtn">
-          📊 保有銘柄${targets.length}件の市場注目度を一括取得
-          ${attCachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${attCachedCount}/${targets.length}）</span>` : ''}
-        </button>
-      `;
-      // v0.19 Phase 2: 🎯 全銘柄の3シナリオを一括取得ボタン
-      const scnCachedCount = targets.filter(h => SCENARIOS_CACHE[h.code]?.text).length;
-      html += `
-        <button class="scenario-bulk-btn" onclick="fetchAllScenarios()" id="scenarioBulkBtn">
-          🎯 保有銘柄${targets.length}件の3シナリオ判断材料を一括取得
-          ${scnCachedCount > 0 ? `<span class="news-bulk-cached">（取得済 ${scnCachedCount}/${targets.length}）</span>` : ''}
-        </button>
-      `;
-    }
-  }
-
-  if (HOLDINGS.length === 0) {
-    html += `
-      <div class="empty">
-        <div class="ei">💼</div>
-        保有銘柄が見つかりません<br>
-        <span style="font-size:11px;color:var(--t3);">v1 で登録するか、下から手動入力してください</span>
-      </div>
-    `;
-  } else {
-    // 優待枠は朝会の分析対象から除外し、別セクションで淡色表示
-    const normal = HOLDINGS.filter(h => !h.is_yutai);
-    const yutai  = HOLDINGS.filter(h =>  h.is_yutai);
-    html += normal.map(renderHoldingCard).join("");
-    if (yutai.length > 0) {
-      html += `
-        <div class="yutai-section-hdr">🎁 優待保有銘柄（${yutai.length}銘柄・分析対象外）</div>
-      `;
-      html += yutai.map(renderYutaiHoldingCard).join("");
-    }
-  }
-
-  html += `
-    <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px;">
-      <div style="font-size:11px;color:var(--t3);margin-bottom:6px;">＋ 朝会だけ追加（v1 には反映されません）</div>
-      <div class="h-add-row">
-        <input id="addCode"   type="text" placeholder="6196" maxlength="5">
-        <input id="addName"   type="text" placeholder="銘柄名">
-        <input id="addStop"   type="number" placeholder="損切">
-        <button class="add-btn" onclick="addManualHolding()">＋</button>
-      </div>
-      <button class="skip-log-link" onclick="skipNewStockFromForm()" title="保有しないが検討した銘柄の見送りを記録">
-        ⏭️ 検討スルーを記録
-      </button>
-    </div>
-  `;
-
-  body.innerHTML = html;
-}
-
-function renderHoldingCard(h){
-  const code5 = code4to5(h.code);
-  const price = getPrice(h.code);
-  const judged = JUDGMENTS[h.code];
-
-  const curHtml = price ?
-    `<div class="h-cur">${fmt(price.close, 1)}</div>
-     <div class="h-chg ${price.change_pct >= 0 ? 'up' : 'dn'}">
-       ${price.change_pct >= 0 ? '+' : ''}${fmt(price.change_pct, 2)}%
-     </div>` :
-    `<div class="h-cur muted">-</div><div class="h-chg muted">価格不明</div>`;
-
-  let pnlHtml = `<div class="h-meta-val muted">-</div>`;
-  if (price && h.buy_price) {
-    const pnlPct = (price.close / h.buy_price - 1) * 100;
-    pnlHtml = `<div class="h-meta-val ${pnlPct >= 0 ? 'up' : 'dn'}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 1)}%</div>`;
-  }
-
-  let slPctHtml = "-", tgtPctHtml = "-";
-  if (h.stop_loss) {
-    if (price) {
-      const slDist = (price.close / h.stop_loss - 1) * 100;
-      slPctHtml = `${fmt(h.stop_loss, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(slDist,1)}%</span>`;
-    } else slPctHtml = `${fmt(h.stop_loss, 0)}`;
-  }
-  if (h.target) {
-    if (price) {
-      const tgtDist = (h.target / price.close - 1) * 100;
-      tgtPctHtml = `${fmt(h.target, 0)}<br><span style="color:var(--t3);font-size:9px;">+${fmt(tgtDist,1)}%</span>`;
-    } else tgtPctHtml = `${fmt(h.target, 0)}`;
-  }
-
-  // Phase 5.3: ATR ベースの撤退ライン目安 + 保有日数 + ファンダ需給チップ
-  const curPrice = price ? price.close : null;
-  const atrStopHint   = formatAtrHint(curPrice, h.atr, "stop");
-  const atrTargetHint = formatAtrHint(curPrice, h.atr, "target");
-  const holdingDays   = calcHoldingDays(h.entry_date);
-  const timeStopIcon  = formatTimeStopIcon(holdingDays);
-  const fundChips     = formatFundChips(h, true);
-  const holdingDaysStr = holdingDays != null ? `${holdingDays}日保有` : "";
-
-  let judgeHtml;
-  if (judged) {
-    const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討", skip:"見送り"};
-    const icons  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰", skip:"⏭️"};
-    const lbl = labels[judged.judgment] || judged.judgment;
-    const ic  = icons[judged.judgment]  || "•";
-    // 見送りの場合は理由も小さく表示
-    const reasonsTxt = judged.judgment === "skip" && Array.isArray(judged.reasons) && judged.reasons.length
-      ? `<div style="font-size:10px;color:var(--t3);margin-top:3px;">理由: ${judged.reasons.map(escapeHtml).join("・")}</div>`
-      : "";
-    judgeHtml = `
-      <div class="h-judged-banner" onclick="resetJudgment('${escapeHtml(h.code)}')">
-        <div>
-          ${ic} 判定: <b>${lbl}</b>
-          <span class="change-link">変更</span>
-          ${reasonsTxt}
-        </div>
-      </div>
-    `;
-  } else {
-    judgeHtml = `
-      <div class="h-judge-btns with-skip">
-        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','hold')">
-          <span class="ji">✋</span>継続保有
-        </button>
-        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','consider_cut')">
-          <span class="ji">⛔</span>損切検討
-        </button>
-        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','consider_sell')">
-          <span class="ji">💰</span>利確検討
-        </button>
-        <button class="j-btn" onclick="setJudgment('${escapeHtml(h.code)}','skip')">
-          <span class="ji">⏭️</span>見送り
-        </button>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="h-card ${judged ? 'judged' : ''}" id="card-${escapeHtml(h.code)}">
-      <div class="h-card-top">
-        <div class="h-code-name">
-          <div class="h-code">${code5} ${h.type === 'margin' ? '<span style="color:var(--yellow)">[信用]</span>' : ''}${holdingDaysStr ? `<span style="color:var(--t3);margin-left:6px;font-size:10px;">${holdingDaysStr}</span>` : ""}${timeStopIcon}</div>
-          <div class="h-name">${escapeHtml(h.name)}</div>
-        </div>
-        <div class="h-price">${curHtml}</div>
-      </div>
-      <div class="h-meta">
-        <div class="h-meta-item">
-          <div class="h-meta-lbl">買付/含損益</div>
-          <div class="h-meta-val">${h.buy_price ? '¥'+fmt(h.buy_price,0) : '-'}</div>
-          ${pnlHtml}
-        </div>
-        <div class="h-meta-item">
-          <div class="h-meta-lbl">損切ライン</div>
-          <div class="h-meta-val">${slPctHtml}</div>
-          ${atrStopHint}
-        </div>
-        <div class="h-meta-item">
-          <div class="h-meta-lbl">目標</div>
-          <div class="h-meta-val">${tgtPctHtml}</div>
-          ${atrTargetHint}
-        </div>
-      </div>
-      ${fundChips}
-      ${renderTechnicalSection(h.code, h.name)}
-      ${renderAttentionSection(h.code, h.name)}
-      ${renderNewsSection(h.code, h.name)}
-      ${renderScenarioSection(h.code, h.name)}
-      ${judgeHtml}
-    </div>
-  `;
-}
-
-// ─── Phase 1 (v0.18): 📰 ニュース・材料セクション ───
-//   各保有銘柄カードに表示。初回はボタンのみ、押下で Gemini に投げる。
-//   セッション IndexedDB にキャッシュし、当日中の再展開時はキャッシュを使う。
-function renderNewsSection(code, name){
-  const cached = NEWS_CACHE[code];
-  if (cached && cached.text) {
-    return `
-      <div class="news-section">
-        <div class="news-hdr">
-          📰 <b>ニュース・材料</b>
-          <span class="news-meta">${formatJpDateTime(cached.fetched_at)}</span>
-          <button class="news-refresh-btn" onclick="fetchNewsForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)" title="再取得">🔄</button>
-        </div>
-        <div class="news-body" id="news-body-${escapeHtml(code)}">${formatNewsBody(cached.text)}</div>
-      </div>`;
-  }
-  if (cached && cached.error) {
-    return `
-      <div class="news-section">
-        <div class="news-hdr">📰 <b>ニュース・材料</b></div>
-        <div class="news-error" id="news-body-${escapeHtml(code)}">⚠️ ${escapeHtml(cached.error)}
-          <button class="news-fetch-btn" onclick="fetchNewsForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)">🔄 再試行</button>
-        </div>
-      </div>`;
-  }
-  if (cached && cached.loading) {
-    return `
-      <div class="news-section">
-        <div class="news-hdr">📰 <b>ニュース・材料</b></div>
-        <div class="news-loading" id="news-body-${escapeHtml(code)}">
-          <span class="loading"></span> Gemini が直近72時間のニュースを Google検索中...
-        </div>
-      </div>`;
-  }
-  return `
-    <div class="news-section">
-      <div class="news-hdr">📰 <b>ニュース・材料</b></div>
-      <button class="news-fetch-btn" onclick="fetchNewsForHolding('${escapeHtml(code)}','${escapeHtml(name)}',false)">
-        🔍 直近72時間のニュース・材料を取得
-      </button>
-    </div>`;
-}
-
-function formatNewsBody(text){
-  // 改行を <br> に、見出しっぽい行は強調 (簡易マークダウン風)
-  return escapeHtml(text)
-    .replace(/\n/g, "<br>")
-    .replace(/\*\*([^\*]+)\*\*/g, "<b>$1</b>");
-}
-
-// ─── Phase 2 (v0.19): 🎯 3シナリオ判断材料セクション ───
-//   各保有銘柄カードに表示。Claude に「結論を出さず3つの視点を並列提示」させる。
-//   セッション IndexedDB にキャッシュし、当日中の再展開時はキャッシュを使う。
-function renderScenarioSection(code, name){
-  const cached = SCENARIOS_CACHE[code];
-  if (cached && cached.text) {
-    return `
-      <div class="scenario-section">
-        <div class="scenario-hdr">
-          🎯 <b>3シナリオ判断材料</b>
-          <span class="news-meta">${formatJpDateTime(cached.fetched_at)}</span>
-          <button class="news-refresh-btn" onclick="fetchScenarioForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)" title="再取得">🔄</button>
-        </div>
-        <div class="scenario-body" id="scn-body-${escapeHtml(code)}">${formatScenarioBody(cached.text)}</div>
-      </div>`;
-  }
-  if (cached && cached.error) {
-    return `
-      <div class="scenario-section">
-        <div class="scenario-hdr">🎯 <b>3シナリオ判断材料</b></div>
-        <div class="news-error" id="scn-body-${escapeHtml(code)}">⚠️ ${escapeHtml(cached.error)}
-          <button class="news-fetch-btn" onclick="fetchScenarioForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)">🔄 再試行</button>
-        </div>
-      </div>`;
-  }
-  if (cached && cached.loading) {
-    return `
-      <div class="scenario-section">
-        <div class="scenario-hdr">🎯 <b>3シナリオ判断材料</b></div>
-        <div class="news-loading" id="scn-body-${escapeHtml(code)}">
-          <span class="loading"></span> Claude が3つの視点を整理中...
-        </div>
-      </div>`;
-  }
-  return `
-    <div class="scenario-section">
-      <div class="scenario-hdr">🎯 <b>3シナリオ判断材料</b></div>
-      <button class="scenario-fetch-btn" onclick="fetchScenarioForHolding('${escapeHtml(code)}','${escapeHtml(name)}',false)">
-        🧠 ホールド/利確/損切 の判断材料を取得
-      </button>
-    </div>`;
-}
-
-function formatScenarioBody(text){
-  // 簡易マークダウン: ### 見出し、- 箇条書き、**太字**
-  let html = escapeHtml(text);
-  // 🟢 / 🔵 / 🔴 + 見出し行を装飾
-  html = html.replace(/^###\s*🟢\s*([^\n]+)$/gm,
-    '<div class="scn-h scn-hold"><span>🟢</span><b>$1</b></div>');
-  html = html.replace(/^###\s*🔵\s*([^\n]+)$/gm,
-    '<div class="scn-h scn-take"><span>🔵</span><b>$1</b></div>');
-  html = html.replace(/^###\s*🔴\s*([^\n]+)$/gm,
-    '<div class="scn-h scn-cut"><span>🔴</span><b>$1</b></div>');
-  // 念のため絵文字なし版もカバー
-  html = html.replace(/^###\s*ホールド([^\n]*)$/gm,
-    '<div class="scn-h scn-hold"><span>🟢</span><b>ホールド$1</b></div>');
-  html = html.replace(/^###\s*利確([^\n]*)$/gm,
-    '<div class="scn-h scn-take"><span>🔵</span><b>利確$1</b></div>');
-  html = html.replace(/^###\s*損切([^\n]*)$/gm,
-    '<div class="scn-h scn-cut"><span>🔴</span><b>損切$1</b></div>');
-  // 箇条書き
-  html = html.replace(/^-\s+(.+)$/gm, '<div class="scn-li">• $1</div>');
-  // 太字
-  html = html.replace(/\*\*([^\*]+)\*\*/g, "<b>$1</b>");
-  // 残った改行
-  html = html.replace(/\n/g, "<br>");
-  return html;
-}
-
-// ─── Phase 2 (v0.20): 📈 テクニカル指標セクション ───
-//   fundamentals.json に既に入っている ma25 / rsi14 / high_20d / low_20d / atr / cp から
-//   その場で計算してレンダリング（API 呼び出しなし、ボタン押下で展開）。
-//   損切り3案: ① ATR×0.5 ② 直近20日安値 ③ 25MA を提示し、ユーザーが選ぶ。
-const TECH_ATR_STOP_MULT = 0.5;  // config.py の ATR_STOP_MULT=0.5 と整合（短期回転戦略）
-
-function renderTechnicalSection(code, name){
-  const revealed = !!TECH_REVEALED[code];
-  if (revealed) return formatTechBody(code, name);
-  return `
-    <div class="tech-section">
-      <div class="tech-hdr">📈 <b>テクニカル指標</b></div>
-      <button class="tech-fetch-btn" onclick="revealTech('${escapeHtml(code)}','${escapeHtml(name)}')">
-        📈 25MA / RSI / 損切り3案 を表示
-      </button>
-    </div>`;
-}
-
-function revealTech(code, name){
-  TECH_REVEALED[code] = true;
-  try { LS.set(K.tech_revealed_today, {...TECH_REVEALED, _date: TODAY}); } catch(_) {}
-  const card = document.getElementById(`card-${code}`);
-  if (!card) return;
-  const sec = card.querySelector(".tech-section");
-  if (sec) sec.outerHTML = renderTechnicalSection(code, name);
-}
-
-// テクニカル本体: fundamentals.json + latest_prices.json から数値計算
-function formatTechBody(code, name){
-  const f = FUND[code4to5(code)] || {};
-  const price = getPrice(code);
-  const cp = price?.close ?? f.cp ?? null;  // 当日終値優先、無ければ collector 取得時の cp
-
-  const ma25      = f.ma25      != null ? Number(f.ma25)      : null;
-  const rsi14     = f.rsi14     != null ? Number(f.rsi14)     : null;
-  const hi20      = f.high_20d  != null ? Number(f.high_20d)  : null;
-  const lo20      = f.low_20d   != null ? Number(f.low_20d)   : null;
-  const atr       = f.atr       != null ? Number(f.atr)       : null;
-  const volAvg20  = f.vol_avg20 != null ? Number(f.vol_avg20) : null;
-
-  // データ全滅時のフォールバック
-  if (cp == null && ma25 == null && rsi14 == null && hi20 == null && lo20 == null) {
-    // v0.18+: HOLDINGS から type を引いて信用銘柄ならその旨を明示（仕様であることを伝える）
-    const h = HOLDINGS.find(x => x.code === code);
-    const hint = h?.type === "margin"
-      ? "信用銘柄は fundamentals.json の収録対象外です"
-      : "中小型株・新規上場・低流動性銘柄などは収録対象外の可能性があります";
-    return `
-      <div class="tech-section">
-        <div class="tech-hdr">📈 <b>テクニカル指標</b></div>
-        <div class="news-error" style="background:rgba(148,163,184,0.08);color:var(--t2);">
-          ℹ️ <b>テクニカル指標は未収録</b>
-          <div style="font-size:10.5px;color:var(--t3);margin-top:4px;">${hint}（ニュース・市場注目度・3シナリオ判断材料は通常通り取得できます）</div>
-        </div>
-      </div>`;
-  }
-
-  // セル群
-  const cells = [];
-
-  // 25MA 乖離
-  if (cp != null && ma25 != null) {
-    const dev = (cp - ma25) / ma25 * 100;
-    const cls = Math.abs(dev) < 1 ? "" : (dev >= 0 ? "up" : "dn");
-    cells.push(`
-      <div class="tech-cell ${cls}">
-        <div class="tech-cell-lbl">25MA乖離</div>
-        <div class="tech-cell-val">${dev >= 0 ? '+' : ''}${fmt(dev,2)}%</div>
-        <div class="tech-cell-sub">25MA ¥${fmt(ma25,0)}</div>
-      </div>`);
-  } else {
-    cells.push(`<div class="tech-cell"><div class="tech-cell-lbl">25MA乖離</div><div class="tech-cell-val muted">—</div></div>`);
-  }
-
-  // RSI14（過熱感アイコン）
-  if (rsi14 != null) {
-    let icon = "", cls = "";
-    if (rsi14 >= 70)      { icon = "🔥 "; cls = "warn"; }
-    else if (rsi14 <= 30) { icon = "🧊 "; cls = "warn"; }
-    cells.push(`
-      <div class="tech-cell ${cls}">
-        <div class="tech-cell-lbl">RSI(14)</div>
-        <div class="tech-cell-val">${icon}${fmt(rsi14,1)}</div>
-        <div class="tech-cell-sub">${rsi14 >= 70 ? "過熱" : rsi14 <= 30 ? "売られ過ぎ" : "中立"}</div>
-      </div>`);
-  } else {
-    cells.push(`<div class="tech-cell"><div class="tech-cell-lbl">RSI(14)</div><div class="tech-cell-val muted">—</div></div>`);
-  }
-
-  // 20日レンジ位置
-  if (cp != null && hi20 != null && lo20 != null && hi20 > lo20) {
-    const pos = (cp - lo20) / (hi20 - lo20) * 100;
-    const cls = pos >= 80 ? "warn" : pos <= 20 ? "warn" : "";
-    cells.push(`
-      <div class="tech-cell ${cls}">
-        <div class="tech-cell-lbl">20日レンジ位置</div>
-        <div class="tech-cell-val">${fmt(pos,0)}%</div>
-        <div class="tech-cell-sub">¥${fmt(lo20,0)} 〜 ¥${fmt(hi20,0)}</div>
-      </div>`);
-  } else {
-    cells.push(`<div class="tech-cell"><div class="tech-cell-lbl">20日レンジ位置</div><div class="tech-cell-val muted">—</div></div>`);
-  }
-
-  // 損切り3案
-  const stopRows = [];
-  if (cp != null && atr != null) {
-    const v = Math.round(cp - atr * TECH_ATR_STOP_MULT);
-    const pct = (v / cp - 1) * 100;
-    stopRows.push(`<div class="tech-stops-row">
-      <span class="lbl">① ATR基準</span>
-      <span class="val">¥${fmt(v,0)}</span>
-      <span class="pct">cp - ATR×${TECH_ATR_STOP_MULT} (${fmt(pct,1)}%)</span>
-    </div>`);
-  }
-  if (cp != null && lo20 != null) {
-    const pct = (lo20 / cp - 1) * 100;
-    stopRows.push(`<div class="tech-stops-row">
-      <span class="lbl">② 直近安値</span>
-      <span class="val">¥${fmt(lo20,0)}</span>
-      <span class="pct">20日安値 (${fmt(pct,1)}%)</span>
-    </div>`);
-  }
-  if (cp != null && ma25 != null) {
-    const pct = (ma25 / cp - 1) * 100;
-    stopRows.push(`<div class="tech-stops-row">
-      <span class="lbl">③ 25MA</span>
-      <span class="val">¥${fmt(ma25,0)}</span>
-      <span class="pct">25日MA (${fmt(pct,1)}%)</span>
-    </div>`);
-  }
-  const stopsHtml = stopRows.length ? `
-    <div class="tech-stops">
-      <div class="tech-stops-hdr">🛡 損切り3案（cp ¥${fmt(cp,0)} 基準）</div>
-      ${stopRows.join("")}
-    </div>` : "";
-
-  // 出来高平均（参考表示）
-  const volMeta = volAvg20 != null
-    ? `20日平均出来高: ${fmt(volAvg20,0)} 株`
-    : "";
-
-  return `
-    <div class="tech-section">
-      <div class="tech-hdr">
-        📈 <b>テクニカル指標</b>
-        <span class="news-meta">fundamentals.json</span>
-      </div>
-      <div class="tech-body">
-        <div class="tech-grid">${cells.join("")}</div>
-        ${stopsHtml}
-        ${volMeta ? `<div class="tech-meta">${volMeta}</div>` : ""}
-      </div>
-    </div>`;
-}
-
-// ─── Phase 2 (v0.20): 📊 注目度セクション (Gemini Google検索) ───
-function renderAttentionSection(code, name){
-  const cached = ATTENTION_CACHE[code];
-  if (cached && cached.text) {
-    return `
-      <div class="attention-section">
-        <div class="attention-hdr">
-          📊 <b>市場注目度</b>
-          <span class="news-meta">${formatJpDateTime(cached.fetched_at)}</span>
-          <button class="news-refresh-btn" onclick="fetchAttentionForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)" title="再取得">🔄</button>
-        </div>
-        <div class="attention-body" id="att-body-${escapeHtml(code)}">${formatNewsBody(cached.text)}</div>
-      </div>`;
-  }
-  if (cached && cached.error) {
-    return `
-      <div class="attention-section">
-        <div class="attention-hdr">📊 <b>市場注目度</b></div>
-        <div class="news-error" id="att-body-${escapeHtml(code)}">⚠️ ${escapeHtml(cached.error)}
-          <button class="attention-fetch-btn" onclick="fetchAttentionForHolding('${escapeHtml(code)}','${escapeHtml(name)}',true)">🔄 再試行</button>
-        </div>
-      </div>`;
-  }
-  if (cached && cached.loading) {
-    return `
-      <div class="attention-section">
-        <div class="attention-hdr">📊 <b>市場注目度</b></div>
-        <div class="news-loading" id="att-body-${escapeHtml(code)}">
-          <span class="loading"></span> Gemini が直近1週間の注目度を Google検索中...
-        </div>
-      </div>`;
-  }
-  return `
-    <div class="attention-section">
-      <div class="attention-hdr">📊 <b>市場注目度</b></div>
-      <button class="attention-fetch-btn" onclick="fetchAttentionForHolding('${escapeHtml(code)}','${escapeHtml(name)}',false)">
-        🔍 出来高/SNS/ニュース頻度から注目度を評価
-      </button>
-    </div>`;
-}
-
-async function fetchAttentionForHolding(code, name, force){
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  if (!geminiKey) {
-    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  if (!force && ATTENTION_CACHE[code] && ATTENTION_CACHE[code].text) return;
-
-  ATTENTION_CACHE[code] = {loading: true};
-  const _refreshOne = () => {
-    const card = document.getElementById(`card-${code}`);
-    if (!card) return;
-    const sec = card.querySelector(".attention-section");
-    if (sec) sec.outerHTML = renderAttentionSection(code, name);
-  };
-  _refreshOne();
-
-  const prompt = buildAttentionPrompt(code, name);
-  try {
-    // v0.20: Gemini 2.5 Flash + Google検索ではthinking tokensを大量消費するため、
-    //   maxTokens=600 では本文がほぼ書き出される前に上限に達して切れていた。
-    //   ニュース取得と同等の余裕（3000）に拡大。
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 3000});
-    ATTENTION_CACHE[code] = {
-      text: (text || "").trim(),
-      fetched_at: new Date().toISOString(),
-    };
-  } catch(e) {
-    console.warn("[attention] fetch failed:", code, e);
-    ATTENTION_CACHE[code] = {
-      error: e.message || String(e),
-      fetched_at: new Date().toISOString(),
-    };
-  }
-  try { LS.set(K.attention_cache_today, {...ATTENTION_CACHE, _date: TODAY}); } catch(_) {}
-  _refreshOne();
-}
-
-async function fetchAllAttention(){
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  if (!geminiKey) {
-    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  const targets = HOLDINGS.filter(h => !h.is_yutai);
-  if (targets.length === 0) {
-    toast("対象銘柄なし"); return;
-  }
-  const todo = targets.filter(h => !(ATTENTION_CACHE[h.code]?.text));
-  if (todo.length === 0) {
-    toast("✅ 全銘柄取得済み（個別の🔄で再取得可）"); return;
-  }
-  const btn = document.getElementById("attentionBulkBtn");
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<span class="loading"></span> ${todo.length}件の注目度評価中...`;
-  }
-  toast(`📊 ${todo.length}件の注目度を並列取得開始`);
-  const results = await Promise.allSettled(
-    todo.map(h => fetchAttentionForHolding(h.code, h.name, false))
-  );
-  const ok = results.filter(r => r.status === "fulfilled").length;
-  toast(`📊 注目度取得完了: ${ok}/${todo.length} 件`);
-  if (btn) { btn.disabled = false; }
-  renderHoldings();
-}
-
-// 注目度プロンプト: 出来高/SNS/ニュース頻度の3観点を簡潔に
-function buildAttentionPrompt(code, name){
-  const f = FUND[code4to5(code)] || {};
-  const volAvg20 = f.vol_avg20 != null ? `（20日平均出来高: ${fmt(Number(f.vol_avg20),0)} 株）` : "";
-  return `日本株「${name}（${code}）」の**直近1週間の市場注目度**を Google検索で簡潔に評価してください${volAvg20}。
-
-## 出力フォーマット（必ず守る）
-
-**🔥 注目度: [低 / 中 / 高 / 急騰中]**
-
-- **出来高動向**: (1〜2行: 平均比増減・特徴的な日)
-- **SNS言及**: (1〜2行: X/掲示板での話題化、急騰の煽り、空売り議論等)
-- **ニュース頻度**: (1〜2行: 直近1週間の報道本数の体感、テーマ性)
-
-## 執筆ルール
-- 全体で 250字以内
-- Google検索で裏取りできた事実のみ。推測は避ける
-- 注目度ランクは 4段階: 低 / 中 / 高 / 急騰中
-- 「買え」「売れ」等の推奨は書かない、観測される事実のみ
-- 該当情報が薄い場合は「（直近1週間で目立った話題なし）」と明記`;
-}
-
-// ─── 優待保有銘柄の表示（分析対象外、淡色） ───
-function renderYutaiHoldingCard(h){
-  const code5 = code4to5(h.code);
-  const price = getPrice(h.code);
-  let pnlHtml = "-";
-  if (price && h.buy_price) {
-    const pnlPct = (price.close / h.buy_price - 1) * 100;
-    const cls = pnlPct >= 0 ? "up" : "dn";
-    pnlHtml = `<span class="${cls}">${pnlPct >= 0 ? '+' : ''}${fmt(pnlPct, 1)}%</span>`;
-  }
-  const curStr = price ? `¥${fmt(price.close, 0)}` : "（価格不明）";
-  // v0.19: 優待詳細 (権利月・内容) があれば 2 行目で表示
-  const ym = h.yutai_month;
-  const yc = h.yutai_content;
-  const detailLine = (ym || yc) ? `
-      <div class="h-yutai-detail">
-        ${ym ? `<span class="h-yutai-month">${ym}月権利</span>` : ''}
-        ${yc ? `<span class="h-yutai-content">${escapeHtml(yc)}</span>` : ''}
-      </div>` : '';
-  return `
-    <div class="h-card-yutai">
-      <div class="h-yutai-row">
-        <span class="h-yutai-badge">🎁</span>
-        <span class="h-yutai-code">${code5}</span>
-        <span class="h-yutai-name">${escapeHtml(h.name)}</span>
-        <span class="h-yutai-price">${curStr}</span>
-        <span class="h-yutai-pnl">${pnlHtml}</span>
-      </div>
-      ${detailLine}
-    </div>`;
-}
-
-// ─── Phase 1: ニュース取得 (Gemini + Google検索) ───
-//   force=true で強制再取得。code は v1 の 4桁/英数字コード。
-async function fetchNewsForHolding(code, name, force){
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  if (!geminiKey) {
-    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  // 当日キャッシュがあり、force じゃなければ何もしない（既に画面に出ている）
-  if (!force && NEWS_CACHE[code] && NEWS_CACHE[code].text) {
-    return;
-  }
-  // ローディング状態を反映
-  NEWS_CACHE[code] = {loading: true};
-  // 個別の DOM だけ更新（renderHoldings 全再描画は判定や金額表示に影響するので避ける）
-  const bodyEl = document.getElementById(`news-body-${code}`);
-  const sectionParent = bodyEl ? bodyEl.closest(".h-card") : null;
-  // セクションごとごっそり差し替え
-  const _refreshOne = () => {
-    const card = document.getElementById(`card-${code}`);
-    if (!card) return;
-    const sec = card.querySelector(".news-section");
-    if (sec) sec.outerHTML = renderNewsSection(code, name);
-  };
-  _refreshOne();
-
-  const prompt = buildHoldingNewsPrompt(code, name);
-  try {
-    // v0.18+: Gemini 2.5 Flash + Google検索 では thinking tokens が消費されるため
-    //   1200 では出力が途中で切れる事象（例: ヤマダHD/稀元素）が報告された。2500 に拡大。
-    // v0.20: 2500 でもなお途中で切れる事象（三菱UFJ等で確認）。
-    //   売買分析(L4878)で実績のある 8000 まで引き上げて十分な余裕を確保する。
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 8000});
-    NEWS_CACHE[code] = {
-      text: (text || "").trim(),
-      fetched_at: new Date().toISOString(),
-    };
-  } catch(e) {
-    console.warn("[news] fetch failed:", code, e);
-    NEWS_CACHE[code] = {
-      error: e.message || String(e),
-      fetched_at: new Date().toISOString(),
-    };
-  }
-  // 当日キャッシュとして localStorage に保存
-  try { LS.set(K.news_cache_today, {...NEWS_CACHE, _date: TODAY}); } catch(_) {}
-  _refreshOne();
-}
-
-// ─── Phase 1: 全保有銘柄のニュースを一括並列取得 ───
-async function fetchAllHoldingsNews(){
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  if (!geminiKey) {
-    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  const targets = HOLDINGS.filter(h => !h.is_yutai);
-  if (targets.length === 0) {
-    toast("対象銘柄なし"); return;
-  }
-  // 既にキャッシュ済みの銘柄はスキップ。エラー or 未取得のみ実行。
-  const todo = targets.filter(h => !(NEWS_CACHE[h.code]?.text));
-  if (todo.length === 0) {
-    toast("✅ 全銘柄取得済み（個別の🔄で再取得可）"); return;
-  }
-  const btn = document.getElementById("newsBulkBtn");
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<span class="loading"></span> ${todo.length}件のニュース取得中...`;
-  }
-  toast(`📰 ${todo.length}件のニュースを並列取得開始`);
-  // 並列実行（Promise.allSettled で 1件失敗しても他は続行）
-  const results = await Promise.allSettled(
-    todo.map(h => fetchNewsForHolding(h.code, h.name, false))
-  );
-  const ok = results.filter(r => r.status === "fulfilled").length;
-  toast(`📰 ニュース取得完了: ${ok}/${todo.length} 件`);
-  // ボタン状態の最終更新は renderHoldings で
-  if (btn) { btn.disabled = false; }
-  // 全体再描画して取得済 count を更新
-  renderHoldings();
-}
-
-// ─── Phase 1: ニュース取得プロンプト（個別銘柄） ───
-function buildHoldingNewsPrompt(code, name){
-  return `日本株「${name}（${code}）」の直近72時間のニュース・材料を Google検索で調べて、
-箇条書きで最大3件に絞って提示してください。
-
-## 出力フォーマット（必ず守る）
-
-各項目を以下の形式で：
-- **[YYYY-MM-DD or 〇日前]** [1行サマリ]（出典: [媒体名]）[インパクト: 強/中/弱]
-
-特に注目すべき項目:
-- 決算発表・業績修正・配当方針変更
-- IR・適時開示（提携・M&A・自社株買い・新製品）
-- 格付け変更・目標株価変更・アナリスト評価
-- セクター全体に影響する規制・政策
-- 大株主の売買・注目度の高いニュース
-
-## 執筆ルール（厳守）
-- **全体で 250字以内、各項目 1行・最大80字**（途中で切れないよう厳守）
-- 検索で裏取りできた情報のみ。推測・一般論は不要
-- 直近72時間でめぼしいニュースが無い場合は「（直近72時間で目立った材料なし）」と1行で明記し、それ以上書かない
-- 売買の判断材料として有用な情報を優先（株価インパクトの大きさで選定）
-- 結論や推奨は書かない、事実とソースのみ
-- 思考プロセスや前置きは出力しない、本文のみ
-- 日本語、最後まで書き切ること`;
-}
-
-// ─── Phase 2 (v0.19): 🎯 3シナリオ判断材料の取得 (Claude) ───
-//   force=true で強制再取得。code は v1 の 4桁/英数字コード。
-async function fetchScenarioForHolding(code, name, force){
-  const claudeKey = (LS.raw(K.api_claude) || "").trim();
-  if (!claudeKey) {
-    toast("⚠️ Claude APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  if (!force && SCENARIOS_CACHE[code] && SCENARIOS_CACHE[code].text) return;
-
-  SCENARIOS_CACHE[code] = {loading: true};
-  const _refreshOne = () => {
-    const card = document.getElementById(`card-${code}`);
-    if (!card) return;
-    const sec = card.querySelector(".scenario-section");
-    if (sec) sec.outerHTML = renderScenarioSection(code, name);
-  };
-  _refreshOne();
-
-  const prompt = buildHoldingScenarioPrompt(code, name);
-  try {
-    const text = await callClaude(claudeKey, prompt, {maxTokens: 800});
-    SCENARIOS_CACHE[code] = {
-      text: (text || "").trim(),
-      fetched_at: new Date().toISOString(),
-    };
-  } catch(e) {
-    console.warn("[scenario] fetch failed:", code, e);
-    SCENARIOS_CACHE[code] = {
-      error: e.message || String(e),
-      fetched_at: new Date().toISOString(),
-    };
-  }
-  try { LS.set(K.scenarios_cache_today, {...SCENARIOS_CACHE, _date: TODAY}); } catch(_) {}
-  _refreshOne();
-}
-
-// ─── Phase 2: 全保有銘柄の3シナリオを並列一括取得 ───
-async function fetchAllScenarios(){
-  const claudeKey = (LS.raw(K.api_claude) || "").trim();
-  if (!claudeKey) {
-    toast("⚠️ Claude APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  const targets = HOLDINGS.filter(h => !h.is_yutai);
-  if (targets.length === 0) {
-    toast("対象銘柄なし"); return;
-  }
-  const todo = targets.filter(h => !(SCENARIOS_CACHE[h.code]?.text));
-  if (todo.length === 0) {
-    toast("✅ 全銘柄取得済み（個別の🔄で再取得可）"); return;
-  }
-  const btn = document.getElementById("scenarioBulkBtn");
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<span class="loading"></span> ${todo.length}件の3シナリオ生成中...`;
-  }
-  toast(`🎯 ${todo.length}件の3シナリオを並列取得開始`);
-  const results = await Promise.allSettled(
-    todo.map(h => fetchScenarioForHolding(h.code, h.name, false))
-  );
-  const ok = results.filter(r => r.status === "fulfilled").length;
-  toast(`🎯 3シナリオ取得完了: ${ok}/${todo.length} 件`);
-  if (btn) { btn.disabled = false; }
-  renderHoldings();
-}
-
-// ─── Phase 2: 3シナリオ判断材料 プロンプト ───
-//   保有情報・直近ニュース・需給・テクニカルを束ねて Claude に投げる。
-//   結論を出させず、3 つの視点を並列に提示させるのがキモ。
-function buildHoldingScenarioPrompt(code, name){
-  const h = HOLDINGS.find(x => x.code === code) || {};
-  const price = getPrice(code);
-  const cur = price?.close ?? null;
-  const chg = price?.change_pct ?? null;
-  const bp = h.buy_price ?? null;
-  const pnlPct = (cur && bp) ? ((cur / bp - 1) * 100).toFixed(2) : null;
-
-  // 保有日数
-  let daysHeld = null;
-  if (h.entry_date) {
-    try {
-      const d1 = new Date(h.entry_date);
-      const d2 = new Date(TODAY);
-      daysHeld = Math.max(0, Math.round((d2 - d1) / 86400000));
-    } catch(_) {}
-  }
-
-  // 当日のニュース (B が取得済みなら付ける)
-  const newsText = NEWS_CACHE[code]?.text || "（未取得 — Bセクションでニュースを取得すると判断材料が増えます）";
-
-  // 需給・ファンダ (HOLDINGS にあれば)
-  const fundLines = [];
-  if (h.margin_ratio != null) fundLines.push(`信用倍率: ${h.margin_ratio}倍`);
-  if (h.margin_buy != null && h.margin_sell != null) {
-    fundLines.push(`買い残: ${fmt(h.margin_buy, 0)} / 売り残: ${fmt(h.margin_sell, 0)}`);
-  }
-  if (h.pbr != null) fundLines.push(`PBR: ${h.pbr}`);
-  if (h.dividend_yield != null) fundLines.push(`配当利回り: ${h.dividend_yield}%`);
-  if (h.next_earnings_date) fundLines.push(`次回決算: ${h.next_earnings_date}`);
-
-  // テクニカル (v0.20: fundamentals.json から拡張データを流し込み)
-  const f = FUND[code4to5(code)] || {};
-  const techLines = [];
-  if (h.atr != null) techLines.push(`ATR(14日): ${h.atr}`);
-  if (f.ma25 != null && cur != null) {
-    const dev = (cur - Number(f.ma25)) / Number(f.ma25) * 100;
-    techLines.push(`25日MA: ¥${fmt(Number(f.ma25),0)} (乖離 ${dev >= 0 ? '+' : ''}${fmt(dev,2)}%)`);
-  }
-  if (f.rsi14 != null) {
-    const r = Number(f.rsi14);
-    const tag = r >= 70 ? "(過熱)" : r <= 30 ? "(売られ過ぎ)" : "(中立)";
-    techLines.push(`RSI(14日): ${fmt(r,1)} ${tag}`);
-  }
-  if (f.high_20d != null && f.low_20d != null && cur != null) {
-    const hi = Number(f.high_20d), lo = Number(f.low_20d);
-    if (hi > lo) {
-      const pos = (cur - lo) / (hi - lo) * 100;
-      techLines.push(`20日レンジ位置: ${fmt(pos,0)}% (¥${fmt(lo,0)}〜¥${fmt(hi,0)})`);
-    }
-  }
-
-  // v0.20: 注目度 (取得済みなら付ける)
-  const attentionText = ATTENTION_CACHE[code]?.text || "（未取得 — 注目度セクションで取得すると判断材料が増えます）";
-
-  return `${buildStrategyContext()}
-
-## 銘柄情報
-- 銘柄: **${name} (${code})**
-- 約定価格: ${bp != null ? `¥${fmt(bp, 0)}` : '不明'}
-- 現在値: ${cur != null ? `¥${fmt(cur, 0)}` : '不明'} ${chg != null ? `(前日比 ${chg >= 0 ? '+' : ''}${fmt(chg, 2)}%)` : ''}
-- 含み損益: ${pnlPct != null ? `${pnlPct >= 0 ? '+' : ''}${pnlPct}%` : '不明'}
-${daysHeld != null ? `- 保有日数: ${daysHeld}日` : ''}
-${h.stop_loss != null ? `- 設定済み損切り: ¥${fmt(h.stop_loss, 0)}` : ''}
-${h.target != null ? `- 設定済み目標: ¥${fmt(h.target, 0)}` : ''}
-
-## 直近ニュース・材料
-${newsText}
-
-## 需給・ファンダ
-${fundLines.length ? fundLines.join("\n") : '（データ不足）'}
-
-## テクニカル
-${techLines.length ? techLines.join("\n") : '（データ不足）'}
-
-## 市場注目度
-${attentionText}
-
----
-
-# 指示
-
-ひろき様が**自分で判断するための材料**として、3 つのシナリオそれぞれの根拠を並列に提示してください。
-**結論を出さない**こと。3つの視点を公平に、それぞれ 2〜3 件の根拠を箇条書きで。
-
-回転重視戦略 (損切り -8% / RR 1:2 / 数日〜数週間保有) を踏まえること。
-
-## 出力フォーマット (必ず守る)
-
-### 🟢 ホールドする理由
-- (根拠1: 70字以内)
-- (根拠2: 70字以内)
-
-### 🔵 利確する理由
-- (根拠1: 70字以内)
-- (根拠2: 70字以内)
-
-### 🔴 損切る理由
-- (根拠1: 70字以内)
-- (根拠2: 70字以内)
-
-## 執筆ルール
-- 全体で 600字以内
-- 各根拠は具体的・数字付きで（漠然とした「相場が不安」等は不可）
-- 「〜すべき」「〜が良い」と推奨しない。事実と材料のみ
-- 直近ニュース・需給・テクニカル・含み損益・保有日数を必ず参照する
-- 該当する根拠が無いシナリオでも、最低1つは絞り出して書く（「材料なし」と書かない）`;
-}
-
-function setJudgment(code, judgment, extra){
-  const h = HOLDINGS.find(x => x.code === code);
+// 個別銘柄AI分析（Gemini+Claude合議）
+async function analyzeHolding(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
   if (!h) return;
+  const panel = document.getElementById('ai-'+cd+'-'+(tp||'spot'));
+  if (!panel) return;
 
-  // Phase 5.3: 見送りの場合はモーダルを開いて理由入力を要求
-  //   extra が渡されている場合は確定済み（モーダルから呼ばれた）として保存に進む
-  if (judgment === "skip" && !extra) {
-    openSkipModal({mode: "holding", code: h.code, name: h.name});
+  if (panel.style.display === 'block' && panel.textContent) {
+    panel.style.display = 'none'; return;
+  }
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="ldg" style="padding:8px 0"><div class="spin"></div><span>J-Quantsデータ取得中...</span></div>';
+
+  const cp = h.cp || h.bp;
+  const pnl = (cp - h.bp) * h.sh;
+  const pct = ((cp - h.bp) / h.bp * 100).toFixed(2);
+  const isMargin = h.type === 'margin';
+  const typeStr = isMargin ? '信用買建' : '現物';
+  const cost = h.bp * h.sh;
+
+  // J-Quants週次データを取得
+  const weeklyData = await fetchWeeklyData();
+  const wEntry = findWeeklyEntry(weeklyData, h.cd);
+  const wInfo = formatWeeklyInfo(wEntry);
+  const jqText = wInfo ? wInfo.lines.join('\n') : 'J-Quantsデータなし（週次スキャン未実行）';
+
+  // 現物・信用で異なる判断軸
+  const marginSpecific = isMargin ? `
+【信用取引固有の判断軸】
+・期日リスク: 制度信用の返済期限（6ヶ月）を考慮すること
+・金利コスト: 保有日数が長いほど金利負担が増加する点を考慮
+・追証リスク: 含み損が拡大した場合の追証発生ラインを示すこと
+・ロスカット優先: 現物より損切りを早めに判断すること
+・判断: 「返済（決済）」「継続保有」「ナンピン（追加買い）」のどれか断言` :
+`【現物取引固有の判断軸】
+・長期保有の可否: 下落しても期日がないため、ファンダが崩れていなければ保有継続も選択肢
+・配当・株主優待の有無も考慮（ある場合は言及）
+・判断: 「売却」「継続保有」「買い増し」のどれか断言`;
+
+  // Gemini専用プロンプト（需給・市場情報・テーマ）
+  const gPrompt =
+    `あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてから回答してください。\n\n` +
+    `【保有銘柄】${h.cd} ${h.nm}（${typeStr}）\n` +
+    `取得金額: ${cost.toLocaleString()}円（${h.bp.toLocaleString()}円 × ${h.sh}株）\n` +
+    `現在値: ${cp.toLocaleString()}円 / 含み損益: ${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円（${pct>=0?'+':''}${pct}%）\n` +
+    `${h.sl?'損切り設定: '+h.sl.toLocaleString()+'円\n':''}` +
+    `${h.tgt?'目標設定: '+h.tgt.toLocaleString()+'円\n':''}` +
+    `\n【J-Quants週次データ（参考）】\n${jqText}\n\n` +
+    `以下を調べて簡潔に答えてください（各1〜2行）:\n` +
+    `①今日の株価・前日比・出来高の状況\n` +
+    `②信用倍率（J-Quantsデータ参照）と需給の評価\n` +
+    `③空売り残高・外国人・機関の動向\n` +
+    `④直近の材料・ニュース（今週以内）\n` +
+    `⑤テーマ性: 今の市場テーマと合致しているか\n` +
+    `⑥${isMargin ? '信用建玉として継続保有すべきか（期日・金利コスト考慮）' : '現物として継続保有に値するか（ファンダ・テーマ面）'}`;
+
+  // Claude専用プロンプト（テクニカル・リスク管理）
+  const cPrompt =
+    `あなたは運用歴25年の日本株専門シニアFMです。以下のデータを基に判断してください。\n\n` +
+    `【保有銘柄】${h.cd} ${h.nm}（${typeStr}）\n` +
+    `取得金額: ${cost.toLocaleString()}円（${h.bp.toLocaleString()}円 × ${h.sh}株）\n` +
+    `現在値: ${cp.toLocaleString()}円 / 含み損益: ${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円（${pct>=0?'+':''}${pct}%）\n` +
+    `${h.sl?'損切り設定: '+h.sl.toLocaleString()+'円\n':''}` +
+    `${h.tgt?'目標設定: '+h.tgt.toLocaleString()+'円\n':''}` +
+    `\n【J-Quants週次データ】\n${jqText}\n\n` +
+    marginSpecific + `\n\n` +
+    `## 【テクニカル判断】\n` +
+    `J-QuantsのATR・シグナル・損切りラインを参照し、チャート状況を1〜2行で。\n\n` +
+    `## 【損切りライン】\n` +
+    `J-Quantsの損切りライン（${wEntry?.stop_loss?.toLocaleString()||'データなし'}円）を参考に、` +
+    `具体的な価格と現在値からの下落率を示すこと。${isMargin?'追証ラインも考慮すること。':''}\n\n` +
+    `## 【利確目標】\n` +
+    `J-Quantsの目標価格（${wEntry?.target?.toLocaleString()||'データなし'}円）を参考に、` +
+    `第1目標・最終目標を具体的に。\n\n` +
+    `## 【シニアFMの本音】\n` +
+    `${isMargin?'信用建玉として':'現物として'}持ち続けるか？率直に一言で。`;
+
+  try {
+    const [gRes, cRes] = await Promise.all([
+      callGemini(gPrompt, null, null).catch(e => '⚠️ Gemini: '+e.message),
+      callClaude(cPrompt, null, null).catch(e => '⚠️ Claude: '+e.message),
+    ]);
+
+    // J-Quantsサマリーを最初に表示
+    const jqSummary = wInfo ?
+      `📊 J-Quants: ${wInfo.rank}ランク ${wInfo.total}pt${wEntry?.atr?' / ATR:'+wEntry.atr+'円':''}${wEntry?.margin_ratio?' / 信用倍率:'+wEntry.margin_ratio+'倍':''}\n` +
+      `🛑 損切り:${wEntry?.stop_loss?.toLocaleString()||'?'}円  🎯 目標:${wEntry?.target?.toLocaleString()||'?'}円\n` +
+      `━━━━━━━━━━━━━━━\n` : '';
+
+    panel.innerHTML =
+      `<div style="font-size:11px;font-weight:700;color:${isMargin?'#f59e0b':'#10b981'};margin-bottom:6px">` +
+      `${isMargin?'📊 信用買建':'💴 現物'} 専用分析</div>` +
+      `<pre style="font-size:11px;color:#94a3b8;white-space:pre-wrap;margin-bottom:8px">${jqSummary}</pre>` +
+      `<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini（需給・市場情報）</div>` +
+      `<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap;margin-bottom:10px">${gRes}</div>` +
+      `<div style="border-top:1px solid var(--border);padding-top:10px">` +
+      `<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude（テクニカル・リスク管理）</div>` +
+      `<div style="font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap">${cRes}</div>` +
+      `</div>`;
+  } catch(e) {
+    panel.innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+  }
+}
+
+function uCP(cd, tp, v) { const h = H.find(h => h.cd===cd && (!tp||h.type===tp)); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
+
+// 🎁 優待枠トグル: 保有銘柄を優待目的か通常かを切り替え
+function toggleYutai(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
+  if (!h) return;
+  h.is_yutai = !h.is_yutai;
+  sv(KH, H);
+  if (typeof rHold === 'function') rHold();
+  if (typeof calcS === 'function') calcS();
+  toast(h.is_yutai ? '🎁 優待枠に設定（朝会の分析対象外）' : '✅ 通常枠に戻しました');
+}
+
+// HTMLエスケープ (優待内容を表示する時に使用)
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// 🎁 優待詳細編集モーダルを開く
+let _yutaiEditing = null;
+function openYutaiEdit(cd, tp){
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
+  if (!h) return;
+  _yutaiEditing = {cd: h.cd, type: h.type || 'spot'};
+  document.getElementById('ymodalTitle').textContent = '🎁 ' + h.nm + ' (' + h.cd + ')';
+  document.getElementById('ymonthInput').value = h.yutai_month || '';
+  document.getElementById('ycontentInput').value = h.yutai_content || '';
+  document.getElementById('ymodalOverlay').classList.add('show');
+  setTimeout(()=>document.getElementById('ymonthInput').focus(), 50);
+}
+
+function closeYutaiEdit(){
+  document.getElementById('ymodalOverlay').classList.remove('show');
+  _yutaiEditing = null;
+}
+
+function saveYutaiEdit(){
+  if (!_yutaiEditing) return;
+  const h = H.find(h => h.cd===_yutaiEditing.cd && h.type===_yutaiEditing.type)
+         || H.find(h => h.cd===_yutaiEditing.cd);
+  if (!h) { closeYutaiEdit(); return; }
+  const m = parseInt(document.getElementById('ymonthInput').value);
+  const c = document.getElementById('ycontentInput').value.trim();
+  h.yutai_month = (m >= 1 && m <= 12) ? m : null;
+  h.yutai_content = c || null;
+  sv(KH, H);
+  closeYutaiEdit();
+  if (typeof rHold === 'function') rHold();
+  toast('✅ 優待情報を保存しました');
+}
+
+// 売買タブの優待目的チェックボックス UI 同期
+function syncYutaiCheck(){
+  const cb = document.getElementById('tyutai');
+  const lbl = document.getElementById('yutaiCheckLabel');
+  if (!cb || !lbl) return;
+  if (cb.checked) lbl.classList.add('on');
+  else lbl.classList.remove('on');
+}
+function toggleYutaiCheck(){
+  const cb = document.getElementById('tyutai');
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  syncYutaiCheck();
+}
+
+function editBuyPrice(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp || h.type===tp));
+  if (!h) return;
+  // インライン編集フォームを表示
+  const row = document.querySelector('[data-edit="'+cd+'"]');
+  if (row) { row.remove(); return; } // 既に開いていれば閉じる
+
+  const hrow = document.getElementById('hrow-'+cd);
+  if (!hrow) { 
+    // hrowが見つからない場合はpromptで対応
+    const newBp = parseFloat(prompt('買値を入力（円）:', h.bp));
+    if (newBp && newBp > 0) {
+      h.bp = newBp;
+      const newSl = parseFloat(prompt('損切りラインを入力（円、スキップはEnter）:', h.sl||''));
+      if (newSl && newSl > 0) h.sl = newSl;
+      const newTgt = parseFloat(prompt('目標価格を入力（円、スキップはEnter）:', h.tgt||''));
+      if (newTgt && newTgt > 0) h.tgt = newTgt;
+      sv(KH,H); rHold(); calcS();
+      toast('✅ ' + h.nm + ' の価格を更新しました');
+    }
     return;
   }
 
-  const price = getPrice(code);
+  const div = document.createElement('div');
+  div.setAttribute('data-edit', cd);
+  div.style.cssText = 'background:var(--s2);border:1px solid var(--acc);border-radius:8px;padding:10px;margin-top:6px';
+  div.innerHTML =
+    '<div style="font-size:11px;color:var(--acc);font-weight:700;margin-bottom:8px">✏️ 価格を編集</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">' +
+    '<div><div style="font-size:10px;color:var(--t3);margin-bottom:3px">買値（円）</div>' +
+    '<input type="number" id="edit-bp-'+cd+'" value="'+h.bp+'" style="width:100%;background:var(--s1);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:6px;outline:none"></div>' +
+    '<div><div style="font-size:10px;color:var(--t3);margin-bottom:3px">損切り（円）</div>' +
+    '<input type="number" id="edit-sl-'+cd+'" value="'+(h.sl||'')+'" placeholder="未設定" style="width:100%;background:var(--s1);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:6px;outline:none"></div>' +
+    '<div><div style="font-size:10px;color:var(--t3);margin-bottom:3px">目標（円）</div>' +
+    '<input type="number" id="edit-tgt-'+cd+'" value="'+(h.tgt||'')+'" placeholder="未設定" style="width:100%;background:var(--s1);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:6px;outline:none"></div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+    '<button id="save-edit-'+cd+'" style="background:var(--acc);color:#fff;border:none;border-radius:6px;padding:8px;font-size:13px;font-weight:700;cursor:pointer">✅ 保存</button>' +
+    '<button id="cancel-edit-'+cd+'" style="background:var(--s1);color:var(--t2);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;cursor:pointer">キャンセル</button>' +
+    '</div>';
 
-  // v0.18 Phase 1: 当日のニュースを判定に紐づけて保存（履歴・夕会レビュー・月次分析で参照可能に）
-  const news = NEWS_CACHE[code];
-  const briefNews = (news && news.text) ? news.text : null;
-  // v0.19 Phase 2: 当日の3シナリオも紐づけて保存
-  const scn = SCENARIOS_CACHE[code];
-  const briefScenarios = (scn && scn.text) ? scn.text : null;
+  hrow.insertAdjacentElement('afterend', div);
+  // ボタンイベントをaddEventListenerで設定（onclickのクォート問題を回避）
+  document.getElementById('save-edit-'+cd).addEventListener('click', () => saveEditPrice(cd, h.type));
+  document.getElementById('cancel-edit-'+cd).addEventListener('click', () => div.remove());
+}
 
-  JUDGMENTS[code] = {
-    code, name: h.name, judgment,
-    price_at_judgment: price?.close ?? null,
-    change_pct: price?.change_pct ?? null,
-    buy_price: h.buy_price ?? null,
-    stop_loss: h.stop_loss ?? null,
-    target: h.target ?? null,
-    type: h.type ?? null,
-    judged_at: new Date().toISOString(),
-    ...(briefNews ? {brief_news: briefNews} : {}),
-    ...(briefScenarios ? {brief_scenarios: briefScenarios} : {}),
-    // Phase 5.3: 見送り時の理由・メモを記録
-    ...(extra ? {reasons: extra.reasons || [], memo: extra.memo || ""} : {}),
-  };
-  LS.set(K.judgments, JUDGMENTS);
-  renderHoldings();
+function saveEditPrice(cd, tp) {
+  const h = H.find(h => h.cd===cd && (!tp||h.type===tp));
+  if (!h) return;
+  const bp  = parseFloat(document.getElementById('edit-bp-'+cd)?.value);
+  const sl  = parseFloat(document.getElementById('edit-sl-'+cd)?.value);
+  const tgt = parseFloat(document.getElementById('edit-tgt-'+cd)?.value);
+  if (bp && bp > 0) h.bp = bp;
+  if (sl && sl > 0) h.sl = sl; else if (!sl) h.sl = null;
+  if (tgt && tgt > 0) h.tgt = tgt; else if (!tgt) h.tgt = null;
+  sv(KH, H);
+  document.querySelector('[data-edit="'+cd+'"]')?.remove();
+  rHold(); calcS();
+  toast('✅ ' + h.nm + ' の価格を更新しました');
+}
+function delH(cd, tp) { if(!confirm('削除しますか？')) return; H=H.filter(h=>!(h.cd===cd && (tp?h.type===tp:true))); sv(KH,H); rHold(); toast('削除しました'); }
+function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map(h=>hHTML(h,false)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
 
-  // 次の未判定銘柄へスクロール（優待枠は対象外）
-  setTimeout(() => {
-    const next = HOLDINGS.find(x => !x.is_yutai && !JUDGMENTS[x.code]);
-    if (next) {
-      const el = document.getElementById(`card-${next.code}`);
-      if (el) el.scrollIntoView({behavior: "smooth", block: "center"});
+// ウォッチリスト
+function addWatch() {
+  const cd = document.getElementById('wCode').value.trim();
+  const nm = document.getElementById('wName').value.trim();
+  const tag = document.getElementById('wTag').value.trim();
+  if (!cd || !nm) { toast('⚠️ コードと銘柄名は必須'); return; }
+  if (W.find(w => w.cd===cd)) { toast('すでに追加済みです'); return; }
+  W.push({cd, nm, tag, dt: TODAY}); sv(KW, W);
+  ['wCode','wName','wTag'].forEach(id => document.getElementById(id).value='');
+  rWatch(); toast('👁 ' + nm + ' を追加');
+}
+function delWatch(cd) { W=W.filter(w=>w.cd!==cd); sv(KW,W); rWatch(); }
+function rWatch() {
+  const el = document.getElementById('watchList');
+  if (!W.length) { el.innerHTML='<div class="empty"><div class="ei">👁</div>ウォッチリストなし</div>'; return; }
+  el.innerHTML = W.map(w =>
+    '<div class="wrow"><div class="winfo"><div class="wnm">' + w.nm + '<span class="wtag">' + w.cd + '</span></div>' +
+    '<div class="wmeta">' + (w.tag||'メモなし') + ' / 登録' + w.dt + '</div></div>' +
+    '<button class="wdel" onclick="delWatch(\'' + w.cd + '\')">🗑</button></div>'
+  ).join('');
+}
+
+// 売買記録
+function onAct() {
+  const b = document.getElementById('ta').value === 'buy';
+  document.getElementById('buyEx').style.display = b ? '' : 'none';
+  document.getElementById('tBtn').textContent = b ? '💱 買いを記録する' : '💰 売りを記録する';
+  document.getElementById('tBtn').className = 'btn ' + (b ? 'btnb' : 'btns');
+  // 売り時は計算アシスタント/RR表示を隠す
+  const cp = document.getElementById('calcPanel');
+  const rd = document.getElementById('rrDisplay');
+  if (cp) cp.style.display = b ? '' : 'none';
+  if (rd) rd.style.display = b ? '' : 'none';
+  if (b && typeof runAssistant === 'function') runAssistant();
+}
+function doTrade() {
+  const a = document.getElementById('ta').value;
+  const cd = document.getElementById('tc').value.trim();
+  const nm = document.getElementById('tn').value.trim();
+  const sh = parseFloat(document.getElementById('tsh').value);
+  const p = parseFloat(document.getElementById('tp').value);
+  if (!cd||!nm||!sh||!p) { toast('⚠️ コード・銘柄名・株数・価格は必須'); return; }
+  if (a === 'buy') {
+    const sl = parseFloat(document.getElementById('tsl').value) || null;
+    const tgt = parseFloat(document.getElementById('ttgt').value) || null;
+    const memo = document.getElementById('tmemo').value.trim();
+    const tdt = document.getElementById('tdt').value || TODAY;
+    const ttype = document.getElementById('ttype').value || 'spot';
+    const isYutai = !!document.getElementById('tyutai')?.checked;
+    // 🔧 修正: 銘柄コード + 取引区分（現物/信用）が同じ場合のみ合算
+    const idx = H.findIndex(h => h.cd===cd && h.type===ttype);
+    if (idx>=0) {
+      const ex=H[idx], tot=ex.sh+sh;
+      // 既存の is_yutai は保持、新規買いで明示チェックされていれば true 化
+      H[idx]={...ex, sh:tot, bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, is_yutai: ex.is_yutai || isYutai};
     } else {
-      // 全銘柄判定完了 → ③に自動移行 + 計画生成準備
-      setTimeout(() => {
-        document.getElementById("secHoldings").classList.remove("open");
-        document.getElementById("secPlan").classList.add("open");
-        document.getElementById("numPlan").classList.add("active");
-        toast("✅ 全銘柄判定完了！");
-        renderPlanInitial();
-      }, 300);
+      H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p,is_yutai:isYutai});
+    }
+    sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
+    document.getElementById('cashIn').value = cash || '';
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype}); sv(KT,T);
+    toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + (isYutai?'・🎁優待':'') + '） 買い記録');
+  } else {
+    const ttype = document.getElementById('ttype').value || 'spot';
+    // 🔧 修正: 売り時も取引区分を考慮して対象を特定
+    const h = H.find(h => h.cd===cd && h.type===ttype)
+           || H.find(h => h.cd===cd); // 区分不明の場合はコードだけで検索
+    let pnl=null;
+    if (h) {
+      pnl=(p-h.bp)*sh;
+      if(h.sh<=sh) H=H.filter(hh=>!(hh.cd===cd && hh.type===h.type));
+      else h.sh-=sh;
+      sv(KH,H);
+    }
+    cash+=p*sh; sv(KC,cash);
+    document.getElementById('cashIn').value = cash || '';
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl,type:ttype}); sv(KT,T);
+    const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
+    toast('✅ ' + nm + '（' + (ttype==='margin'?'信用':'現物') + '） 売り記録' + ps);
+  }
+  ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
+  const yc = document.getElementById('tyutai'); if (yc) { yc.checked = false; syncYutaiCheck(); }
+  rTH();
+}
+function rTH() {
+  document.getElementById('tHist').innerHTML = T.length
+    ? [...T].reverse().slice(0,30).map(tHTML).join('')
+    : '<div class="empty"><div class="ei">📋</div>履歴なし</div>';
+}
+
+// ポートフォリオ文字列
+function pfS() {
+  const hs = H.length
+    ? H.map(h => {
+        const cp = h.cp||h.bp, pct = ((cp-h.bp)/h.bp*100).toFixed(1);
+        return h.cd + ' ' + h.nm + '(' + (h.type==='margin'?'信用':'現物') + '): ' + h.sh + '株 買値' + h.bp + '円 現値' + cp + '円(' + (pct>=0?'+':'') + pct + '%) 損切' + (h.sl||'未') + '→目標' + (h.tgt||'未');
+      }).join('\n')
+    : '保有銘柄なし（現金のみ）';
+  const td = T.filter(t => t.dt===TODAY);
+  const ts = td.length ? '\n本日売買: ' + td.map(t => (t.a==='buy'?'買':'売') + ' ' + t.nm + ' ' + t.p + '円×' + t.sh + '株').join(', ') : '';
+  const ws = W.length ? '\nウォッチ中: ' + W.map(w => w.cd + ' ' + w.nm).join(', ') : '';
+  return hs + ts + ws + '\n残金: ' + Math.round(cash).toLocaleString() + '円';
+}
+
+// ═══════════════════════════════════════════
+// 🌅 朝の板チェック機能
+// ═══════════════════════════════════════════
+let mrnMode = 'all';
+function setMrnMode(m) {
+  mrnMode = m;
+  ['all','hold','watch'].forEach(x => {
+    const el = document.getElementById('mrn' + x.charAt(0).toUpperCase() + x.slice(1));
+    if(el) el.classList.toggle('on', x===m);
+  });
+}
+
+function getMrnTargets() {
+  // 分析対象の銘柄リストを取得
+  let targets = [];
+  if (mrnMode === 'hold' || mrnMode === 'all') {
+    H.forEach(h => targets.push({
+      cd: h.cd, nm: h.nm,
+      bp: h.bp, cp: h.cp || h.bp,
+      sh: h.sh, sl: h.sl, tgt: h.tgt,
+      type: h.type || 'spot',
+      role: '保有中'
+    }));
+  }
+  if (mrnMode === 'watch' || mrnMode === 'all') {
+    W.forEach(w => {
+      if (!targets.find(t => t.cd === w.cd)) {
+        targets.push({cd: w.cd, nm: w.nm, bp: null, cp: null, sh: 0, role: '注目'});
+      }
+    });
+  }
+  return targets;
+}
+
+async function doMorning() {
+  const btn = document.getElementById('mrnBtn');
+  btn.disabled = true;
+  btn.textContent = '🔄 分析中...';
+  const out = document.getElementById('mrnOut');
+  out.innerHTML = '';
+
+  const today = new Date().toLocaleDateString('ja-JP',{month:'numeric',day:'numeric',weekday:'short'});
+  const targets = getMrnTargets();
+  if (!targets.length) {
+    out.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px">保有銘柄・ウォッチリストが登録されていません</div>';
+    btn.disabled = false;
+    btn.innerHTML = '🌅 朝の板チェックを開始<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
+    return;
+  }
+
+  // J-Quantsデータを事前取得
+  const weeklyData = await fetchWeeklyData();
+
+  // ポートフォリオの詳細情報を構築
+  const holdTargets = targets.filter(t => t.role === '保有中');
+  const totalCost = holdTargets.reduce((s, t) => s + (t.bp||0) * (t.sh||0), 0);
+  const totalVal  = holdTargets.reduce((s, t) => s + (t.cp||t.bp||0) * (t.sh||0), 0);
+  const totalPnl  = totalVal - totalCost;
+  const pfDetail  = holdTargets.map(t => {
+    const pnl = ((t.cp||t.bp) - t.bp) * t.sh;
+    const pct = ((t.cp||t.bp) - t.bp) / t.bp * 100;
+    const wE  = findWeeklyEntry(weeklyData, t.cd);
+    const jqLine = wE ? ` [J-Quants: ${wE.rank||'?'}ランク${wE.margin_ratio?' 信用倍率'+wE.margin_ratio+'倍':''}${wE.atr?' ATR'+wE.atr+'円':''}${wE.stop_loss?' 損切'+wE.stop_loss.toLocaleString()+'円':''}]` : '';
+    return `${t.cd} ${t.nm}（${t.type==='margin'?'信用':'現物'} ${t.sh}株 買値${t.bp?.toLocaleString()}円 現値${(t.cp||t.bp)?.toLocaleString()}円 ${pct>=0?'+':''}${pct.toFixed(1)}% 損益${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円 損切${t.sl?.toLocaleString()||'未'}→目標${t.tgt?.toLocaleString()||'未'}）${jqLine}`;
+  }).join('\n');
+
+  // ① Gemini: 市場全体の地合い（1枚目カード）
+  const mktCard = mkMrnCard('🌅', '今日の地合い・相場環境', 'var(--gem)', '🤖 Gemini', true);
+  out.appendChild(mktCard);
+
+  // ② 銘柄別カード（Gemini需給 + Claude判断を並列）
+  const stockCards = targets.map(t => {
+    const pnlAmt = t.bp ? Math.round(((t.cp||t.bp) - t.bp) * (t.sh||0)) : 0;
+    const pnlPct = t.bp ? (((t.cp||t.bp) - t.bp) / t.bp * 100) : 0;
+    const pnlStr = t.bp ? (' <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:' +
+      (pnlAmt >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+      (pnlAmt >= 0 ? '+' : '') + pnlAmt.toLocaleString() + '円（' +
+      (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%）</span>') : '';
+    const typeTag = '<span style="font-size:10px;background:' + (t.role==='保有中'?'rgba(59,130,246,.2)':'rgba(16,185,129,.2)') +
+      ';padding:2px 6px;border-radius:4px;color:' + (t.role==='保有中'?'var(--acc)':'var(--green)') + '">' +
+      (t.type==='margin'?'📊信用':'💴現物') + ' ' + t.role + '</span>';
+    const card = mkMrnCard(
+      t.role === '保有中' ? '💼' : '👁',
+      t.cd + ' ' + t.nm + '　' + typeTag + pnlStr,
+      t.role==='保有中'?'var(--acc)':'var(--green)', ''
+    );
+    out.appendChild(card);
+    return {card, target: t};
+  });
+
+  // 地合いプロンプト（ポートフォリオ全体を把握した上での相場判断）
+  const mktPrompt = `あなたは日本株専門のシニアFMです。Google検索で${today}の最新情報を調べてください。
+
+【保有ポートフォリオ全体】
+${pfDetail || '保有なし'}
+合計評価額: ${totalVal.toLocaleString()}円 / 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+以下を詳しく答えてください:
+①【相場環境】昨夜のNYダウ・ナスダック・SOX指数・為替（ドル円）の動きと、今日の日経平均・グロース指数への影響予測
+②【今日のテーマ】市場で注目されているセクター・テーマ（保有銘柄との関連性も言及）
+③【保有銘柄の材料】各保有銘柄の直近ニュース・適時開示・アナリスト動向（見つかったものだけで可）
+④【ポートフォリオ評価】現在のポジション配分について、集中リスク・セクター偏りがあれば指摘
+⑤【今日の戦略】強気/中立/弱気 + 今日取るべきアクション（買い増し・利確・損切り・様子見）を具体的に`;
+
+  const gemMktP = callGemini(mktPrompt).then(txt => {
+    mktCard.querySelector('.mrn-body').innerHTML = fmtRevText(txt);
+    const wrap = mktCard.querySelector('.rcard-body-wrap');
+    if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded');wrap.classList.remove('rcard-fade');}
+  }).catch(e => {
+    mktCard.querySelector('.mrn-body').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+  });
+
+  // 銘柄別分析（並列実行）
+  const stockPs = stockCards.map(({card, target: t}) => {
+    const bodyEl = card.querySelector('.mrn-body');
+
+    // Geminiブロック
+    const gBlock = document.createElement('div');
+    gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div><div class="ldg"><div class="spin"></div><span>調査中...</span></div>';
+    bodyEl.appendChild(gBlock);
+
+    // Claudeブロック
+    const cBlock = document.createElement('div');
+    cBlock.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid var(--border)';
+    cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜' + (t.type==='margin'?'信用建玉判断':'現物判断') + '</div><div class="ldg"><div class="spin"></div><span>判断中...</span></div>';
+    bodyEl.appendChild(cBlock);
+
+    // J-Quantsデータ取得
+    const wE = findWeeklyEntry(weeklyData, t.cd);
+    const wInfo = formatWeeklyInfo(wE);
+    const jqText = wInfo ? wInfo.lines.join('\n') : 'J-Quantsデータなし';
+    const isMargin = t.type === 'margin';
+
+    // 信用金利コスト計算（制度信用・一般信用ともに買方金利あり）
+    // SBI証券 制度信用買方金利: 約2.8%/年
+    const MARGIN_RATE = 0.028;
+    let interestInfo = '';
+    if (isMargin && t.bp && t.sh && t.dt) {
+      const buyDate = new Date(t.dt);
+      const today2  = new Date();
+      const days    = Math.max(1, Math.round((today2 - buyDate) / (1000*60*60*24)));
+      const cost    = Math.round(t.bp * t.sh * MARGIN_RATE / 365 * days);
+      const remain  = Math.max(0, 180 - days); // 制度信用6ヶ月=180日
+      interestInfo  = `金利コスト: 約${cost.toLocaleString()}円（${days}日間 × 年率2.8%）／期日まで残${remain}日`;
+    } else if (isMargin) {
+      interestInfo = '金利コスト: 年率2.8%（買付日未設定のため計算不可）';
+    }
+
+    const holdInfo = t.bp ? [
+      `取引区分: ${isMargin ? '📊信用買建（制度信用6ヶ月・金利あり）' : '💴現物'}`,
+      `取得単価: ${t.bp.toLocaleString()}円 × ${t.sh}株（投資額: ${(t.bp*t.sh).toLocaleString()}円）`,
+      `現在値: ${(t.cp||t.bp).toLocaleString()}円`,
+      `含み損益: ${((t.cp||t.bp)-t.bp)*t.sh>=0?'+':''}${Math.round(((t.cp||t.bp)-t.bp)*t.sh).toLocaleString()}円（${(((t.cp||t.bp)-t.bp)/t.bp*100).toFixed(2)}%）`,
+      t.sl ? `損切り設定: ${t.sl.toLocaleString()}円（現在値から${((t.sl-(t.cp||t.bp))/(t.cp||t.bp)*100).toFixed(1)}%）` : '損切り: 未設定',
+      t.tgt ? `目標設定: ${t.tgt.toLocaleString()}円（現在値から+${((t.tgt-(t.cp||t.bp))/(t.cp||t.bp)*100).toFixed(1)}%）` : '目標: 未設定',
+      interestInfo ? interestInfo : '',
+    ].filter(Boolean).join('\n') : '新規候補銘柄（未保有）';
+
+    // Geminiプロンプト（需給・板・最新情報）
+    const gPrompt = `あなたは日本株専門アナリストです。Google検索で${t.cd} ${t.nm}の今日の最新情報を必ず調べてから答えてください。
+
+【銘柄・ポジション情報】
+${holdInfo}
+
+【J-Quants週次データ（先週末時点）】
+${jqText}
+
+以下を詳しく答えてください:
+①【今日の株価・出来高】現在値・前日比・出来高（平均比）・板の状況
+②【需給】信用倍率（J-Quantsデータと最新値を比較）・空売り残高・外国人動向
+③【直近材料】今週以内のニュース・適時開示・アナリストレーティング変更
+④【テクニカル】5日線・25日線・75日線との位置関係、出来高トレンド
+⑤【今日の値動き予想】強気/中立/弱気 + 具体的な理由と注目価格帯`;
+
+    // Claudeプロンプト（現物/信用で完全分岐）
+    // 損益状況を計算
+    const cp = t.cp || t.bp || 0;
+    const pnlAmt2 = t.bp ? Math.round((cp - t.bp) * (t.sh||0)) : 0;
+    const pnlPct2 = t.bp ? ((cp - t.bp) / t.bp * 100) : 0;
+    const pnlStatus = t.bp ? `現在${pnlPct2>=0?'+':''}${pnlPct2.toFixed(1)}%（${pnlAmt2>=0?'+':''}${pnlAmt2.toLocaleString()}円）` : '';
+    const toTarget = (t.tgt && cp) ? ((t.tgt - cp) / cp * 100).toFixed(1) : null;
+    const toStop   = (t.sl  && cp) ? ((cp - t.sl)  / cp * 100).toFixed(1) : null;
+    const distanceInfo = [
+      toTarget ? `目標まで+${toTarget}%` : null,
+      toStop   ? `損切りまで-${toStop}%` : null,
+    ].filter(Boolean).join(' / ');
+
+    const cPrompt = isMargin ?
+    `あなたは運用歴25年の日本株専門シニアFMです。信用取引の専門家として今日の判断を断言してください。
+
+【信用建玉】${t.cd} ${t.nm}
+━━ 損益状況 ━━
+買値: ${t.bp?.toLocaleString()}円 × ${t.sh}株（投資額: ${(t.bp*(t.sh||0)).toLocaleString()}円）
+現在値: ${cp.toLocaleString()}円
+含み損益: ${pnlStatus}
+${t.sl?'損切り設定: '+t.sl.toLocaleString()+'円（現在値から'+((t.sl-cp)/cp*100).toFixed(1)+'%）':'損切り: 未設定'}
+${t.tgt?'目標設定: '+t.tgt.toLocaleString()+'円（現在値から+'+(( t.tgt-cp)/cp*100).toFixed(1)+'%）':'目標: 未設定'}
+${distanceInfo}
+
+【J-Quantsデータ】
+${jqText}
+
+【ポートフォリオ全体】${pfDetail||'なし'}
+合計評価額: ${totalVal.toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+━━ 判断してください ━━
+① 【今日の判断】「今日返済」「継続保有」「ナンピン」を一言で断言してから理由3行
+  ※ 含み益${pnlPct2>=0?'+':''}${pnlPct2.toFixed(1)}%の状況でどう動くべきか具体的に
+② 【利確ライン】
+  - J-Quants目標(${wE?.target?.toLocaleString()||'未取得'}円)と現在値の差を踏まえ、
+    今日中に利確すべき水準か、それとも伸ばすべきか断言
+  - 段階利確するなら第1目標・最終目標を具体的な円で
+③ 【損切りライン】
+  - J-Quants損切り(${wE?.stop_loss?.toLocaleString()||'未取得'}円)と自分の設定を比較
+  - 今日ここを割ったら即返済する価格を明示
+④ 【信用固有リスク】追証ライン(買値の約75%＝${t.bp?Math.round(t.bp*0.75).toLocaleString():'?'}円)・金利コスト
+⑤ 【一言】このポジションを今日どうしたいか` :
+    `あなたは運用歴25年の日本株専門シニアFMです。現物保有の専門家として今日の判断を断言してください。
+
+【現物保有】${t.cd} ${t.nm}
+━━ 損益状況 ━━
+買値: ${t.bp?.toLocaleString()}円 × ${t.sh}株（投資額: ${(t.bp*(t.sh||0)).toLocaleString()}円）
+現在値: ${cp.toLocaleString()}円
+含み損益: ${pnlStatus}
+${t.sl?'損切り設定: '+t.sl.toLocaleString()+'円（現在値から'+((t.sl-cp)/cp*100).toFixed(1)+'%）':'損切り: 未設定'}
+${t.tgt?'目標設定: '+t.tgt.toLocaleString()+'円（現在値から+'+(( t.tgt-cp)/cp*100).toFixed(1)+'%）':'目標: 未設定'}
+${distanceInfo}
+
+【J-Quantsデータ】
+${jqText}
+
+【ポートフォリオ全体】${pfDetail||'なし'}
+合計評価額: ${totalVal.toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+━━ 判断してください ━━
+① 【今日の判断】「売却」「継続保有」「買い増し」を一言で断言してから理由3行
+  ※ 含み益${pnlPct2>=0?'+':''}${pnlPct2.toFixed(1)}%の状況でどう動くべきか具体的に
+② 【利確ライン】
+  - J-Quants目標(${wE?.target?.toLocaleString()||'未取得'}円)と現在値の差を踏まえ、
+    今日中に利確すべき水準か、それとも伸ばすべきか断言
+  - 段階利確するなら第1目標・最終目標を具体的な円で
+③ 【損切りライン】
+  - J-Quants損切り(${wE?.stop_loss?.toLocaleString()||'未取得'}円)と自分の設定を比較
+  - 今日ここを割ったら売る価格を明示
+④ 【継続保有の根拠】
+  - 今の含み益を手放してまで保有を続ける理由があるか
+  - テーマ・ファンダ・チャートから判断
+⑤ 【一言】このポジションを今日どうしたいか`;
+
+    const gP = callGemini(gPrompt).then(txt => {
+      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini｜需給・テクニカル</div>' + fmtRevText(txt);
+      const sum1El = card.querySelector('.mrn-summary-g');
+      if(sum1El) { const l1 = txt.split('\n').find(l=>l.trim().length>5)||''; sum1El.textContent = l1.slice(0,42)+(l1.length>42?'…':''); }
+    }).catch(e => {
+      gBlock.innerHTML = '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:4px">🤖 Gemini</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
+    });
+
+    const cP = callClaude(cPrompt).then(txt => {
+      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude｜' + (isMargin?'信用建玉判断':'現物判断') + '</div>' + fmtRevText(txt);
+      const sum2El = card.querySelector('.mrn-summary-c');
+      if(sum2El) {
+        const judge = txt.match(/継続保有|売却|利確|損切り|返済|買い増し|ナンピン/);
+        const j1 = judge ? judge[0] : '分析完了';
+        const firstLine = txt.split('\n').find(l=>l.trim().length>5)||'';
+        sum2El.textContent = '🧠 ' + j1 + '｜' + firstLine.slice(0,28) + (firstLine.length>28?'…':'');
+        sum2El.style.color = (j1==='売却'||j1==='返済'||j1==='損切り') ? 'var(--red)' :
+                             (j1==='買い増し'||j1==='ナンピン') ? 'var(--acc)' : 'var(--green)';
+      }
+    }).catch(e => {
+      cBlock.innerHTML = '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:4px">🧠 Claude</div><span style="color:var(--red);font-size:12px">⚠️ ' + e.message + '</span>';
+    });
+
+    return Promise.all([gP, cP]);
+  });
+
+  await Promise.all([gemMktP, ...stockPs]);
+
+  // 地合いカードのみ展開、銘柄カードは折りたたみのまま（タップで読む）
+  const mktWrap = mktCard.querySelector('.rcard-body-wrap');
+  if(mktWrap){ mktWrap.classList.remove('collapsed'); mktWrap.classList.add('expanded'); mktWrap.classList.remove('rcard-fade'); }
+  const mktChev = mktCard.querySelector('.rev-chevron');
+  if(mktChev) mktChev.textContent='▼';
+
+  btn.disabled = false;
+  btn.innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">🤖Gemini: 需給・信用倍率　🧠Claude: エントリー判断</span>';
+
+  // 結果を保存
+  saveReport(K_MRN, TODAY, document.getElementById('mrnOut').innerHTML);
+  toast('💾 朝チェックを保存しました');
+  rMrnHistory();
+}
+
+function rMrnHistory() {
+  const el = document.getElementById('mrnHistory');
+  if (!el) return;
+  const dates = getReportDates(K_MRN);
+  // 今日以外の履歴
+  const past = dates.filter(d => d !== TODAY);
+  if (!past.length) { el.innerHTML = ''; return; }
+
+  let html = '<div style="margin-top:16px"><div class="sec-lbl" style="margin-bottom:8px">📂 過去の朝チェック履歴</div>';
+  past.slice(0, 7).forEach(d => {
+    const r = loadReport(K_MRN, d);
+    html += '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleHistory(this)">' +
+      '<span style="font-size:13px;font-weight:700">🌅 ' + d + ' <span style="font-size:10px;color:var(--t3);font-weight:400">保存 ' + (r?.savedAt||'') + '</span></span>' +
+      '<span style="color:var(--t3);font-size:12px">▼</span>' +
+      '</div>' +
+      '<div style="display:none;padding:0 4px 8px">' + (r?.html||'') + '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function mkMrnCard(icon, titleHtml, color, pill, defaultOpen) {
+  const card = document.createElement('div');
+  card.className = 'rcard rcard-toggle';
+  card.style.marginBottom = '10px';
+  card.innerHTML =
+    '<div class="rhdr" onclick="toggleRevCard(this)" style="background:linear-gradient(135deg,var(--s1),var(--s2));padding:12px 14px">' +
+    '<span style="font-size:18px;flex-shrink:0">' + icon + '</span>' +
+    '<div style="flex:1;min-width:0;margin-left:6px">' +
+    '<div style="font-size:13px;font-weight:700;color:' + color + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + titleHtml + '</div>' +
+    (pill ? '<div style="font-size:9px;color:var(--t3);margin-top:1px">' + pill + '</div>' : '') +
+    '</div>' +
+    '<span class="rev-chevron" style="font-size:14px;color:var(--t3);flex-shrink:0;margin-left:8px">▶</span>' +
+    '</div>' +
+    '<div class="rcard-body-wrap ' + (defaultOpen ? 'expanded' : 'collapsed') + (defaultOpen ? '' : ' rcard-fade') + '">' +
+    '<div style="padding:6px 14px 4px;display:flex;flex-direction:column;gap:2px"><div class="mrn-summary-g" style="font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🤖 読み込み中...</div><div class="mrn-summary-c" style="font-size:10px;color:var(--t2);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🧠 判断中...</div></div><div class="mrn-body" style="padding:10px 13px 8px"></div>' +
+    '</div>';
+  return card;
+}
+
+// 振り返り
+const GEM_STEPS = [
+  {icon:'📊', title:'今日の保有銘柄の動き', color:'var(--gem)',
+   p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の終値・動きを調べてください。\n保有銘柄: ' + pf + '\n各銘柄について【終値・前日比】【出来高の特徴】【本日の動きの理由】を各2行以内で簡潔に。長文不要。'},
+  {icon:'🌍', title:'明日に影響する材料', color:'var(--gem)',
+   p: pf => 'あなたは日本株専門のシニアFMです。Google検索で最新情報を調べてください。\n保有銘柄: ' + pf + '\n以下を各1〜2行で簡潔に（長文不要）:\n①明日の日本株に影響するNY・為替・指標\n②保有銘柄の明日の材料・注目点\n③明日の相場予想: 強気/中立/弱気 + 理由1行'},
+  {icon:'📱', title:'SNS・市場センチメント', color:'var(--gem)',
+   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で今日のSNS情報を調べてください。\n保有銘柄: ' + pf + '\n箇条書き3点以内・各1行のみ:\n・今日のX/SNSで話題の日本株テーマ\n・保有銘柄への言及・評判\n・市場センチメント: 強気/中立/弱気'},
+];
+const CLD_STEP = {
+  icon:'🎯', title:'明日の作戦・行動計画', color:'var(--cld)',
+  p: pf => 'あなたは運用歴25年のシニアFMです。\n【ポートフォリオ】\n' + pf + '\n以下を率直・具体的・簡潔に（各項目3行以内）:\n① 今日の総括（一言）\n② 保有銘柄ごと: 継続/利確/損切り + 判断価格\n③ 明日の具体的アクション（買い・売り・何もしない）\n④ 注意すべき価格帯・ライン\n⑤ 一言アドバイス'
+};
+
+function mkRevCard(icon, title, color, pill, pillClass) {
+  const card = document.createElement('div');
+  card.className = 'rcard rcard-toggle';
+  card.innerHTML =
+    '<div class="rhdr" onclick="toggleRevCard(this)">' +
+    '<span style="font-size:15px">' + icon + '</span>' +
+    '<span style="font-size:12px;font-weight:700;color:' + color + '">' + title + '</span>' +
+    '<span class="ai-pill ' + pillClass + '" style="margin-left:auto">' + pill + '</span>' +
+    '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+    '</div>' +
+    '<div class="rcard-body-wrap collapsed rcard-fade">' +
+    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>分析中...</span></div></div>' +
+    '</div>';
+  return card;
+}
+function toggleRevCard(hdr) {
+  const wrap = hdr.nextElementSibling;
+  const chev = hdr.querySelector('.rev-chevron');
+  const expanded = wrap.classList.contains('expanded');
+  wrap.classList.toggle('expanded', !expanded);
+  wrap.classList.toggle('collapsed', expanded);
+  wrap.classList.toggle('rcard-fade', !expanded);
+  chev.textContent = expanded ? '▶' : '▼';
+}
+
+// ═══════════════════════════════════════════
+// 📸 振り返り用 終値データ（売買タブのスクショから連携）
+// ═══════════════════════════════════════════
+// localStorageに保存して、タブ切替後やリロード後も保持
+const K_REV_SS = 'tj_rev_ss';   // 終値データ
+const K_REV_SS_DATE = 'tj_rev_ss_date'; // 保存日
+
+let revSsPrices = loadRevSsPrices();  // {code: {code,name,shares,price,chg,chgPct,type}}
+
+function saveRevSsPrices() {
+  try {
+    localStorage.setItem(K_REV_SS, JSON.stringify(revSsPrices));
+    localStorage.setItem(K_REV_SS_DATE, TODAY);
+  } catch(e) { console.error('saveRevSsPrices:', e); }
+}
+
+function loadRevSsPrices() {
+  try {
+    const savedDate = localStorage.getItem(K_REV_SS_DATE);
+    // 当日のデータのみ復元（日付が変わったらクリア）
+    if (savedDate === new Date().toISOString().slice(0,10)) {
+      return JSON.parse(localStorage.getItem(K_REV_SS) || '{}');
+    }
+  } catch(e) { console.error('loadRevSsPrices:', e); }
+  return {};
+}
+
+function updateRevSsStatus() {
+  const el = document.getElementById('revSsStatusBody');
+  if (!el) return;
+  const prices = Object.values(revSsPrices);
+  if (prices.length === 0) {
+    el.innerHTML = '💡 売買タブの「💴 現物保有」「📊 信用建玉」スクショから自動連携されます';
+    el.style.color = 'var(--t3)';
+    return;
+  }
+  el.style.color = 'var(--t2)';
+  el.innerHTML = '<div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:4px">✅ ' + prices.length + '銘柄の終値読み取り済み</div>' +
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">（売買タブのスクショ取込から連携）</div>' +
+    prices.map(it => {
+      const clr = it.chg >= 0 ? 'var(--green)' : 'var(--red)';
+      const tag  = it.type === 'margin'
+        ? '<span style="font-size:9px;background:rgba(251,191,36,.15);color:#f59e0b;border-radius:3px;padding:0 4px">信用</span> '
+        : '<span style="font-size:9px;background:rgba(59,130,246,.15);color:#60a5fa;border-radius:3px;padding:0 4px">現物</span> ';
+      return tag +
+        `<b>${it.code} ${it.name}</b> ` +
+        `<span style="font-family:var(--mono)">${it.price.toLocaleString()}円</span> ` +
+        `<span style="color:${clr}">${it.chg>=0?'+':''}${it.chg}円（${it.chgPct>=0?'+':''}${it.chgPct}%）</span>`;
+    }).join('<br>');
+}
+
+// 後方互換: 旧onRevSsSelect / onRevSsSelectTab が呼ばれても何もしない
+function onRevSsSelect(e) {}
+function onRevSsSelectTab(e, t) {}
+
+async function doRev() {
+  const btn = document.getElementById('revBtn');
+  btn.disabled = true; btn.textContent = '🔄 分析中...';
+  const out = document.getElementById('revOut'); out.innerHTML = '';
+
+  // J-Quantsデータを取得
+  const weeklyData = await fetchWeeklyData();
+
+  // ── スクショから読み取った終値を保有銘柄に反映 ──
+  const hasSsPrices = Object.keys(revSsPrices).length > 0;
+  if (hasSsPrices) {
+    H.forEach(h => {
+      const p = revSsPrices[h.cd];
+      if (p?.price > 0) h.cp = p.price;
+    });
+    sv(KH, H);
+  }
+
+  // ── 保有銘柄の詳細情報を構築（スクショの前日比も含める）──
+  const holdDetail = H.map(h => {
+    const cp = h.cp || h.bp;
+    const pnl = (cp - h.bp) * h.sh;
+    const pct = ((cp - h.bp) / h.bp * 100).toFixed(1);
+    const wE  = findWeeklyEntry(weeklyData, h.cd);
+    const jqLine = wE ?
+      ` ／ J-Quants[${wE.rank||'?'}ランク${wE.margin_ratio?' 信用倍率'+wE.margin_ratio+'倍':''}${wE.atr?' ATR'+wE.atr+'円':''}${wE.stop_loss?' 損切'+wE.stop_loss.toLocaleString()+'円':''}${wE.target?' 目標'+wE.target.toLocaleString()+'円':''}${wE.signals?.length?' シグナル:'+wE.signals.map(s=>s.type).join('/'):''} ${wE.earn_note||''}]`
+      : ' ／ J-Quantsデータなし';
+    // スクショの前日比情報
+    const ssP = revSsPrices[h.cd];
+    const chgStr = ssP ? ` 今日${ssP.chg>=0?'+':''}${ssP.chg}円（${ssP.chgPct>=0?'+':''}${ssP.chgPct}%）` : '';
+    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'} ${h.sh}株）`+
+           ` 買${h.bp.toLocaleString()}円→終値${cp.toLocaleString()}円${chgStr}`+
+           ` 損益${pnl>=0?'+':''}${Math.round(pnl).toLocaleString()}円（${pct>=0?'+':''}${pct}%）`+
+           ` 損切${h.sl?.toLocaleString()||'未'}→目標${h.tgt?.toLocaleString()||'未'}${jqLine}`;
+  }).join('\n') || '保有なし';
+
+  const totalCost = H.reduce((s,h)=>s+h.bp*h.sh, 0);
+  const totalVal  = H.reduce((s,h)=>s+(h.cp||h.bp)*h.sh, 0);
+  const totalPnl  = totalVal - totalCost;
+
+  // スクショ情報の注記
+  const ssNote = hasSsPrices
+    ? `\n【本日の終値（スクショより）】\n` + Object.values(revSsPrices).map(p =>
+        `${p.code} ${p.name}: ${p.price?.toLocaleString()}円 ${p.chg>=0?'+':''}${p.chg}円（${p.chgPct>=0?'+':''}${p.chgPct}%）`
+      ).join('\n')
+    : '\n（終値データなし → 売買タブの「💴 現物保有」「📊 信用建玉」スクショから取込、もしくはGoogle検索で補完してください）';
+
+  const pfJq = `【本日の保有銘柄・終値・損益】${ssNote}\n\n【詳細データ（J-Quants付き）】\n${holdDetail}\n合計評価額: ${totalVal.toLocaleString()}円 ／ 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 ／ 残金: ${Math.round(cash).toLocaleString()}円`;
+
+  // Geminiステップ（J-Quantsデータ主軸・Google検索は補完）
+  const revSteps = [
+    {
+      icon:'📊', title:'今日の保有銘柄の動き・明日への展望', color:'var(--gem)',
+      prompt: `あなたは日本株専門のシニアアナリストです。
+以下のデータを使って今日の振り返りと明日の展望を分析してください。
+${hasSsPrices ? 'スクショから読み取った終値データがあります。' : 'Google検索で今日の終値・動きを補完してください。'}
+
+${pfJq}
+
+【分析してください】
+① 今日の各銘柄の動き評価（終値・前日比・強弱の理由）
+② J-Quantsシグナルと実際の動きの整合性（シグナル通りに動いたか）
+③ 今夜のNY・為替の動向が明日の各銘柄に与える影響予測
+④ J-Quantsの損切りライン・目標価格に対する現在の距離
+⑤ 明日の相場予想: 強気/中立/弱気 + 根拠
+
+【必ず全銘柄に言及すること。データがなければ知識ベースで分析。】`
+    },
+    {
+      icon:'🎯', title:'明日の材料・注意事項', color:'var(--gem)',
+      prompt: `あなたは日本株専門のシニアFMです。
+以下の保有銘柄について、明日の具体的な材料・注意事項を分析してください。
+
+${pfJq}
+
+【分析してください】
+① 各保有銘柄で明日発表予定の決算・適時開示（J-Quantsの決算リスクデータを参照）
+② 米国市場・為替・金利など明日の日本株に影響する外部要因（知識ベースで分析）
+③ 各銘柄のJ-Quants信用倍率・空売り状況から見た需給リスク
+④ 明日注意すべき価格帯（サポート・レジスタンス）を銘柄ごとに
+⑤ ポートフォリオ全体として明日取るべき行動（利確・損切り・継続）
+
+【J-Quantsデータを根拠に断言的に答えること。】`
+    },
+  ];
+
+  // Claude（損益・J-Quants基軸の明日の作戦）
+  const pnlDetail = H.map(h => {
+    const cp2 = h.cp || h.bp;
+    const pnl2 = Math.round((cp2 - h.bp) * h.sh);
+    const pct2 = ((cp2 - h.bp) / h.bp * 100).toFixed(1);
+    const wE2  = findWeeklyEntry(weeklyData, h.cd);
+    const ssP2 = revSsPrices[h.cd];
+    const toTgt = (h.tgt && cp2) ? '+'+((h.tgt-cp2)/cp2*100).toFixed(1)+'%' : '目標未設定';
+    const toSl  = (h.sl  && cp2) ? '-'+((cp2-h.sl)/cp2*100).toFixed(1)+'%'  : '損切未設定';
+    return `${h.cd} ${h.nm}（${h.type==='margin'?'信用':'現物'}）`+
+      ` 買${h.bp.toLocaleString()}→終値${cp2.toLocaleString()}円`+
+      (ssP2 ? ` 今日${ssP2.chg>=0?'+':''}${ssP2.chg}円` : '')+
+      ` ${pct2>=0?'+':''}${pct2}%（${pnl2>=0?'+':''}${pnl2.toLocaleString()}円）`+
+      ` 目標まで${toTgt} 損切まで${toSl}`+
+      (wE2 ? ` [J-Quants:${wE2.rank}ランク 損切${wE2.stop_loss?.toLocaleString()||'?'}円 目標${wE2.target?.toLocaleString()||'?'}円]` : '');
+  }).join('\n') || '保有なし';
+
+  const cldRevPrompt = `あなたは運用歴25年のシニアFMです。本日の終値と損益・J-Quantsデータを基に明日の作戦を立案してください。
+${ssNote}
+
+【保有銘柄の損益状況（必ず全銘柄に言及）】
+${pnlDetail}
+合計評価額: ${totalVal.toLocaleString()}円 / 含み損益: ${totalPnl>=0?'+':''}${Math.round(totalPnl).toLocaleString()}円 / 残金: ${Math.round(cash).toLocaleString()}円
+
+以下を率直・具体的に:
+① 今日の総括: 各銘柄の今日の動き（前日比）を評価・ポートフォリオ全体の状況
+② 銘柄ごとの明日の判断（全銘柄必ず言及）
+   含み益あり → 今の利益を確定すべきか、何円で利確するか
+   含み損あり → 損切り水準まであと何%、どこで損切りするか
+   J-Quantsの損切り・目標価格との距離を円と%で具体的に
+③ 明日の売買ライン: 「ここを超えたら利確: XX円」「ここを割ったら損切り: XX円」
+④ 最大リスクポジション: 今一番危ないポジションと理由
+⑤ 明日へのアドバイス: 相場環境も踏まえた一言`;
+
+  const gemCards = revSteps.map(s => {
+    const card = mkRevCard(s.icon, s.title, s.color, '🤖 Gemini', 'pill-g');
+    out.appendChild(card); return card;
+  });
+  const cldCard = mkRevCard('🎯', '明日の作戦・行動計画', 'var(--cld)', '🧠 Claude', 'pill-c');
+  out.appendChild(cldCard);
+
+  const gemPs = revSteps.map((s, i) =>
+    callGemini(s.prompt).then(txt => {
+      const body = gemCards[i].querySelector('.rbody');
+      body.innerHTML = fmtRevText(txt);
+      const wrap = gemCards[i].querySelector('.rcard-body-wrap');
+      if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded','rcard-fade');}
+      const chev = gemCards[i].querySelector('.rev-chevron');
+      if(chev) chev.textContent='▼';
+    }).catch(e => {
+      gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+    })
+  );
+  const cldP = callClaude(cldRevPrompt).then(txt => {
+    cldCard.querySelector('.rbody').innerHTML = fmtRevText(txt);
+    const wrap = cldCard.querySelector('.rcard-body-wrap');
+    if(wrap){wrap.classList.remove('collapsed');wrap.classList.add('expanded','rcard-fade');}
+    const chev = cldCard.querySelector('.rev-chevron');
+    if(chev) chev.textContent='▼';
+  }).catch(e => {
+    cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>';
+  });
+  await Promise.all([...gemPs, cldP]);
+  btn.disabled = false;
+  btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×明日の戦略</span>';
+
+  // 結果を保存
+  saveReport(K_REV, TODAY, document.getElementById('revOut').innerHTML);
+  toast('💾 振り返りを保存しました');
+  rRevHistory();
+}
+
+function rRevHistory() {
+  const el = document.getElementById('revHistory');
+  if (!el) return;
+  const dates = getReportDates(K_REV);
+  const past = dates.filter(d => d !== TODAY);
+  if (!past.length) { el.innerHTML = ''; return; }
+
+  let html = '<div style="margin-top:16px"><div class="sec-lbl" style="margin-bottom:8px">📂 過去の振り返り履歴</div>';
+  past.slice(0, 14).forEach(d => {
+    const r = loadReport(K_REV, d);
+    html += '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleHistory(this)">' +
+      '<span style="font-size:13px;font-weight:700">🌆 ' + d + ' <span style="font-size:10px;color:var(--t3);font-weight:400">保存 ' + (r?.savedAt||'') + '</span></span>' +
+      '<span style="color:var(--t3);font-size:12px">▼</span>' +
+      '</div>' +
+      '<div style="display:none;padding:0 4px 8px">' + (r?.html||'') + '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function fmtRevText(txt) {
+  if (!txt) return '';
+  return '<div style="font-size:13px;line-height:1.85;color:#cbd5e1">' +
+    txt
+      .replace(/\*\*(.+?)\*\*/g, '<b style="color:#e2e8f0">$1</b>')
+      .replace(/^#{1,3}\s+(.+)$/gm, '<div style="font-size:12px;font-weight:700;color:var(--acc);margin:10px 0 4px">$1</div>')
+      .replace(/^[•\-・]\s+(.+)$/gm, '<div style="padding-left:12px;margin:2px 0">・$1</div>')
+      .replace(/^(\d+)[.．]\s+(.+)$/gm, '<div style="padding-left:12px;margin:3px 0"><span style="color:var(--acc);font-weight:700">$1.</span> $2</div>')
+      .split('\n\n').join('<br><br>')
+      .split('\n').join('<br>') +
+    '</div>';
+}
+
+
+// ═══════════════════════════════════════════
+// 🔬 銘柄スコアリング分析
+// ═══════════════════════════════════════════
+function rAnalyzeQuick() {
+  const el = document.getElementById('azQuickList');
+  if (!el) return;
+  el.innerHTML = '';
+  const all = [
+    ...H.map(h=>({cd:h.cd, nm:h.nm, role:'💼'})),
+    ...W.filter(w=>!H.find(h=>h.cd===w.cd)).map(w=>({cd:w.cd, nm:w.nm, role:'👁'}))
+  ];
+  all.forEach(t => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--text);cursor:pointer';
+    btn.textContent = t.role + ' ' + t.cd + ' ' + t.nm;
+    btn.onclick = () => {
+      document.getElementById('azCode').value = t.cd;
+      document.getElementById('azName').value = t.nm;
+      doAnalyze();
+    };
+    el.appendChild(btn);
+  });
+}
+
+async function doAnalyze() {
+  const code = document.getElementById('azCode').value.trim();
+  const nameIn = document.getElementById('azName').value.trim();
+  if (!code) { toast('⚠️ 証券コードを入力してください'); return; }
+
+  const out = document.getElementById('azOut');
+  out.innerHTML = '<div class="ldg" style="padding:20px"><div class="spin"></div><span>' + code + ' を分析中...</span></div>';
+
+  // 保有・ウォッチから情報を取得
+  const hold = H.find(h=>h.cd===code);
+  const watch = W.find(w=>w.cd===code);
+  const nm = nameIn || (hold?.nm) || (watch?.nm) || code;
+  const tag = watch?.tag || hold?.memo || '';
+  const holdInfo = hold ?
+    `取得単価: ${hold.bp.toLocaleString()}円 × ${hold.sh}株\n現在値: ${(hold.cp||hold.bp).toLocaleString()}円\n含み損益: ${((hold.cp||hold.bp)-hold.bp)*hold.sh>=0?'+':''}${Math.round(((hold.cp||hold.bp)-hold.bp)*hold.sh).toLocaleString()}円\n損切り: ${hold.sl?.toLocaleString()||'未設定'}円 / 目標: ${hold.tgt?.toLocaleString()||'未設定'}円` : '新規候補銘柄';
+  const today = new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'numeric',day:'numeric'});
+
+  // ── J-Quants週次データを取得 ──
+  const weeklyData = await fetchWeeklyData();
+  const wEntry = findWeeklyEntry(weeklyData, code);
+  const wInfo = formatWeeklyInfo(wEntry);
+
+  // ── J-Quantsデータを構造化して整理 ──
+  const jqBase = wEntry ? {
+    rank:         wEntry.rank        || 'データなし',
+    total:        wEntry.total       || 0,
+    price:        wEntry.price       || null,
+    atr:          wEntry.atr         || null,
+    stop_loss:    wEntry.stop_loss   || null,
+    target:       wEntry.target      || null,
+    margin_ratio: wEntry.margin_ratio|| null,
+    fins_note:    wEntry.fins_note   || '',
+    short_note:   wEntry.short_note  || '',
+    earn_note:    wEntry.earn_note   || '',
+    earn_avg:     wEntry.earn_avg_move || null,
+    investor_note:wEntry.investor_note|| '',
+    earnings_risk:wEntry.earnings_risk|| '',
+    signals:      (wEntry.signals||[]).map(s=>(s.icon||'')+(s.type||'')+'('+'★'.repeat(Math.min(s.strength||0,3))+')').join(' / ') || 'なし',
+    g_score:      wEntry.g_theme_score || wEntry.g_score || null,
+    c_score:      wEntry.c_logic_score || wEntry.c_score || null,
+    analyzed_at:  wEntry.analyzed_at || '',
+  } : null;
+
+  const jqSection = jqBase ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【J-Quants週次スキャンデータ】（${jqBase.analyzed_at}時点・これを分析の軸にすること）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+総合評価: ${jqBase.rank}ランク ${jqBase.total}pt（G:${jqBase.g_score||'?'}pt / C:${jqBase.c_score||'?'}pt）
+直近株価: ${jqBase.price?.toLocaleString()||'?'}円
+ATR（日次変動幅）: ${jqBase.atr?.toLocaleString()||'?'}円
+損切りライン: ${jqBase.stop_loss?.toLocaleString()||'?'}円
+目標価格: ${jqBase.target?.toLocaleString()||'?'}円
+信用倍率: ${jqBase.margin_ratio||'?'}倍
+財務: ${jqBase.fins_note||'データなし'}
+空売り需給: ${jqBase.short_note||'データなし'}
+決算特性: ${jqBase.earn_note||'データなし'}
+外国人動向: ${jqBase.investor_note||'データなし'}
+決算リスク: ${jqBase.earnings_risk||'なし'}
+テクニカルシグナル: ${jqBase.signals}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━` :
+`【J-Quantsデータ】週次スキャン未実行またはウォッチリスト外の銘柄（Google検索で補完すること）`;
+
+  // Geminiプロンプト（J-Quants基軸 + ファンダ・需給・テーマをWeb検索で補完）
+  const portfolioNote = H.length > 0
+    ? '\n【保有銘柄（参考）】' + H.map(h => h.cd+' '+h.nm+'（買値'+h.bp.toLocaleString()+'円）').join(', ')
+    : '';
+
+  const gPrompt = `あなたはマクロ経済・テーマ投資に強いチーフストラテジストです。
+以下のJ-Quantsデータを分析の基礎として使い、Google検索で不足情報を補完してください（${today}時点）。
+
+${jqSection}
+
+【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
+${holdInfo !== '新規候補銘柄' ? '【自分のポジション】\n'+holdInfo : '（新規候補銘柄）'}
+${portfolioNote}
+
+━━ J-Quantsデータを基に以下を分析してください ━━
+① J-Quantsの総合評価（${jqBase?.rank||'?'}ランク ${jqBase?.total||0}pt）の妥当性を評価
+② 信用倍率${jqBase?.margin_ratio||'?'}倍・空売り状況からの需給判断
+③ 決算特性（${jqBase?.earn_note||'データなし'}）を踏まえた今後のリスク
+④ Google検索で最新ニュース・材料・アナリスト評価を調べて追記
+⑤ テーマ性: 国策・世界トレンドとの合致度
+
+【採点基準（各0〜20点 × 5項目 = 100点）】
+1. ファンダメンタルズ: J-Quantsの財務データ（${jqBase?.fins_note||'?'}）＋最新決算
+2. 需給優位性: J-Quantsの信用倍率${jqBase?.margin_ratio||'?'}倍・空売り数値を基準に
+3. テーマ合致度: 国策・世界トレンドとの一致
+4. 材料の質: J-Quantsの決算特性＋Google検索で調べた最新ニュース
+5. スイング適性: J-QuantsのシグナルとAI評価を踏まえた1〜4週間の見通し
+
+【絶対ルール】J-Quantsのランクを根拠にすること。良い銘柄65〜85点、悪い銘柄20〜35点。
+
+ファンダ・需給コメント（200字以内）:
+テーマ合致スコア: XX点/100点
+判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
+
+  // Claudeプロンプト（J-Quants基軸 + テクニカルをWeb検索で補完）
+  const cPrompt = `あなたはスイングトレード専門のクオンツアナリストです（運用歴20年）。
+以下のJ-Quantsデータを分析の基礎として使い、Google検索でチャート情報を補完してください（${today}時点）。
+
+${jqSection}
+
+【銘柄】${code} ${nm}${tag?' ('+tag+')':''}
+${holdInfo !== '新規候補銘柄' ? '【自分のポジション】\n'+holdInfo : '（新規候補銘柄）'}
+
+━━ J-Quantsデータを基に以下を分析してください ━━
+① J-Quantsの損切りライン（${jqBase?.stop_loss?.toLocaleString()||'?'}円）・目標価格（${jqBase?.target?.toLocaleString()||'?'}円）の根拠を説明
+② ATR（${jqBase?.atr?.toLocaleString()||'?'}円）から今週の値幅予想とエントリー価格帯
+③ J-Quantsのシグナル（${jqBase?.signals||'なし'}）の信頼性を評価
+④ Google検索で5日線・25日線・出来高トレンドを調べて追記
+⑤ J-Quantsの損切り・目標を修正すべきか、そのままでよいか判断
+
+【採点基準（各0〜20点 × 5項目 = 100点）】
+1. トレンド強度: J-QuantsのシグナルとATR（${jqBase?.atr||'?'}円）を軸に評価
+2. エントリータイミング: J-Quantsのシグナル（${jqBase?.signals||'なし'}）の質を評価
+3. RR合理性: J-Quantsの損切り${jqBase?.stop_loss?.toLocaleString()||'?'}円→目標${jqBase?.target?.toLocaleString()||'?'}円のRR比を計算
+4. チャートパターン: Google検索で確認した最新チャートと照合
+5. リスク管理: 信用倍率${jqBase?.margin_ratio||'?'}倍・決算リスク（${jqBase?.earnings_risk||'なし'}）
+
+【絶対ルール】J-Quantsの数値を具体的に引用すること。±20点乖離禁止。良い銘柄65〜85点、悪い銘柄20〜35点。
+
+テクニカルコメント（200字以内）:
+論理的期待値スコア: XX点/100点
+判定: ◎今すぐ買い / ○条件付き / △様子見 / ×見送り`;
+
+  try {
+    const [gTxt, cTxt] = await Promise.all([
+      callGemini(gPrompt).catch(e => 'エラー: ' + e.message),
+      callClaude(cPrompt).catch(e => 'エラー: ' + e.message),
+    ]);
+
+    // スコア抽出
+    const gScore = extractAzScore(gTxt, ['テーマ合致スコア']);
+    const cScore = extractAzScore(cTxt, ['論理的期待値スコア']);
+    const total = gScore + cScore;
+    const rank = total >= 160 ? 'S' : total >= 140 ? 'A' : total >= 110 ? 'B' : 'C';
+    const rankLabel = {S:'即エントリー候補',A:'条件付き監視',B:'要観察',C:'見送り'}[rank];
+    const rankColor = {S:'#f59e0b',A:'#10b981',B:'#3b82f6',C:'#4b6088'}[rank];
+
+    // 判定抽出
+    const gJudge = extractAzJudge(gTxt);
+    const cJudge = extractAzJudge(cTxt);
+
+    // カードHTML生成
+    out.innerHTML = '';
+
+    // ── J-Quantsデータカード（あれば最初に表示） ──
+    if (wInfo) {
+      const jqCard = document.createElement('div');
+      jqCard.className = 'rcard rcard-toggle';
+      jqCard.innerHTML =
+        '<div class="rhdr" onclick="toggleRevCard(this)">' +
+        '<span style="font-size:14px">📊</span>' +
+        '<span style="font-size:12px;font-weight:700;color:#10b981">J-Quants週次データ</span>' +
+        '<span style="margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:700;color:' + wInfo.rankColor + '">' +
+        wInfo.rank + 'ランク ' + wInfo.total + 'pt</span>' +
+        '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+        '</div>' +
+        '<div class="rcard-body-wrap expanded rcard-fade">' +
+        '<div class="rbody">' +
+        '<div style="font-size:12px;line-height:2;color:var(--text)">' +
+        wInfo.lines.map(l => {
+          if (l.includes('シグナル')) return '<div style="color:#f59e0b">📡 ' + l + '</div>';
+          if (l.includes('⚠️')) return '<div style="color:var(--red)">' + l + '</div>';
+          if (l.includes('損切り')) return '<div style="color:var(--red)">🛑 ' + l + '</div>';
+          if (l.includes('目標')) return '<div style="color:var(--green)">🎯 ' + l + '</div>';
+          if (l.includes('信用倍率')) return '<div>📊 ' + l + '</div>';
+          if (l.includes('AI評価')) return '<div style="color:var(--acc);font-weight:700">🤝 ' + l + '</div>';
+          return '<div>' + l + '</div>';
+        }).join('') +
+        '</div></div></div>';
+      out.appendChild(jqCard);
+    } else {
+      const noJqNote = document.createElement('div');
+      noJqNote.style.cssText = 'background:rgba(75,96,136,.15);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--t3);margin-bottom:8px;text-align:center';
+      noJqNote.textContent = '📊 J-Quants週次データなし（週次スキャン未実行またはウォッチリスト外の銘柄）';
+      out.appendChild(noJqNote);
+    }
+
+    // ── サマリーカード ──
+    const sumCard = document.createElement('div');
+    sumCard.className = 'score-card';
+    sumCard.innerHTML =
+      '<div class="score-hdr">' +
+      '<div><div class="score-title">' + code + ' ' + nm + '</div>' +
+      '<div style="font-size:11px;color:var(--t3);margin-top:2px">' + (tag||'') + ' / ' + (hold?'💼保有中':'👁監視候補') + '</div></div>' +
+      '<div style="text-align:right">' +
+      '<div class="score-badge ' + rank.toLowerCase() + '">' + rank + '</div>' +
+      '<div style="font-size:10px;color:' + rankColor + ';margin-top:2px">' + rankLabel + '</div>' +
+      '</div></div>' +
+      '<div class="score-bars">' +
+      mkScoreBar('🤖 テーマ', gScore, '#4285f4') +
+      mkScoreBar('🧠 ロジック', cScore, '#d97706') +
+      mkScoreBar('合計', Math.round(total/2), total>=160?'#f59e0b':total>=140?'#10b981':'#3b82f6') +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--border)">' +
+      '<div style="padding:10px 12px;border-right:1px solid var(--border)">' +
+      '<div style="font-size:10px;color:var(--gem);font-weight:700;margin-bottom:3px">🤖 Gemini判定</div>' +
+      '<div style="font-size:13px;font-weight:700;color:var(--text)">' + gJudge + '</div>' +
+      '</div>' +
+      '<div style="padding:10px 12px">' +
+      '<div style="font-size:10px;color:var(--cld);font-weight:700;margin-bottom:3px">🧠 Claude判定</div>' +
+      '<div style="font-size:13px;font-weight:700;color:var(--text)">' + cJudge + '</div>' +
+      '</div></div>';
+    out.appendChild(sumCard);
+
+    // ── Gemini詳細カード ──
+    const gCard = document.createElement('div');
+    gCard.className = 'rcard rcard-toggle';
+    gCard.innerHTML =
+      '<div class="rhdr" onclick="toggleRevCard(this)">' +
+      '<span style="font-size:14px">🤖</span>' +
+      '<span style="font-size:12px;font-weight:700;color:var(--gem)">需給・テーマ分析（Gemini）</span>' +
+      '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:#4285f4;margin-left:auto">' + gScore + 'pt</span>' +
+      '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+      '</div>' +
+      '<div class="rcard-body-wrap expanded rcard-fade">' +
+      '<div class="rbody">' + fmtRevText(gTxt) + '</div>' +
+      '</div>';
+    out.appendChild(gCard);
+
+    // ── Claude詳細カード ──
+    const cCard = document.createElement('div');
+    cCard.className = 'rcard rcard-toggle';
+    cCard.innerHTML =
+      '<div class="rhdr" onclick="toggleRevCard(this)">' +
+      '<span style="font-size:14px">🧠</span>' +
+      '<span style="font-size:12px;font-weight:700;color:var(--cld)">テクニカル・判断（Claude）</span>' +
+      '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:#d97706;margin-left:auto">' + cScore + 'pt</span>' +
+      '<span class="rev-chevron" style="font-size:12px;color:var(--t3);margin-left:6px">▼</span>' +
+      '</div>' +
+      '<div class="rcard-body-wrap expanded rcard-fade">' +
+      '<div class="rbody">' + fmtRevText(cTxt) + '</div>' +
+      '</div>';
+    out.appendChild(cCard);
+
+    // ── 注目リストに自動追加 ──
+    if (!H.find(h=>h.cd===code) && !W.find(w=>w.cd===code)) {
+      W.push({cd:code, nm:nm, tag:tag||'銘柄分析から追加', dt:TODAY});
+      sv(KW, W);
+      const autoNote = document.createElement('div');
+      autoNote.style.cssText = 'background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--acc);margin-bottom:8px;text-align:center';
+      autoNote.textContent = '👁 ' + nm + ' を注目リストに追加しました';
+      out.insertBefore(autoNote, out.firstChild);
+    } else if (H.find(h=>h.cd===code)) {
+      const holdNote = document.createElement('div');
+      holdNote.style.cssText = 'background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--green);margin-bottom:8px;text-align:center';
+      holdNote.textContent = '💼 保有中の銘柄です';
+      out.insertBefore(holdNote, out.firstChild);
+    }
+
+  } catch(e) {
+    out.innerHTML = '<div style="color:var(--red);padding:16px">⚠️ ' + e.message + '</div>';
+  }
+
+  // 銘柄分析結果を保存（銘柄コードと日付をキーに）
+  setTimeout(() => {
+    const outHtml = document.getElementById('azOut').innerHTML;
+    if (outHtml) {
+      const azData = ld(K_AZ, {});
+      const key = code + '_' + TODAY;
+      azData[key] = { code, nm, html: outHtml, date: TODAY,
+        savedAt: new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}) };
+      // 90件を超えたら古いものを削除
+      const keys = Object.keys(azData).sort().reverse();
+      keys.slice(90).forEach(k => delete azData[k]);
+      sv(K_AZ, azData);
+      rAzHistory();
     }
   }, 100);
 }
 
-function resetJudgment(code){
-  delete JUDGMENTS[code];
-  LS.set(K.judgments, JUDGMENTS);
-  renderHoldings();
+function toggleHistory(hdr) {
+  const body = hdr.nextElementSibling;
+  const chev = hdr.querySelector('span:last-child');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  chev.textContent = isOpen ? '▼' : '▲';
 }
 
-function addManualHolding(){
-  const code = document.getElementById("addCode").value.trim();
-  const name = document.getElementById("addName").value.trim();
-  const stop = parseFloat(document.getElementById("addStop").value) || null;
-  if (!code || !name) { toast("⚠️ コードと銘柄名は必須"); return; }
-  const list = LS.get(K.manual_holdings, []);
-  if (list.some(h => h.code === code)) { toast("⚠️ 既に追加済み"); return; }
-  list.push({code, name, stop_loss: stop, type: "spot"});
-  LS.set(K.manual_holdings, list);
-  toast(`✅ ${name} を追加`);
-  loadHoldings();
+function rAzHistory() {
+  const el = document.getElementById('azHistory');
+  if (!el) return;
+  const azData = ld(K_AZ, {});
+  const entries = Object.entries(azData).sort((a,b) => b[0].localeCompare(a[0])).slice(0, 20);
+  if (!entries.length) { el.innerHTML = ''; return; }
+
+  let html = '<div style="margin-top:16px"><div class="sec-lbl" style="margin-bottom:8px">📂 過去の銘柄分析</div>';
+  entries.forEach(([key, r]) => {
+    html += '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleHistory(this)">' +
+      '<span style="font-size:13px;font-weight:700">🔬 ' + r.code + ' ' + r.nm +
+      ' <span style="font-size:10px;color:var(--t3);font-weight:400">' + r.date + ' ' + (r.savedAt||'') + '</span></span>' +
+      '<span style="color:var(--t3);font-size:12px">▼</span>' +
+      '</div>' +
+      '<div style="display:none;padding:0 4px 8px">' + (r.html||'') + '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 
-function syncFromV1(){
-  cache.delete(URLS.latest_prices);
-  loadHoldings();
-  toast("🔄 再読込完了");
+function mkScoreBar(lbl, score, color) {
+  const pct = Math.min(Math.max(score, 0), 100);
+  return '<div class="score-bar-row">' +
+    '<div class="score-bar-lbl">' + lbl + '</div>' +
+    '<div class="score-bar-track"><div class="score-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+    '<div class="score-bar-val" style="color:' + color + '">' + score + '</div>' +
+    '</div>';
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Phase 5.3: 見送り（スルー）機能
-// ════════════════════════════════════════════════════════════════════
-
-// 見送りモーダルの内部状態（モーダルが閉じるまで保持）
-let _skipCtx = null;  // {mode: "holding"|"new", code, name}
-
-// 見送りモーダルを開く
-//   ctx = {mode: "holding", code, name}     - 保有銘柄の判定として
-//   ctx = {mode: "new"}                     - フォーム入力（コード・銘柄名）から
-//   ctx = {mode: "new", code, name}         - フォーム値が事前にある状態で開く
-function openSkipModal(ctx){
-  _skipCtx = ctx || {mode: "new"};
-
-  // ヘッダ情報の組み立て
-  const target = document.getElementById("skipTargetInfo");
-  const codeArea = document.getElementById("skipCodeInputArea");
-
-  if (_skipCtx.mode === "holding"){
-    const c5 = code4to5(_skipCtx.code);
-    const price = getPrice(_skipCtx.code);
-    const priceStr = price ? `¥${fmt(price.close, 0)} (${price.change_pct >= 0 ? '+' : ''}${fmt(price.change_pct, 2)}%)` : "価格不明";
-    target.innerHTML = `
-      <div><b>${escapeHtml(_skipCtx.name)}</b> <span style="color:var(--t3);font-family:var(--mono);">${c5}</span></div>
-      <div class="skip-target-meta">保有銘柄として「見送り」（今日は何もしない）を記録します / 現在値 ${priceStr}</div>
-    `;
-    codeArea.innerHTML = "";
-  } else {
-    // new モード: コード/銘柄名入力欄を出す
-    target.innerHTML = `
-      <div><b>新規検討の見送り記録</b></div>
-      <div class="skip-target-meta">買おうか迷ったが見送った銘柄を記録します。後日「見送って正解だったか」をレビューで検証できます。</div>
-    `;
-    codeArea.innerHTML = `
-      <div class="modal-sec-title" style="margin-bottom:6px;">銘柄</div>
-      <div class="skip-code-input">
-        <input type="text" id="skipCodeInp" placeholder="コード" maxlength="5" value="${escapeHtml(_skipCtx.code || "")}">
-        <input type="text" id="skipNameInp" placeholder="銘柄名" value="${escapeHtml(_skipCtx.name || "")}">
-      </div>
-    `;
+function extractAzScore(txt, keys) {
+  for (const key of keys) {
+    const m = txt.match(new RegExp(key + '[：:s]*([0-9]+)'));
+    if (m) { const v=parseInt(m[1]); if(v>=0&&v<=100) return v; }
   }
-
-  // 理由チェックボックスの組み立て
-  const reasonsEl = document.getElementById("skipReasons");
-  reasonsEl.innerHTML = SKIP_REASONS.map((r, i) => `
-    <label class="skip-reason" data-reason="${escapeHtml(r)}" onclick="toggleSkipReason(this)">
-      <input type="checkbox">
-      <span class="check"></span>
-      <span>${escapeHtml(r)}</span>
-    </label>
-  `).join("");
-
-  document.getElementById("skipMemo").value = "";
-  document.getElementById("skipConfirmBtn").disabled = true;
-
-  document.getElementById("skipModal").classList.add("on");
+  const m2 = txt.match(/([0-9]+)\s*点[\/\/]100/);
+  if (m2) { const v=parseInt(m2[1]); if(v>=0&&v<=100) return v; }
+  return 50;
 }
 
-function closeSkipModal(){
-  document.getElementById("skipModal").classList.remove("on");
-  _skipCtx = null;
+function extractAzJudge(txt) {
+  const m = txt.match(/判定[：:]\s*([◎○△×][^\n]{0,20})/);
+  if (m) return m[1].trim().slice(0,20);
+  if (txt.includes('◎')) return '◎ 今すぐ買い';
+  if (txt.includes('○')) return '○ 条件付き';
+  if (txt.includes('△')) return '△ 様子見';
+  if (txt.includes('×')) return '× 見送り';
+  return '判定中';
 }
 
-// チェックボックストグル + 確定ボタンの活性制御
-function toggleSkipReason(el){
-  el.classList.toggle("on");
-  const cb = el.querySelector("input");
-  if (cb) cb.checked = el.classList.contains("on");
-  updateSkipConfirmState();
+
+// チャット
+let chatMode = 'gc', gemHist = [], cldHist = [];
+function setMode(m) {
+  chatMode = m;
+  ['modeGC','modeG','modeC'].forEach(id => document.getElementById(id).classList.remove('on'));
+  document.getElementById(m==='gc'?'modeGC':m==='g'?'modeG':'modeC').classList.add('on');
 }
-
-function updateSkipConfirmState(){
-  const checked = document.querySelectorAll("#skipReasons .skip-reason.on").length;
-  const memo = document.getElementById("skipMemo").value.trim();
-  // 理由を1つ以上 OR メモが入力されていれば確定可能
-  document.getElementById("skipConfirmBtn").disabled = (checked === 0 && memo.length === 0);
-}
-
-// モーダル背景クリックで閉じる + メモ入力で確定状態を更新
-document.getElementById("skipModal").onclick = (e) => {
-  if (e.target.id === "skipModal") closeSkipModal();
-};
-document.getElementById("skipMemo").addEventListener("input", updateSkipConfirmState);
-
-// 確定: 見送りを記録
-function confirmSkip(){
-  if (!_skipCtx){ closeSkipModal(); return; }
-
-  const reasons = Array.from(document.querySelectorAll("#skipReasons .skip-reason.on"))
-    .map(el => el.dataset.reason);
-  const memo = document.getElementById("skipMemo").value.trim();
-
-  if (_skipCtx.mode === "holding"){
-    // 保有銘柄の見送り判定 → setJudgment 経由で JUDGMENTS に保存
-    closeSkipModal();
-    setJudgment(_skipCtx.code, "skip", {reasons, memo});
-    toast(`⏭️ ${_skipCtx.name} を見送り記録`);
-  } else {
-    // 新規検討の見送り → K.skip_log（localStorage、日付別配列）に保存
-    let code = _skipCtx.code || "";
-    let name = _skipCtx.name || "";
-    const codeInp = document.getElementById("skipCodeInp");
-    const nameInp = document.getElementById("skipNameInp");
-    if (codeInp) code = codeInp.value.trim();
-    if (nameInp) name = nameInp.value.trim();
-    if (!code && !name){
-      toast("⚠️ コードか銘柄名を入力してください");
-      return;
-    }
-
-    const log = LS.get(K.skip_log, []);
-    const entry = {
-      date: TODAY,
-      code, name,
-      reasons, memo,
-      timestamp: new Date().toISOString(),
-    };
-    log.push(entry);
-    LS.set(K.skip_log, log);
-    closeSkipModal();
-    toast(`⏭️ ${name || code} を見送り記録`);
-
-    // フォーム値を初期化
-    const ac = document.getElementById("addCode");
-    const an = document.getElementById("addName");
-    const as = document.getElementById("addStop");
-    if (ac) ac.value = "";
-    if (an) an.value = "";
-    if (as) as.value = "";
-  }
-}
-
-// 手動追加フォーム下のリンクから呼ばれる
-function skipNewStockFromForm(){
-  const code = (document.getElementById("addCode")?.value || "").trim();
-  const name = (document.getElementById("addName")?.value || "").trim();
-  openSkipModal({mode: "new", code, name});
-}
-
-// 当日の見送り記録（K.skip_log のうち today 分のみ）を取得
-function getTodaysSkipLog(){
-  const log = LS.get(K.skip_log, []);
-  return log.filter(e => e.date === TODAY);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  ③ 計画生成 (v0.9 B-β: Gemini市場速報 + Claude計画 の2段分業)
-//    Step1: Gemini 2.5 Flash + Google検索
-//           → 今朝のNY市況・為替・関連セクター・ヘッドライン (オプショナル)
-//    Step2: Claude Haiku 4.5
-//           → Step1結果を踏まえた今日の行動計画 (必須)
-//    Gemini が未設定/失敗でも Claude 単独で続行（無劣化フォールバック）
-//    キャッシュ schema: {date, step1:{text|error}|null, step2:{text,generated_at}, generated_at}
-//    後方互換: v0.8 schema {date,text,generated_at} も読み込み可
-// ════════════════════════════════════════════════════════════════════
-
-function renderPlanInitial(){
-  // 既に生成済みの計画があれば表示（新schema優先、legacy schema対応）
-  const cached = LS.get(K.last_plan, null);
-  if (cached && cached.date === TODAY) {
-    // v0.9 新schema
-    if (cached.step2 && cached.step2.text) {
-      PLAN_TEXT = cached.step2.text;
-      renderPlanCards(cached.step1 || null, cached.step2);
-      return;
-    }
-    // v0.8 legacy schema (同日のキャッシュはクラッシュさせず Claude-only として表示)
-    if (cached.text) {
-      PLAN_TEXT = cached.text;
-      renderPlanCards(null, {text: cached.text, generated_at: cached.generated_at});
-      return;
-    }
-  }
-
-  // 未生成: 生成ボタン
-  const geminiAvailable = !!((LS.raw(K.api_gemini) || "").trim());
-  document.getElementById("bodyPlan").innerHTML = `
-    <button class="plan-gen-btn" onclick="generatePlan()">
-      🌅 今日の計画を生成
-    </button>
-    <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:center;line-height:1.6;">
-      ${geminiAvailable
-        ? `🌍 ${GEMINI_MODEL} + 🧠 ${CLAUDE_MODEL}<br>コスト目安: 約¥2〜3/回`
-        : `🧠 ${CLAUDE_MODEL} のみ<br><span style="color:var(--yellow);">💡 Gemini キー設定で今朝の市場速報も自動取得</span><br>コスト目安: 約¥1〜2/回`
-      }
-    </div>
-  `;
-  document.getElementById("badgePlan").textContent = "未生成";
-  document.getElementById("badgePlan").className = "sec-badge active";
-  document.getElementById("doneBtn").disabled = true;
-}
-
-async function generatePlan(){
-  const claudeKey = LS.raw(K.api_claude);
-  if (!claudeKey || !claudeKey.trim()) {
-    document.getElementById("bodyPlan").innerHTML = `
-      <div class="plan-error">
-        ⚠️ Claude API キーが未設定です<br>
-        画面右上の <b>⚙️ 設定</b> から登録してください。
-      </div>
-      <button class="plan-gen-btn" onclick="openSettings()" style="margin-top:10px;">
-        ⚙️ 設定を開く
-      </button>
-    `;
-    return;
-  }
-
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  const useGemini = !!geminiKey;
-
-  // ── Step1: Gemini 市場速報 (optional) ──
-  let step1Result = null;
-  if (useGemini) {
-    document.getElementById("bodyPlan").innerHTML = `
-      <div class="ja-step-card loading">
-        <div class="ja-step-hdr">🌍 今朝の市場を調査中...</div>
-        <div class="ja-step-body" style="color:var(--t3);">Gemini が Google検索で NY市況・為替・セクター動向を取得しています（15〜30秒）</div>
-      </div>
-    `;
-    try {
-      const giPrompt = buildGeminiMarketBriefPrompt();
-      const giText = await callGemini(geminiKey, giPrompt, {useSearch: true, maxTokens: 2000});
-      step1Result = {text: giText, generated_at: new Date().toISOString()};
-    } catch(e) {
-      console.warn("Gemini market brief failed:", e);
-      step1Result = {error: e.message || String(e)};
-    }
-  }
-
-  // ── Step1 結果を表示しつつ Step2 ローディング ──
-  const step1Html = step1Result
-    ? renderStepCard(1, "今朝の市場速報", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)
-    : "";
-  const hasGeminiText = !!(step1Result && step1Result.text);
-  document.getElementById("bodyPlan").innerHTML = `
-    ${step1Html}
-    <div class="ja-step-card loading">
-      <div class="ja-step-hdr">🧠 今日の計画を考案中...</div>
-      <div class="ja-step-body" style="color:var(--t3);">Claude が保有銘柄・マクロ${hasGeminiText ? "・市場速報" : ""}を統合しています</div>
-    </div>
-  `;
-
-  // ── Step2: Claude 計画 ──
+async function doChat() {
+  const inp = document.getElementById('cinp');
+  const txt = inp.value.trim(); if(!txt) return;
+  inp.value=''; autoH(inp);
+  document.getElementById('csend').disabled = true;
+  addMsg('u', txt);
+  const pf = pfS();
+  const gemSys = 'あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。\nポートフォリオ: ' + pf;
+  const cldSys = 'あなたは運用歴25年の日本株専門シニアFMです。\nポートフォリオ: ' + pf + '\n率直・具体的にアドバイスしてください。';
+  const ldEl = document.createElement('div'); ldEl.className='cmsg';
+  ldEl.innerHTML = '<div class="cav">' + (chatMode==='gc'?'🤝':chatMode==='g'?'🤖':'🧠') + '</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
+  document.getElementById('cMsgs').appendChild(ldEl); sC();
   try {
-    const geminiText = hasGeminiText ? step1Result.text : null;
-    const prompt = buildPlanPrompt(geminiText);
-    const text = await callClaude(claudeKey, prompt);
-    PLAN_TEXT = text;
+    if (chatMode==='g') {
+      gemHist.push({role:'user',parts:[{text:txt}]});
+      const r = await callGemini(txt, gemSys, gemHist.slice(-8));
+      ldEl.remove(); addAIMsg('g', r);
+      gemHist.push({role:'model',parts:[{text:r}]});
+    } else if (chatMode==='c') {
+      cldHist.push({role:'user',content:txt});
+      const r = await callClaude(txt, cldSys, cldHist.slice(-10));
+      ldEl.remove(); addAIMsg('c', r);
+      cldHist.push({role:'assistant',content:r});
+    } else {
+      gemHist.push({role:'user',parts:[{text:txt}]});
+      cldHist.push({role:'user',content:txt});
+      const [gr, cr] = await Promise.all([
+        callGemini(txt, gemSys, gemHist.slice(-8)).catch(e => '⚠️ ' + e.message),
+        callClaude(txt, cldSys, cldHist.slice(-10)).catch(e => '⚠️ ' + e.message),
+      ]);
+      ldEl.remove(); addDualMsg(gr, cr);
+      gemHist.push({role:'model',parts:[{text:gr}]});
+      cldHist.push({role:'assistant',content:cr});
+    }
+  } catch(e) { ldEl.remove(); addAIMsg('c', '⚠️ ' + e.message); }
+  document.getElementById('csend').disabled = false;
+}
+function addMsg(role, txt) {
+  const w=document.getElementById('cMsgs'), d=document.createElement('div');
+  d.className='cmsg'+(role==='u'?' u':'');
+  d.innerHTML = role==='u' ? '<div class="cb">'+esc(txt)+'</div><div class="cav">👤</div>' : '<div class="cav">🧠</div><div class="cb">'+esc(txt)+'</div>';
+  w.appendChild(d); sC();
+}
+function addAIMsg(who, txt) {
+  const w=document.getElementById('cMsgs'), d=document.createElement('div');
+  d.className='cmsg';
+  d.innerHTML='<div class="cav">'+(who==='g'?'🤖':'🧠')+'</div><div class="cb">'+esc(txt)+'</div>';
+  w.appendChild(d); sC();
+}
+function addDualMsg(gTxt, cTxt) {
+  const w=document.getElementById('cMsgs'), d=document.createElement('div');
+  d.style.marginBottom='8px';
+  d.innerHTML='<div class="dual-bubble"><div class="db-pane"><div class="db-hdr dhg">🤖 Gemini（市場情報）</div>'+esc(gTxt)+'</div><div class="db-pane"><div class="db-hdr dhc">🧠 Claude（戦略判断）</div>'+esc(cTxt)+'</div></div>';
+  w.appendChild(d); sC();
+}
+function sC() { const w=document.getElementById('cMsgs'); setTimeout(()=>w.scrollTop=w.scrollHeight,50); }
+function autoH(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,90)+'px'; }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
 
-    const nowIso = new Date().toISOString();
-    const step2 = {text, generated_at: nowIso};
+// Gemini API
 
-    // localStorage キャッシュ (v0.9 新schema)
-    LS.set(K.last_plan, {
-      date: TODAY,
-      step1: step1Result,
-      step2,
-      generated_at: nowIso,
-    });
+// ═══════════════════════════════════════════
+// 📊 J-Quants週次データ（GitHubのweekly_results.jsonから取得）
+// ═══════════════════════════════════════════
+const GITHUB_RAW_BASE = 'https://raw.githubusercontent.com/hiroki300/stock-checker/main/';
+let weeklyCache = null;
+let weeklyCacheTime = 0;
 
-    renderPlanCards(step1Result, step2);
+async function fetchWeeklyData() {
+  // 30分以内のキャッシュは再利用
+  if (weeklyCache && (Date.now() - weeklyCacheTime) < 30 * 60 * 1000) {
+    return weeklyCache;
+  }
+  try {
+    const r = await fetch(GITHUB_RAW_BASE + 'weekly_results.json?t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) return null;
+    const data = await r.json();
+    weeklyCache = data;
+    weeklyCacheTime = Date.now();
+    return data;
   } catch(e) {
-    console.error("plan generation failed:", e);
-    const step1HtmlRetry = step1Result
-      ? renderStepCard(1, "今朝の市場速報", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)
-      : "";
-    document.getElementById("bodyPlan").innerHTML = `
-      ${step1HtmlRetry}
-      <div class="plan-error" style="margin-top:10px;">
-        ⚠️ 計画生成に失敗しました<br>
-        ${escapeHtml(e.message)}
-      </div>
-      <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:10px;">
-        🔄 再試行
-      </button>
-    `;
-    document.getElementById("badgePlan").textContent = "❌";
-    document.getElementById("badgePlan").className = "sec-badge error";
+    console.warn('weekly_results.json取得失敗:', e);
+    return null;
   }
 }
 
-// 2カード描画（Step1 Gemini 市場速報 + Step2 Claude 計画）
-// step1 は null / {text,generated_at} / {error} のいずれか
-// step2 は {text,generated_at}（必須）
-function renderPlanCards(step1, step2){
-  // v0.11: 各カード右上に 📋 コピーボタンを添える
-  // v0.15: さらに 💬 深掘りボタンを並置
-  let step1Html = "";
-  if (step1) {
-    // renderStepCard はヘッダ固定なので、外側ラッパで並置する方式に変更
-    const inner = renderStepCard(1, "今朝の市場速報", "🌍", step1, `🤖 ${GEMINI_MODEL} + Google検索`);
-    step1Html = `
-      <div style="position:relative;">
-        ${inner}
-        ${(!step1.error && step1.text) ? `
-          <div class="btn-row-tr">
-            <button class="copy-btn-sm" onclick="copyPlanStep1()" title="市場速報をMarkdownコピー">📋 コピー</button>
-            <button class="drill-btn-sm" onclick="drilldownChatPlanStep1()" title="チャットで深掘り">💬 深掘り</button>
-          </div>
-        ` : ''}
-      </div>`;
+function findWeeklyEntry(data, code) {
+  if (!Array.isArray(data)) return null;
+  return data.find(r => String(r.code) === String(code)) || null;
+}
+
+function formatWeeklyInfo(entry) {
+  if (!entry) return null;
+  try {
+    const rank = entry.rank || 'N/A';
+    const total = entry.total || 0;
+    const rankColor = {S:'#f59e0b', A:'#10b981', B:'#3b82f6', C:'#4b6088'}[rank] || '#4b6088';
+    const fmt = v => (v != null && !isNaN(v)) ? Number(v).toLocaleString() : '?';
+    const lines = [];
+    if (entry.price)        lines.push('直近株価: ' + fmt(entry.price) + '円');
+    if (entry.atr)          lines.push('ATR: ' + fmt(entry.atr) + '円（日次変動幅）');
+    if (entry.stop_loss)    lines.push('損切りライン: ' + fmt(entry.stop_loss) + '円');
+    if (entry.target)       lines.push('目標価格: ' + fmt(entry.target) + '円');
+    if (entry.margin_ratio) lines.push('信用倍率: ' + entry.margin_ratio + '倍');
+    if (entry.fins_note)    lines.push('財務: ' + entry.fins_note);
+    if (entry.short_note)   lines.push('空売り: ' + entry.short_note);
+    if (entry.earn_note)    lines.push('決算特性: ' + entry.earn_note);
+    if (entry.investor_note) lines.push(entry.investor_note);
+    if (entry.earnings_risk) lines.push('⚠️ ' + entry.earnings_risk);
+    const sigs = (entry.signals || []).filter(s=>s).map(s =>
+      (s.icon||'') + (s.type||'') + '(' + '★'.repeat(Math.min(s.strength||0,3)) + ')'
+    );
+    if (sigs.length) lines.push('シグナル: ' + sigs.join(' / '));
+    if (entry.g_theme_score || entry.g_score) {
+      const gs = entry.g_theme_score || entry.g_score || 0;
+      const cs = entry.c_logic_score || entry.c_score || 0;
+      lines.push('AI評価: G:' + gs + 'pt / C:' + cs + 'pt / 合計:' + total + 'pt');
+    }
+    if (entry.entry_timing_gemini?.mark)
+      lines.push('Gemini判定: ' + entry.entry_timing_gemini.mark + ' ' + (entry.entry_timing_gemini.reason||''));
+    if (entry.entry_timing_claude?.mark)
+      lines.push('Claude判定: ' + entry.entry_timing_claude.mark + ' ' + (entry.entry_timing_claude.reason||''));
+    if (entry.analyzed_at) lines.push('週次分析: ' + entry.analyzed_at);
+    return {rank, total, rankColor, lines, entry};
+  } catch(e) {
+    console.warn('formatWeeklyInfo error:', e);
+    return null;
   }
-
-  // Step2 (Claude計画) はメインコンテンツなので strategy クラスで強調
-  const dt = new Date(step2.generated_at || new Date().toISOString());
-  const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-  const step2Html = `
-    <div class="ja-step-card strategy" style="position:relative;">
-      <div class="ja-step-hdr">🧠 今日の計画</div>
-      ${step2.text ? `
-        <div class="btn-row-tr">
-          <button class="copy-btn-sm" onclick="copyPlanStep2()" title="Claude計画をMarkdownコピー">📋 コピー</button>
-          <button class="drill-btn-sm" onclick="drilldownChatPlanStep2()" title="チャットで深掘り">💬 深掘り</button>
-        </div>
-      ` : ''}
-      <div class="plan-text" style="margin-top:4px;">${escapeHtml(step2.text)}</div>
-      <div class="ja-step-meta">🤖 ${CLAUDE_MODEL} · ${dtStr}</div>
-    </div>
-  `;
-
-  // v0.11: セクション単位のコピー（市場速報 + 計画を1つの Markdown に）
-  // v0.15: 計画全体の深掘りボタンも追加
-  const sectionBtns = step2.text ? `
-    <button class="copy-section-btn" onclick="copyPlanAll()" title="今朝の市場速報＋計画を一括コピー">
-      📋 今朝の計画まるごとコピー
-    </button>
-    <button class="drill-section-btn" onclick="drilldownChatPlanAll()" title="今朝の計画全体について深掘り">
-      💬 今朝の計画について深掘りする
-    </button>
-  ` : '';
-
-  document.getElementById("bodyPlan").innerHTML = `
-    ${step1Html}
-    ${step2Html}
-    ${sectionBtns}
-    <button class="plan-gen-btn" onclick="generatePlan()" style="margin-top:12px;background:var(--s2);color:var(--t2);">
-      🔄 再生成
-    </button>
-  `;
-
-  document.getElementById("badgePlan").textContent = "✓ 生成済";
-  document.getElementById("badgePlan").className = "sec-badge done";
-  document.getElementById("numPlan").classList.remove("active");
-  document.getElementById("numPlan").classList.add("done");
-  document.getElementById("numPlan").textContent = "✓";
-  document.getElementById("previewPlan").textContent = step2.text.slice(0, 60) + (step2.text.length > 60 ? "..." : "");
-  document.getElementById("doneBtn").disabled = false;
 }
 
-// v0.11: 朝会計画のコピーハンドラ（tjm_last_plan から生成）
-function getPlanCacheForExport(){
-  const cached = LS.get(K.last_plan, null);
-  if (!cached || cached.date !== TODAY) return null;
-  return cached;
-}
-
-function buildPlanStep1Markdown(cached){
-  if (!cached || !cached.step1 || !cached.step1.text) return "";
-  const dt = new Date(cached.step1.generated_at || cached.generated_at || new Date().toISOString());
-  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-  return [
-    `# 🌍 今朝の市場速報 (${cached.date})`,
-    ``,
-    `- 生成日時: ${dtStr}`,
-    `- 生成モデル: ${GEMINI_MODEL} + Google検索`,
-    ``,
-    cached.step1.text.trim(),
-    ``,
-    `---`,
-    `_trade-journal morning.html v0.11 で生成_`,
-  ].join("\n");
-}
-
-function buildPlanStep2Markdown(cached){
-  // v0.9 schema: cached.step2.text / cached.step2.generated_at
-  // v0.8 legacy: cached.text / cached.generated_at
-  const step2 = cached.step2 || {text: cached.text, generated_at: cached.generated_at};
-  if (!step2 || !step2.text) return "";
-  const dt = new Date(step2.generated_at || new Date().toISOString());
-  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-  return [
-    `# 🧠 今日の計画 (${cached.date || TODAY})`,
-    ``,
-    `- 生成日時: ${dtStr}`,
-    `- 生成モデル: ${CLAUDE_MODEL}`,
-    ``,
-    step2.text.trim(),
-    ``,
-    `---`,
-    `_trade-journal morning.html v0.11 で生成_`,
-  ].join("\n");
-}
-
-function buildPlanAllMarkdown(cached){
-  const step2 = cached.step2 || {text: cached.text, generated_at: cached.generated_at};
-  if (!step2 || !step2.text) return "";
-  const lines = [];
-  lines.push(`# 📅 ${cached.date || TODAY} 朝会の計画`);
-  lines.push(``);
-  lines.push(`_trade-journal morning.html v0.11 で生成_`);
-  lines.push(``);
-  if (cached.step1 && cached.step1.text) {
-    lines.push(`## 🌍 今朝の市場速報`);
-    lines.push(`_🤖 ${GEMINI_MODEL} + Google検索_`);
-    lines.push(``);
-    lines.push(cached.step1.text.trim());
-    lines.push(``);
-  }
-  lines.push(`## 🧠 今日の計画`);
-  lines.push(`_🤖 ${CLAUDE_MODEL}_`);
-  lines.push(``);
-  lines.push(step2.text.trim());
-  lines.push(``);
-  lines.push(`---`);
-  return lines.join("\n");
-}
-
-async function copyPlanStep1(){
-  const cached = getPlanCacheForExport();
-  if (!cached) { toast("⚠️ 今日の計画がまだ生成されていません"); return; }
-  const md = buildPlanStep1Markdown(cached);
-  if (!md) { toast("⚠️ 市場速報データなし"); return; }
-  await copyMarkdown(md, "市場速報");
-}
-
-async function copyPlanStep2(){
-  const cached = getPlanCacheForExport();
-  if (!cached) { toast("⚠️ 今日の計画がまだ生成されていません"); return; }
-  const md = buildPlanStep2Markdown(cached);
-  if (!md) { toast("⚠️ 計画データなし"); return; }
-  await copyMarkdown(md, "計画");
-}
-
-async function copyPlanAll(){
-  const cached = getPlanCacheForExport();
-  if (!cached) { toast("⚠️ 今日の計画がまだ生成されていません"); return; }
-  const md = buildPlanAllMarkdown(cached);
-  if (!md) { toast("⚠️ 計画データなし"); return; }
-  await copyMarkdown(md, "今朝の計画まるごと");
-}
-
-// ─── 共通: ひろき様のトレード戦略コンテキスト（全AIプロンプトの冒頭に差し込む）──
-// 2026-04-25: 中長期保有・RR1:3 から 短期回転重視 へ転換。
-// 戦略方針を変えたい時はここだけ修正すれば全プロンプトに反映される。
-function buildStrategyContext(){
-  return `## ひろき様のトレードスタンス（前提）
-- スタイル: **短期回転重視スイング**（保有数日〜数週間、最長1ヶ月目安）
-- 1ポジション: 10〜30万円、最大5銘柄同時保有、6,000円以下中心
-- 損切り: **-8% デフォルト**（-5%/-3% もあり、浅めに切って回転を優先）
-- 利確: **RR 1:2 デフォルト**（+16%目安、1:1.5〜1:3 の範囲、現実的な目標価を設定）
-- 目標勝率: **50%以上**（RR が低めの分、勝率で積み上げる）
-- 銘柄選定軸: **直近モメンタム・出来高急増・テーマ性・板の厚さ** を重視。業績堅調/割安だけでは弱く、動意づいていることが必要。
-- 回避すべき: 決算またぎ・低出来高・長期横ばいのファンダ銘柄（中長期の仕込みは別枠）
-`;
-}
-
-// ── Gemini Step1: 今朝の市場速報プロンプト ──
-function buildGeminiMarketBriefPrompt(){
-  // ユーザー（ひろき様）の注目テーマ（watchlist のテーマから抽出、固定）
-  const themes = "ドローン / AI / 防衛 / 半導体 / 電池 / レアメタル / SaaS";
-
-  // 保有銘柄の名前リスト（Geminiがセクター関連性を判断する助けに）
-  const holdingNames = HOLDINGS.length > 0
-    ? HOLDINGS.slice(0, 10).map(h => `${h.name}(${h.code})`).join("、")
-    : "（なし）";
-
-  return `あなたは日本株トレーダー向けの市場アナリストです。
-本日 ${TODAY} (${WD}) の東京市場が始まる直前の**今朝の市場ブリーフ**を、Google検索で直近24時間のデータを基に作成してください。
-
-${buildStrategyContext()}
-## 読者の文脈
-- 注目テーマ: ${themes}
-- 本日の保有銘柄: ${holdingNames}
-
-## 出力項目（各1〜2行、箇条書き中心）
-
-### 🇺🇸 NY主要指数（前日終値）
-S&P500 / NASDAQ / ダウ / SOX / Russell2000 の終値と前日比%、流れのコメント
-
-### 💱 為替
-USD/JPY の直近水準と方向感、必要なら EUR/JPY や人民元も
-
-### 🏭 関連セクター・個別銘柄
-上記テーマ（半導体・防衛・ドローン・AI・電池）に関連する米株の直近24hの大きな動き
-（例: NVIDIA, AMD, Palantir, Lockheed Martin, Albemarle, RTX, BA など）
-
-### 📰 注目ヘッドライン
-日本株に波及しうるニュース（FOMC・日銀・地政学・大型決算・規制）を最大3件、1行ずつ
-
-### 🎯 今日の東京市場への含意
-上記を踏まえ、今日の東京市場で特に注意/注目すべきポイントを2〜3行
-
-## 執筆ルール
-- 全体で 400〜600字、箇条書き中心でスキャナブルに
-- 数字は具体的に（「大きく下落」ではなく「-2.3%」）
-- 検索結果で裏取りした事実のみ。推測・一般論は避ける
-- 日本時間で「今朝」= ${TODAY} の朝の視点で書く
-- 最後まで書き切ること（途中で切らない）`;
-}
-
-// ── Claude Step2: 計画プロンプト（geminiResult があれば冒頭に挿入） ──
-function buildPlanPrompt(geminiResult = null){
-  const judgmentsList = HOLDINGS.map(h => {
-    const j = JUDGMENTS[h.code];
-    if (!j) return null;
-    const labels = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
-    const code5 = code4to5(h.code);
-    const price = getPrice(h.code);
-    const pnlPct = (price && h.buy_price) ? ((price.close / h.buy_price - 1) * 100).toFixed(1) : null;
-    return {
-      code: code5, name: h.name, judgment: labels[j.judgment],
-      buy_price: h.buy_price, current: price?.close, pnl_pct: pnlPct,
-      stop_loss: h.stop_loss, target: h.target, type: h.type,
-    };
-  }).filter(Boolean);
-
-  const macroSummary = MACRO ? {
-    regime: MACRO.regime,
-    summary: MACRO.summary,
-    hv_20d: MACRO.hv_20d,
-    ma25_dev: MACRO.ma25_dev,
-    trend: MACRO.trend,
-    reasons: MACRO.reasons,
-  } : null;
-
-  // v0.5: 指値接近銘柄（押し目候補）
-  const watchSettings = getWatchSettings();
-  const watchList = watchlistForPrompt();
-  const watchSection = watchList
-    ? `\n## 💎 指値接近銘柄（押し目候補・¥${fmt(watchSettings.max_price, 0)}以下・${watchSettings.min_rank}+）\n\`\`\`json\n${JSON.stringify(watchList, null, 2)}\n\`\`\`\n`
-    : "";
-
-  // v0.9 B-β: 今朝の市場速報（Gemini調べ、あれば冒頭に挿入）
-  const marketBriefSection = geminiResult
-    ? `\n## 🌍 今朝の市場速報（Gemini + Google検索）
-${geminiResult}
-`
-    : "";
-
-  return `あなたはひろき様の専属トレーディング・コーチです。
-短期回転重視のスイングトレーダーであるひろき様が朝会で記録した本日の判断を踏まえ、
-**今日一日の具体的な行動計画**を簡潔にアドバイスしてください。
-
-${buildStrategyContext()}${marketBriefSection}
-## 📊 マクロ状態
-${macroSummary ? "```json\n" + JSON.stringify(macroSummary, null, 2) + "\n```" : "(データなし)"}
-
-## 💼 保有銘柄と本日の判断
-${judgmentsList.length > 0 ? "```json\n" + JSON.stringify(judgmentsList, null, 2) + "\n```" : "(保有なし)"}
-${watchSection}
-## 📅 日付
-${TODAY} (${WD})
-
-## 🎯 出力フォーマット（必ず守ってください）
-
-# 🌅 今日の方針
-
-(1〜2行でマクロ環境を踏まえた基本スタンス)
-
-## ⚡ 優先アクション
-(本日中にやるべきことを3つまで、優先順に)
-1. ...
-2. ...
-
-## 💼 銘柄別の具体策
-(各保有銘柄について、判断を踏まえた具体的アクション)
-- **[銘柄名]**: ...
-
-${watchList ? `## 💎 押し目候補へのアプローチ
-(指値接近銘柄の中から本日エントリー検討すべきものを1〜2銘柄、具体的な指値水準で)
-- ...
-
-` : ""}## ⚠️ 注意点
-(マクロ・個別銘柄から見て特に気をつけること)
-- ...
-
-## 🚪 撤退ライン
-(どうなったら今日の計画を見直すか)
-- ...
-
----
-
-【執筆ルール】
-- 全体で ${watchList ? '500〜700' : '400〜600'} 字程度に収める
-- マクロ "${macroSummary?.regime}" を必ず考慮（特に STORM/HALT 時はサイズ縮小強調）
-- 「損切検討」「利確検討」と判断した銘柄には、具体的な価格水準で行動指示
-- 推奨する損切り/利確水準は回転重視ルール（損切り -8%目安・RR 1:2目安）に沿って提示。抱え込むより浅く切って次に回すことを優先。
-${geminiResult ? '- 今朝の市場速報（NY市況・為替・海外セクター）が日本株や保有銘柄にどう波及するかを、計画に必ず織り込む\n' : ''}${watchList ? '- 押し目候補は、現在の地合いと既存ポジションのリスクを踏まえて慎重に評価\n' : ''}- 抽象論ではなく、本日 9:00 から取れる具体的アクションで
-- 不確実性を避けず、リスクは率直に明示`;
-}
-
-async function callClaude(apiKey, prompt, options={}){
-  const {
-    model = CLAUDE_MODEL,
-    maxTokens = 1500,
-    system = "",     // Phase 4 Stage 4.1: システムプロンプト対応
-    history = [],    // Phase 4 Stage 4.1: 会話履歴 [{role:'user'|'assistant', content}, ...]
-  } = options;
-
-  // 既存呼出（history=[]）: messages = [{role:"user", content: prompt}] で従来と同一
-  // チャット呼出: [...history, {role:"user", content: prompt}]
-  const messages = [...history, {role: "user", content: prompt}];
-  const body = {
-    model: model,
-    max_tokens: maxTokens,
-    messages,
-  };
-  if (system) body.system = system;
-
-  const r = await fetch(CLAUDE_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!r.ok) {
-    let errMsg = `HTTP ${r.status}`;
-    try {
-      const err = await r.json();
-      errMsg = err.error?.message || errMsg;
-    } catch {}
-    throw new Error(errMsg);
-  }
-
-  const data = await r.json();
-  const text = data.content?.map(b => b.text || "").join("") || "";
-  if (!text) throw new Error("Claude が空のレスポンスを返しました");
-  return text;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  Gemini API 呼出 (v0.8 機能B Phase 3 B-3)
-//  v1 trading_journal.html のパターンを v2 流に整理
-//  options:
-//    - model:     gemini モデル名 (default: GEMINI_MODEL)
-//    - useSearch: Google検索ツールを有効化 (default: true)
-//    - maxTokens: 最大出力トークン (default: 2500)
-//    - system:    システムプロンプト相当 (default: "")
-// ════════════════════════════════════════════════════════════════════
-async function callGemini(apiKey, prompt, options={}){
-  const {
-    model = GEMINI_MODEL,
-    useSearch = true,
-    maxTokens = 2500,
-    system = "",
-    history = [],    // Phase 4 Stage 4.1: 会話履歴 [{role:'user'|'model', parts:[{text}]}, ...]
-  } = options;
-
-  // systemは直近userメッセージにprefix（Gemini APIに専用system欄がないため）
-  const fullPrompt = system ? system + "\n\n" + prompt : prompt;
-  // 既存呼出（history=[]）: contents = [{role:"user",...}] で従来と同一
-  // チャット呼出: [...history, {role:"user", parts:[{text: fullPrompt}]}]
-  const contents = [...history, {role: "user", parts: [{text: fullPrompt}]}];
-  const body = {
-    contents,
-    generationConfig: {maxOutputTokens: maxTokens},
-  };
-  if (useSearch) body.tools = [{googleSearch: {}}];
-
-  const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body),
-  });
-
-  if (!r.ok) {
-    let errMsg = `HTTP ${r.status}`;
-    try {
-      const err = await r.json();
-      errMsg = err.error?.message || errMsg;
-    } catch {}
-    throw new Error(errMsg);
-  }
-
-  const data = await r.json();
-  const cand = data.candidates?.[0];
-  const parts = cand?.content?.parts || [];
-  // Google検索ツール使用時はparts内に複数ブロックが混在しうるため全textを結合
-  let text = parts.filter(p => p.text).map(p => p.text).join("\n").trim();
-  // v0.18+: finishReason をチェック。MAX_TOKENS で打ち切られた場合は警告を末尾に付与
-  //   (Gemini 2.5 Flash + Google検索 では thinking tokens が消費されて出力が途中で切れることがある)
-  const finishReason = cand?.finishReason;
-  if (text && finishReason && finishReason !== "STOP") {
-    const reasonNote = finishReason === "MAX_TOKENS"
-      ? `\n\n⚠️ （出力が上限トークン ${maxTokens} に達して途中で切れました。🔄 で再取得するか、設定からトークン上限を上げてください）`
-      : `\n\n⚠️ （出力が途中で停止: ${finishReason}）`;
-    text = text + reasonNote;
-  }
-  if (text) return text;
-
-  // フォールバック: Google検索で空応答のときは検索なしで再試行（v1と同じ対策）
-  if (useSearch) {
-    const body2 = {contents, generationConfig: {maxOutputTokens: maxTokens}};
-    const r2 = await fetch(url, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body2),
-    });
+async function callGemini(prompt, sys, history, noSearch) {
+  const contents = [];
+  if (history && history.length > 0) contents.push(...history.slice(0, -1));
+  contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
+  // noSearch=trueの場合はGoogle検索ツールを使わない（知識ベース分析）
+  const body = {contents, generationConfig:{maxOutputTokens:2500}};
+  if (!noSearch) body.tools = [{googleSearch:{}}];
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
+  const d = await r.json();
+  // Google検索ツール使用時はparts内にtool_useブロックが混在するため全textを結合
+  const parts = d.candidates?.[0]?.content?.parts || [];
+  const txt = parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+  if (txt) return txt;
+  // フォールバック: Google検索なしで再試行
+  if (!noSearch) {
+    const body2 = {contents, generationConfig:{maxOutputTokens:2500}};
+    const r2 = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body2)});
     if (r2.ok) {
       const d2 = await r2.json();
-      const c2 = d2.candidates?.[0];
-      let t2 = (c2?.content?.parts || [])
-        .filter(p => p.text).map(p => p.text).join("\n").trim();
-      const fr2 = c2?.finishReason;
-      if (t2 && fr2 && fr2 !== "STOP") {
-        t2 = t2 + (fr2 === "MAX_TOKENS"
-          ? `\n\n⚠️ （出力が上限トークン ${maxTokens} に達して途中で切れました）`
-          : `\n\n⚠️ （出力が途中で停止: ${fr2}）`);
-      }
+      const t2 = (d2.candidates?.[0]?.content?.parts||[]).filter(p=>p.text).map(p=>p.text).join('\n').trim();
       if (t2) return t2;
     }
   }
-  throw new Error("Gemini が空のレスポンスを返しました");
+  return '応答なし';
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  朝会完了 → IndexedDB に保存
-// ════════════════════════════════════════════════════════════════════
-
-async function completeSession(){
-  if (SESSION_COMPLETED) {
-    toast("✅ 既に保存済み");
-    return;
-  }
-
-  const judgmentsList = HOLDINGS.map(h => JUDGMENTS[h.code]).filter(Boolean);
-  if (judgmentsList.length === 0 && HOLDINGS.length > 0) {
-    toast("⚠️ まだ判定が完了していません");
-    return;
-  }
-
-  // Phase 5.3: 当日の見送り記録（保有外）も session に含める
-  const skipLogToday = getTodaysSkipLog();
-
-  const session = {
-    date: TODAY,
-    completed_at: new Date().toISOString(),
-    macro: MACRO ? {
-      regime: MACRO.regime,
-      hv_20d: MACRO.hv_20d,
-      ma25_dev: MACRO.ma25_dev,
-      trend: MACRO.trend,
-      summary: MACRO.summary,
-    } : null,
-    judgments: judgmentsList,
-    plan_text: PLAN_TEXT || null,
-    // Phase 5.3: 見送り記録（保有外の検討スルー）
-    skip_log: skipLogToday,
-  };
-
-  try {
-    const id = await dbAdd("daily_sessions", session);
-    SESSION_COMPLETED = true;
-    const btn = document.getElementById("doneBtn");
-    btn.classList.add("completed");
-    btn.textContent = "✅ 朝会を保存しました";
-    btn.disabled = true;
-    toast(`💾 保存完了 (ID: ${id})`);
-  } catch(e) {
-    console.error("save session failed:", e);
-    toast("⚠️ 保存失敗: " + e.message);
-  }
+// Claude API
+async function callClaude(prompt, sys, history) {
+  const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
+  const body = {model:'claude-haiku-4-5-20251001', max_tokens:1500, messages:msgs};
+  if (sys) body.system = sys;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':CK,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify(body)
+  });
+  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
+  const d = await r.json();
+  return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim() || '応答なし';
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  設定モーダル
-// ════════════════════════════════════════════════════════════════════
+// トースト
+let tt;
+function toast(m) { const e=document.getElementById('toast'); e.textContent=m; e.classList.add('on'); clearTimeout(tt); tt=setTimeout(()=>e.classList.remove('on'),2600); }
 
-document.getElementById("settingsBtn").onclick = openSettings;
-
-async function openSettings(){
-  // API キー欄に既存値をマスク表示
-  const ck = LS.raw(K.api_claude) || "";
-  document.getElementById("inpClaudeKey").value = ck;
-  document.getElementById("inpGeminiKey").value = LS.raw(K.api_gemini) || "";
-
-  document.getElementById("statClaudeKey").textContent = ck ? "✅ 設定済" : "⚠️ 未設定";
-  document.getElementById("statClaudeKey").className = "api-status " + (ck ? "set" : "unset");
-  const gk2 = LS.raw(K.api_gemini) || "";
-  document.getElementById("statGeminiKey").textContent = gk2 ? "✅ 設定済" : "未設定（任意）";
-  document.getElementById("statGeminiKey").className = "api-status " + (gk2 ? "set" : "unset");
-
-  // 履歴を読込
-  await renderHistory();
-
-  document.getElementById("settingsModal").classList.add("on");
+// APIキー設定
+function openKeyModal() {
+  const m = document.getElementById('keyModal');
+  m.classList.add('show');
+  document.getElementById('keyGemini').value=GK;
+  document.getElementById('keyAnthropic').value=CK;
+}
+function closeKeyModal() {
+  document.getElementById('keyModal').classList.remove('show');
+}
+function saveKeys() {
+  const gk=document.getElementById('keyGemini').value.trim();
+  const ck=document.getElementById('keyAnthropic').value.trim();
+  if (!gk||!ck) { toast('⚠️ 両方のキーを入力してください'); return; }
+  GK=gk; CK=ck;
+  localStorage.setItem('tj_gk',gk); localStorage.setItem('tj_ck',ck);
+  closeKeyModal(); toast('✅ APIキーを保存しました');
 }
 
-function closeSettings(){
-  document.getElementById("settingsModal").classList.remove("on");
+// スクリーンショット読み込み
+let ssType='spot', ssImageList=[], parsedItems=[];
+
+function setSsType(t) {
+  ssType=t;
+  ['spot','margin','hist','pnl','watch','cash'].forEach(x => { const el=document.getElementById('sst-'+x); if(el) el.classList.toggle('on',x===t); });
+  // タイプ切替時はプレビュー＆結果をリセット
+  document.getElementById('ssResult').classList.remove('show');
+  document.getElementById('ssApplyBtn').style.display='none';
 }
-
-document.getElementById("settingsModal").onclick = (e) => {
-  if (e.target.id === "settingsModal") closeSettings();
-};
-
-function saveKeys(){
-  const ck = document.getElementById("inpClaudeKey").value.trim();
-  const gk = document.getElementById("inpGeminiKey").value.trim();
-
-  if (ck) localStorage.setItem(K.api_claude, ck);
-  else localStorage.removeItem(K.api_claude);
-
-  if (gk) localStorage.setItem(K.api_gemini, gk);
-  else localStorage.removeItem(K.api_gemini);
-
-  toast("✅ API キーを保存しました");
-  document.getElementById("statClaudeKey").textContent = ck ? "✅ 設定済" : "⚠️ 未設定";
-  document.getElementById("statClaudeKey").className = "api-status " + (ck ? "set" : "unset");
+function onFileSelect(e) {
+  const files=Array.from(e.target.files).slice(0,20);
+  if(files.length) loadImages(files);
 }
-
-async function renderHistory(){
-  const wrap = document.getElementById("historyList");
-  try {
-    const sessions = await dbAll("daily_sessions");
-    if (sessions.length === 0) {
-      wrap.innerHTML = `<div style="font-size:11px;color:var(--t3);text-align:center;padding:8px;">まだ履歴がありません</div>`;
-      return;
-    }
-    const recent = sessions.sort((a,b) => b.completed_at.localeCompare(a.completed_at)).slice(0,10);
-    wrap.innerHTML = recent.map(s => {
-      const j = s.judgments || [];
-      const counts = {hold:0, consider_cut:0, consider_sell:0};
-      j.forEach(x => counts[x.judgment] = (counts[x.judgment]||0) + 1);
-      return `
-        <div class="history-item">
-          <div class="hi-date">${s.date} · ${(s.macro?.regime || "?").toUpperCase()}</div>
-          <div class="hi-summary">
-            判定 ${j.length}件: ✋${counts.hold} ⛔${counts.consider_cut} 💰${counts.consider_sell}
-            ${s.plan_text ? '· 🧠計画あり' : ''}
-          </div>
-        </div>
-      `;
-    }).join("");
-  } catch(e) {
-    wrap.innerHTML = `<div class="error">履歴取得エラー: ${escapeHtml(e.message)}</div>`;
-  }
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('ssZone').classList.remove('drag');
+  const files=Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')).slice(0,20);
+  if(files.length) loadImages(files);
 }
-
-async function exportHistory(){
-  try {
-    const sessions = await dbAll("daily_sessions");
-    const blob = new Blob([JSON.stringify(sessions, null, 2)], {type: "application/json"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `morning-history-${TODAY}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast(`✅ ${sessions.length}件をエクスポート`);
-  } catch(e) {
-    toast("⚠️ エクスポート失敗: " + e.message);
-  }
-}
-
-function clearCache(){
-  cache.clear();
-  toast("🔄 キャッシュをクリアしました");
-  closeSettings();
-  // 全部リロード
-  location.reload();
-}
-
-function resetTodaySession(){
-  if (!confirm("当日の判定と計画をリセットしますか？\n（IndexedDB の履歴は消えません）")) return;
-  JUDGMENTS = {_date: TODAY};
-  PLAN_TEXT = "";
-  SESSION_COMPLETED = false;
-  LS.set(K.judgments, JUDGMENTS);
-  localStorage.removeItem(K.last_plan);
-  toast("🗑 当日の判定をリセット");
-  closeSettings();
-  // 再描画
-  renderHoldings();
-  document.getElementById("bodyPlan").innerHTML =
-    `<div class="plan-empty">②保有銘柄の判定を完了すると、Claude が今日の計画を生成します</div>`;
-  document.getElementById("badgePlan").className = "sec-badge";
-  document.getElementById("badgePlan").textContent = "-";
-  document.getElementById("numPlan").classList.remove("done","active");
-  document.getElementById("numPlan").textContent = "3";
-  document.getElementById("doneBtn").disabled = true;
-  document.getElementById("doneBtn").classList.remove("completed");
-  document.getElementById("doneBtn").textContent = "💾 朝会を完了する";
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  指値ウォッチ機能 (v0.5 - Phase2 Step4)
-// ════════════════════════════════════════════════════════════════════
-
-function getWatchSettings(){
-  const stored = LS.get(K.watch_settings, {});
-  return {...WATCH_DEFAULTS, ...stored};
-}
-
-function saveWatchSettings(settings){
-  LS.set(K.watch_settings, settings);
-}
-
-async function loadWatchlist(){
-  const settings = getWatchSettings();
-  if (!settings.enabled) {
-    document.getElementById("secWatch").style.display = "none";
-    return;
-  }
-
-  let raw;
-  try {
-    raw = await fetchJSON(URLS.limit_watchlist);
-  } catch(e) {
-    console.warn("[watch] limit_watchlist fetch failed:", e);
-    document.getElementById("secWatch").style.display = "none";
-    return;
-  }
-
-  WATCH_RAW = Array.isArray(raw) ? raw : [];
-  // v0.18: fundamentals.json から各銘柄のファンダ・需給フィールドを補完
-  //   limit_watchlist.json 自体が将来これらを持てば不要になるが、現状は fundamentals.json 頼み
-  for (const item of WATCH_RAW) {
-    if (!item || !item.code) continue;
-    const f = FUND[code4to5(item.code)];
-    if (!f) continue;
-    if (item.pbr                == null && f.pbr != null) item.pbr                = f.pbr;
-    if (item.dividend_yield     == null && f.dy  != null) item.dividend_yield     = f.dy;
-    if (item.margin_buy         == null && f.mb  != null) item.margin_buy         = f.mb;
-    if (item.margin_sell        == null && f.ms  != null) item.margin_sell        = f.ms;
-    if (item.margin_ratio       == null && f.mr  != null) item.margin_ratio       = f.mr;
-    if (!item.next_earnings_date && f.ned) item.next_earnings_date = f.ned;
-  }
-  WATCH_ITEMS = filterWatchlist(WATCH_RAW, settings);
-
-  if (WATCH_ITEMS.length === 0) {
-    // 該当なしの時はセクションごと非表示（朝会の流れを邪魔しない）
-    document.getElementById("secWatch").style.display = "none";
-    return;
-  }
-
-  document.getElementById("secWatch").style.display = "block";
-  // デフォルト開（朝会で必ず目に入るように）
-  document.getElementById("secWatch").classList.add("open");
-  renderWatchlist();
-}
-
-// 表示対象を絞り込み: 当日の最新価格基準で再計算する
-function filterWatchlist(raw, settings){
-  const ranks = settings.min_rank === "S" ? ["S"] : ["S", "A"];
-  const result = [];
-
-  for (const item of raw) {
-    if (!ranks.includes(item.rank)) continue;
-    if (!item.levels || item.levels.length === 0) continue;
-
-    // 当日の最新価格を latest_prices.json から取得（なければ生成時価格でフォールバック）
-    const latest = getPrice(item.code);
-    const curPrice = (latest && latest.close) || item.current_price;
-    if (!curPrice || curPrice <= 0) continue;
-    if (settings.max_price && curPrice > settings.max_price) continue;
-
-    // 各 level について現在値からの距離を計算（接近 = 現在値が level の +N% 以内）
-    let nearest = null;
-    for (const lv of item.levels) {
-      if (lv.notified) continue;  // 既に到達済みはスキップ
-      if (!lv.price || lv.price <= 0) continue;
-      // 現在値が指値より上でないと「下落して接近」の意味がない
-      if (curPrice < lv.price) continue;
-      const distancePct = ((curPrice - lv.price) / lv.price) * 100;
-      if (distancePct > settings.max_distance_pct) continue;
-      if (!nearest || distancePct < nearest.distance_pct) {
-        nearest = {
-          price: lv.price,
-          tag: lv.tag,
-          distance_pct: Math.round(distancePct * 10) / 10,
-        };
-      }
-    }
-    if (!nearest) continue;
-
-    result.push({
-      code: item.code,
-      name: item.name,
-      rank: item.rank,
-      total_score: item.total_score,
-      atr: item.atr,
-      current_price: curPrice,
-      generated_price: item.current_price,
-      nearest,
-      generated_at: item.generated_at,
-      // Phase 5.3: ファンダ・需給フィールドを通過させる
-      //   limit_watchlist.json の出力側（stock-checker）が将来追加する想定
-      pbr:                item.pbr                || null,
-      dividend_yield:     item.dividend_yield     || null,
-      margin_buy:         item.margin_buy         || null,
-      margin_sell:        item.margin_sell        || null,
-      margin_ratio:       item.margin_ratio       || null,
-      next_earnings_date: item.next_earnings_date || null,
-    });
-  }
-
-  // 距離の近い順に並べ、上限件数で打ち切り
-  result.sort((a,b) => a.nearest.distance_pct - b.nearest.distance_pct);
-  return result.slice(0, settings.max_items);
-}
-
-function renderWatchlist(){
-  const body = document.getElementById("bodyWatch");
-  const badge = document.getElementById("badgeWatch");
-  const preview = document.getElementById("previewWatch");
-
-  const settings = getWatchSettings();
-  // v0.18+: WATCH_RAW（LINEに送られる全件）と WATCH_ITEMS（フィルタ後）の差をユーザーに見せる
-  const totalRaw = WATCH_RAW.length;
-  const filtered = WATCH_ITEMS.length;
-
-  badge.className = "sec-badge active";
-  badge.textContent = `${filtered}件接近`;
-  preview.textContent = totalRaw > filtered
-    ? `${filtered}銘柄が接近中（監視 ${totalRaw} 件中）`
-    : `${filtered}銘柄が指値接近中`;
-
-  if (WATCH_ITEMS.length === 0) {
-    body.innerHTML = `<div class="w-empty">押し目候補なし</div>`;
-    return;
-  }
-
-  // v0.18+: LINE と朝会UIの違いをカード上部に明記（混乱防止）
-  const filterNote = `
-    <div style="font-size:10.5px;color:var(--t2);background:var(--s1);border:1px solid var(--border);
-                border-radius:6px;padding:7px 10px;margin-bottom:8px;line-height:1.55;">
-      📌 <b>LINEとの違い</b>: LINEは監視中の<b>全${totalRaw}銘柄</b>を通知。
-      ここでは現在値が指値に近い<b>上位${filtered}件</b>のみ抜粋表示しています。
-      <span style="color:var(--t3);">（条件: ${settings.min_rank}+ / ¥${fmt(settings.max_price, 0)}以下 / ±${settings.max_distance_pct}%以内 / 最大${settings.max_items}件）</span>
-    </div>`;
-
-  const cardsHtml = WATCH_ITEMS.map(it => {
-    const c5 = code4to5(it.code);
-    const distClass = it.nearest.distance_pct <= 1 ? "very-close" :
-                      it.nearest.distance_pct <= 3 ? "close" : "";
-    // Phase 5.3: ウォッチカードにもファンダ・需給チップを表示
-    const fundChips = formatFundChips(it, true);
-    return `
-      <div class="w-card">
-        <div class="w-card-top">
-          <div class="w-name-row">
-            <div>
-              <span class="w-rank ${it.rank.toLowerCase()}">${it.rank}</span>
-              <span class="w-code">${c5}</span>
-            </div>
-            <div class="w-name">${escapeHtml(it.name)}</div>
-          </div>
-          <div class="w-cur">
-            <div class="w-cur-val">¥${fmt(it.current_price, 0)}</div>
-            <div class="w-cur-lbl">現在値</div>
-          </div>
-        </div>
-        <div class="w-level">
-          <span class="w-level-tag">${escapeHtml(it.nearest.tag)}</span>
-          <span class="w-level-price">¥${fmt(it.nearest.price, 0)}</span>
-          <span class="w-level-dist ${distClass}">+${fmt(it.nearest.distance_pct, 1)}%</span>
-        </div>
-        ${fundChips}
-        <div class="w-meta">
-          <span>スコア ${it.total_score}</span>
-          ${it.atr ? `<span>ATR ${fmt(it.atr, 0)}</span>` : ""}
-          ${it.generated_at ? `<span>生成 ${escapeHtml(it.generated_at)}</span>` : ""}
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  const settingsHint = `
-    <div style="font-size:10px;color:var(--t3);margin-top:8px;text-align:right;">
-      <button onclick="openWatchSettings()" style="background:var(--s2);border:1px solid var(--border);color:var(--t2);padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;">⚙️ フィルタ設定を変更</button>
-    </div>
-  `;
-
-  body.innerHTML = filterNote + cardsHtml + settingsHint;
-}
-
-// ウォッチリストの計画プロンプト用テキスト化
-function watchlistForPrompt(){
-  if (!WATCH_ITEMS || WATCH_ITEMS.length === 0) return null;
-  return WATCH_ITEMS.slice(0, 5).map(it => ({
-    code: code4to5(it.code),
-    name: it.name,
-    rank: it.rank,
-    score: it.total_score,
-    current: it.current_price,
-    target: it.nearest.price,
-    target_tag: it.nearest.tag,
-    distance_pct: it.nearest.distance_pct,
+function loadImages(files) {
+  ssImageList=[];
+  document.getElementById('ssPreviewGrid').innerHTML='';
+  const reads=files.map(file=>new Promise(res=>{
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const b64=ev.target.result.split(',')[1];
+      const mime=file.type||'image/jpeg';
+      ssImageList.push({b64, name:file.name, mime});
+      const img=document.createElement('img');
+      img.src=ev.target.result;
+      img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border)';
+      document.getElementById('ssPreviewGrid').appendChild(img);
+      res();
+    };
+    reader.readAsDataURL(file);
   }));
-}
-
-// 簡易設定モーダル（既存の設定モーダル枠を使わず、prompt連発で代用）
-function openWatchSettings(){
-  const s = getWatchSettings();
-  const newPrice = prompt("最大価格（円、空白で無制限）", s.max_price || "");
-  if (newPrice === null) return;
-  const newDist = prompt("距離閾値（%）", s.max_distance_pct);
-  if (newDist === null) return;
-  const newRank = prompt('最低ランク ("S" or "A")', s.min_rank);
-  if (newRank === null) return;
-
-  const updated = {
-    ...s,
-    max_price: newPrice ? Number(newPrice) : null,
-    max_distance_pct: Number(newDist) || 5,
-    min_rank: (newRank === "S" || newRank === "A") ? newRank : "A",
-  };
-  saveWatchSettings(updated);
-  toast("✅ 設定を保存");
-  loadWatchlist();
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  判断レビュー機能 (v0.4 - Phase2 Step3)
-// ════════════════════════════════════════════════════════════════════
-
-// 評価閾値（将来的に設定モーダルから変更可能にする）
-const REVIEW_THRESHOLDS = {
-  hold_up:           3,   // hold で +3% 以上 → correct
-  hold_down_caution: -3,  // hold で -3% 以下 → caution（軽い誤り）
-  hold_down_wrong:   -5,  // hold で -5% 以下 → wrong（明確な誤り）
-  sell_too_early:    5,   // 利確検討で +5% 以上上昇 → too_early
-  sell_correct:      -3,  // 利確検討で -3% 以下下落 → correct
-  cut_correct:       -3,  // 損切検討で -3% 以下下落 → correct
-  cut_too_early:     5,   // 損切検討で +5% 以上上昇 → too_early
-};
-const EVAL_DAYS = 12;  // 暦日（≒8営業日）経過したら評価対象
-
-const OUTCOME_INFO = {
-  correct:   {icon: "✅", label: "正解",     color: "var(--green)"},
-  wrong:     {icon: "❌", label: "誤り",     color: "var(--red)"},
-  too_early: {icon: "⚠️", label: "手放した", color: "var(--yellow)"},
-  caution:   {icon: "🟡", label: "注意",     color: "var(--yellow)"},
-  neutral:   {icon: "➖", label: "中立",     color: "var(--t3)"},
-  pending:   {icon: "⏳", label: "評価待ち", color: "var(--t3)"},
-};
-
-const JUDGE_LABELS = {hold:"継続保有", consider_cut:"損切検討", consider_sell:"利確検討"};
-const JUDGE_ICONS  = {hold:"✋", consider_cut:"⛔", consider_sell:"💰"};
-
-function classifyOutcome(judgment, changePercent){
-  const t = REVIEW_THRESHOLDS;
-  if (judgment === 'hold') {
-    if (changePercent >= t.hold_up) return 'correct';
-    if (changePercent <= t.hold_down_wrong) return 'wrong';
-    if (changePercent <= t.hold_down_caution) return 'caution';
-    return 'neutral';
-  }
-  if (judgment === 'consider_sell') {
-    if (changePercent >= t.sell_too_early) return 'too_early';
-    if (changePercent <= t.sell_correct) return 'correct';
-    return 'neutral';
-  }
-  if (judgment === 'consider_cut') {
-    if (changePercent <= t.cut_correct) return 'correct';
-    if (changePercent >= t.cut_too_early) return 'too_early';
-    return 'neutral';
-  }
-  return 'neutral';
-}
-
-// 過去判定をバックグラウンド評価。outcome 未設定の judgment を更新
-async function evaluatePastJudgments(){
-  let prices;
-  try {
-    prices = await fetchJSON(URLS.latest_prices);
-  } catch(e) {
-    console.warn("[review] prices fetch failed:", e);
-    return 0;
-  }
-
-  let sessions;
-  try {
-    sessions = await dbAll("daily_sessions");
-  } catch(e) {
-    console.warn("[review] dbAll failed:", e);
-    return 0;
-  }
-
-  const now = Date.now();
-  let updated = 0;
-
-  for (const session of sessions) {
-    if (!session.judgments || session.judgments.length === 0) continue;
-    const sessionTime = new Date(session.date).getTime();
-    if (isNaN(sessionTime)) continue;
-    const daysPassed = (now - sessionTime) / (1000 * 60 * 60 * 24);
-    if (daysPassed < EVAL_DAYS) continue;
-
-    let dirty = false;
-    for (const j of session.judgments) {
-      if (j.outcome) continue;  // 評価済みスキップ
-      if (j.price_at_judgment == null) continue;
-      const c5 = code4to5(j.code);
-      const cur = prices[c5] || prices[j.code];
-      if (!cur || cur.close == null) continue;
-
-      const change = ((cur.close - j.price_at_judgment) / j.price_at_judgment) * 100;
-      j.outcome = classifyOutcome(j.judgment, change);
-      j.outcome_score = Math.round(change * 10) / 10;
-      j.evaluated_at = new Date().toISOString();
-      j.evaluated_price = cur.close;
-      dirty = true;
-      updated++;
-    }
-    if (dirty) {
-      try {
-        await dbPut("daily_sessions", session);
-      } catch(e) {
-        console.warn("[review] dbPut failed for session", session.id, e);
-      }
-    }
-  }
-
-  if (updated > 0) console.log(`[review] evaluated ${updated} judgments`);
-  return updated;
-}
-
-// 期間内の判定を集計
-function aggregateReview(sessions, periodDays){
-  const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
-  const filtered = sessions.filter(s => {
-    const t = new Date(s.date).getTime();
-    return !isNaN(t) && t >= cutoff;
+  Promise.all(reads).then(()=>{
+    document.getElementById('ssPreviewList').style.display='block';
+    document.getElementById('ssFileCount').textContent=ssImageList.length+'枚選択済み';
+    document.getElementById('ssAnalyzeBtn').style.display='block';
+    document.getElementById('ssResult').classList.remove('show');
+    document.getElementById('ssApplyBtn').style.display='none';
+    parsedItems=[];
   });
-
-  const all = [];
-  for (const s of filtered) {
-    if (!s.judgments) continue;
-    for (const j of s.judgments) {
-      all.push({...j, _date: s.date});
-    }
-  }
-
-  const evaluated = all.filter(j => j.outcome);
-  const counts = {correct: 0, wrong: 0, too_early: 0, caution: 0, neutral: 0};
-  let scoreSum = 0;
-  evaluated.forEach(j => {
-    counts[j.outcome] = (counts[j.outcome] || 0) + 1;
-    scoreSum += (j.outcome_score || 0);
-  });
-
-  // 「手放した」= too_early（利確/損切検討が +5% 以上上昇）
-  const tooEarly = evaluated
-    .filter(j => j.outcome === 'too_early')
-    .sort((a,b) => Math.abs(b.outcome_score||0) - Math.abs(a.outcome_score||0));
-
-  // 「抱えた」= hold で wrong または caution（持ち続けて下落）
-  const heldWrong = evaluated
-    .filter(j => (j.outcome === 'wrong' || j.outcome === 'caution') && j.judgment === 'hold')
-    .sort((a,b) => (a.outcome_score||0) - (b.outcome_score||0));
-
-  const pending = all.filter(j => !j.outcome);
-
-  return {
-    total: all.length,
-    evaluated: evaluated.length,
-    pending: pending.length,
-    counts,
-    correct_rate: evaluated.length > 0 ? counts.correct / evaluated.length : 0,
-    avg_score: evaluated.length > 0 ? scoreSum / evaluated.length : 0,
-    too_early: tooEarly,
-    held_wrong: heldWrong,
-    all: all.sort((a,b) => (b._date || '').localeCompare(a._date || '')),
-  };
 }
 
-// レビューモーダル制御
-let _reviewCurrentPeriod = 30;
-
-// ── 月次Claude分析 (v0.6) ──
-const MONTHLY_MIN_JUDGMENTS = 5;          // この件数未満なら分析しない
-const MONTHLY_CACHE_MAX_MONTHS = 3;       // localStorage に保持する月数
-
-function currentYearMonth(){
-  return TODAY.slice(0, 7);  // "2026-04"
-}
-
-function getMonthlyAnalysisCache(){
-  return LS.get(K.monthly_analysis, {});
-}
-
-function saveMonthlyAnalysisCache(yearMonth, data){
-  const cache = getMonthlyAnalysisCache();
-  cache[yearMonth] = data;
-  // 古い月を削除
-  const months = Object.keys(cache).sort().reverse();
-  if (months.length > MONTHLY_CACHE_MAX_MONTHS) {
-    for (const m of months.slice(MONTHLY_CACHE_MAX_MONTHS)) {
-      delete cache[m];
-    }
-  }
-  LS.set(K.monthly_analysis, cache);
-}
-
-function buildMonthlyAnalysisPrompt(stats){
-  const evaluatedJudgments = stats.all
-    .filter(j => j.outcome)
-    .slice(0, 15);
-
-  const judgmentLines = evaluatedJudgments.map(j => {
-    const judgeLabel = JUDGE_LABELS[j.judgment] || j.judgment;
-    const score = j.outcome_score != null
-      ? (j.outcome_score >= 0 ? '+' : '') + j.outcome_score.toFixed(1) + '%'
-      : '-';
-    return `- ${j._date} ${code4to5(j.code)} ${j.name || ''} → ${judgeLabel} → ${score} (${j.outcome})`;
-  }).join("\n");
-
-  const correctPct = stats.evaluated > 0 ? Math.round(stats.correct_rate * 100) : 0;
-  const ym = currentYearMonth();
-
-  return `あなたは日本株スイングトレーダーであるひろき様の専属コーチです。
-過去30日のトレード判定データを分析し、傾向と来月のアドバイスを提示してください。
-
-${buildStrategyContext()}
-
-## 📊 判定統計
-- 評価済み判定数: ${stats.evaluated}件
-- 正解率: ${correctPct}% (${stats.counts.correct}/${stats.evaluated})
-- 「手放した」(too_early): ${stats.counts.too_early}件
-- 「抱えた」(wrong + caution, hold判定): ${stats.held_wrong.length}件
-- 中立: ${stats.counts.neutral}件
-- 平均outcome_score: ${stats.avg_score >= 0 ? '+' : ''}${stats.avg_score.toFixed(1)}%
-
-## 📋 個別判定（直近順、最大15件）
-${judgmentLines || "(なし)"}
-
-## 🎯 出力フォーマット（必ず守ってください）
-
-# 📊 ${ym} の傾向
-
-(2〜3行で全体的な傾向の要約)
-
-## 💪 強み
-(データから読み取れる得意パターンを1〜2点)
-
-## ⚠️ 注意点
-(データから読み取れる弱点・気をつけるべきパターンを1〜2点)
-
-## 🎯 来月への提案
-(具体的なアクション提案を1点)
-
----
-
-【執筆ルール】
-- 全体で 300〜450 字程度
-- データの数字を必ず根拠として引用する
-- 抽象論でなく、具体的な改善提案を1つ
-- too_early が多いなら「利確/損切判断が早すぎる」、wrong/cautionが多いなら「ホールド判断の精度」など、傾向に応じた指摘
-- ひろき様への口調は丁寧、励ましつつも率直に`;
-}
-
-async function generateMonthlyAnalysis(stats, force=false){
-  const ym = currentYearMonth();
-  const cache = getMonthlyAnalysisCache();
-
-  if (!force && cache[ym]) {
-    return {cached: true, ...cache[ym]};
-  }
-
-  if (stats.evaluated < MONTHLY_MIN_JUDGMENTS) {
-    return {
-      insufficient: true,
-      message: `評価済み判定が${stats.evaluated}件です（最低${MONTHLY_MIN_JUDGMENTS}件必要）。判定後${EVAL_DAYS}日経過したものが評価対象です。`,
-    };
-  }
-
-  const apiKey = LS.raw(K.api_claude);
-  if (!apiKey || !apiKey.trim()) {
-    return {
-      no_api_key: true,
-      message: "Claude API キーが未設定です。設定モーダル（⚙️）から登録してください。",
-    };
-  }
-
-  try {
-    const prompt = buildMonthlyAnalysisPrompt(stats);
-    const r = await fetch(CLAUDE_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 800,
-        messages: [{role: "user", content: prompt}],
-      }),
-    });
-    if (!r.ok) {
-      let errMsg = `HTTP ${r.status}`;
-      try {
-        const err = await r.json();
-        errMsg = err.error?.message || errMsg;
-      } catch {}
-      throw new Error(errMsg);
-    }
-    const data = await r.json();
-    const text = data.content?.map(b => b.text || "").join("") || "";
-    if (!text) throw new Error("Claude が空のレスポンスを返しました");
-
-    const result = {
-      text,
-      generated_at: new Date().toISOString(),
-      judgment_count: stats.evaluated,
-    };
-    saveMonthlyAnalysisCache(ym, result);
-    return {cached: false, ...result};
-  } catch(e) {
-    console.error("[monthly] generation failed:", e);
-    return {error: e.message};
-  }
-}
-
-function renderMonthlyAnalysisSection(stats){
-  const ym = currentYearMonth();
-  const cache = getMonthlyAnalysisCache();
-
-  if (cache[ym]) {
-    return renderMonthlyAnalysisResult({cached: true, ...cache[ym]});
-  }
-
-  if (stats.evaluated < MONTHLY_MIN_JUDGMENTS) {
-    return `<div class="ma-card">
-      <div class="ma-empty">
-        評価済み判定が <b>${stats.evaluated}件</b> です。<br>
-        最低 ${MONTHLY_MIN_JUDGMENTS}件 必要（判定後${EVAL_DAYS}日経過分）。
-      </div>
-    </div>`;
-  }
-
-  const apiKey = LS.raw(K.api_claude);
-  if (!apiKey || !apiKey.trim()) {
-    return `<div class="ma-card">
-      <div class="ma-empty">
-        Claude API キー未設定です。<br>
-        設定モーダル（⚙️）から登録してください。
-      </div>
-    </div>`;
-  }
-
-  return `<div class="ma-card">
-    <div class="ma-empty">
-      ${stats.evaluated}件の評価データが揃っています。<br>
-      Claude による傾向分析を生成できます。
-    </div>
-    <button class="ma-gen-btn" onclick="triggerMonthlyAnalysis()">
-      🧠 ${currentYearMonth()} の分析を生成
-    </button>
-  </div>`;
-}
-
-function renderMonthlyAnalysisResult(result){
-  if (result.error) {
-    return `<div class="ma-card">
-      <div class="ma-error">⚠️ 生成失敗: ${escapeHtml(result.error)}</div>
-      <button class="ma-gen-btn" onclick="triggerMonthlyAnalysis(true)">🔄 再試行</button>
-    </div>`;
-  }
-
-  const dt = result.generated_at ? new Date(result.generated_at) : null;
-  const dtStr = dt
-    ? `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`
-    : "-";
-
-  return `<div class="ma-card">
-    <div class="ma-text">${escapeHtml(result.text)}</div>
-    <div class="ma-meta">
-      <span>🧠 ${escapeHtml(CLAUDE_MODEL.split('-').slice(0,3).join('-'))} · ${result.judgment_count || '?'}件分析</span>
-      <button class="ma-regen-btn" onclick="triggerMonthlyAnalysis(true)" title="再生成">
-        🔄 ${dtStr}
-      </button>
-    </div>
-  </div>`;
-}
-
-async function triggerMonthlyAnalysis(force=false){
-  const sec = document.getElementById("monthlyAnalysisSection");
-  if (!sec) return;
-  sec.innerHTML = `<div class="ma-card"><div class="ma-loading"><span class="loading">Claude が分析中...</span></div></div>`;
-
-  const sessions = await dbAll("daily_sessions");
-  const stats = aggregateReview(sessions, _reviewCurrentPeriod);
-  const result = await generateMonthlyAnalysis(stats, force);
-  sec.innerHTML = renderMonthlyAnalysisResult(result);
-}
-
-async function openReviewModal(){
-  document.getElementById("reviewModal").classList.add("on");
-  await refreshReviewModal();
-}
-
-function closeReviewModal(){
-  document.getElementById("reviewModal").classList.remove("on");
-}
-
-async function refreshReviewModal(){
-  const wrap = document.getElementById("reviewBody");
-  wrap.innerHTML = `<div class="loading" style="padding:24px;justify-content:center;">集計中...</div>`;
-
-  try {
-    // モーダル開いたタイミングでも再評価（即時反映）
-    await evaluatePastJudgments();
-    const sessions = await dbAll("daily_sessions");
-    const stats = aggregateReview(sessions, _reviewCurrentPeriod);
-    wrap.innerHTML = await renderReviewBody(stats);
-  } catch(e) {
-    console.error("[review] refresh failed:", e);
-    wrap.innerHTML = `<div class="error">レビュー取得エラー: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function changeReviewPeriod(days){
-  _reviewCurrentPeriod = days;
-  refreshReviewModal();
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  機能B サブタブ (v0.8 Phase 3 B-2) - タブUI + 売買分析タブ描画
-// ════════════════════════════════════════════════════════════════════
-
-let _reviewCurrentTab = "judgment";  // "judgment" | "journal"
-
-function changeReviewTab(tab){
-  _reviewCurrentTab = tab;
-  refreshReviewModal();
-}
-
-// 売買分析タブの描画（B-2: UIと集計プレビューのみ、API呼出は B-3 以降）
-async function renderJournalTab(periodDays){
-  let data;
-  try {
-    data = await aggregateAllForJournal(periodDays);
-  } catch(e) {
-    return `<div class="ja-card"><div class="ja-empty">⚠️ 集計エラー: ${escapeHtml(e.message)}</div></div>`;
-  }
-  const {stats, holdings_summary} = data;
-
-  // 売買ゼロ時
-  if (stats.total_trades === 0) {
-    return `
-      <div class="ja-card">
-        <div class="ja-empty">
-          過去${periodDays}日間に <b>売買記録</b> がありません。<br>
-          <span style="font-size:10px;color:var(--t3);">
-            ※ v1 で記録した売買は、同じデバイス（localStorage）から読まれます。<br>
-            スマホで売買記録している場合、PC側では売買データが見えません。
-          </span>
-        </div>
-      </div>
-    `;
-  }
-
-  // API キーの事前チェック（B-5 で実際の呼出時に改めてチェック）
-  const claudeKey = LS.raw(K.api_claude);
-  const geminiKey = LS.raw(K.api_gemini);
-  const hasClaudeKey = claudeKey && claudeKey.trim();
-  const hasGeminiKey = geminiKey && geminiKey.trim();
-
-  // B-6: キャッシュチェック（あれば結果をプリロード）
-  const cached = findJournalCacheForPeriod(periodDays);
-
-  // v0.10: アーカイブ件数を取得（履歴ボタンのバッジ用）
-  let archiveCount = 0;
-  try {
-    const all = await dbAll("journal_analyses");
-    archiveCount = all.length;
-  } catch(e) {
-    console.warn("[journal] archive count failed:", e);
-  }
-
-  const pnlClass = stats.realized_pnl > 0 ? 'up' : (stats.realized_pnl < 0 ? 'dn' : '');
-  const pnlSign  = stats.realized_pnl > 0 ? '+' : '';
-
-  return `
-    <div class="ja-card">
-      <div class="ja-preview">
-        <b>過去${periodDays}日間のサマリー</b>
-        取引 ${stats.total_trades}回（買 ${stats.buy_count} / 売 ${stats.sell_count}）・
-        確定損益 <span class="${pnlClass}">${pnlSign}¥${fmt(stats.realized_pnl)}</span><br>
-        勝率 ${Math.round(stats.win_rate * 100)}% ・
-        保有中 ${holdings_summary.count}銘柄${holdings_summary.total_unrealized_pnl != null
-          ? `（含み ${holdings_summary.total_unrealized_pnl >= 0 ? '+' : ''}¥${fmt(holdings_summary.total_unrealized_pnl)}）`
-          : ''}
-      </div>
-
-      ${cached ? `
-        <button class="ja-gen-btn ja-regen"
-                onclick="generateJournalAnalysis(${periodDays}, true)"${hasGeminiKey ? '' : ' disabled'}>
-          🔄 再生成（${formatRelativeTime(cached.generated_at)}に生成）
-        </button>
-      ` : `
-        <button class="ja-gen-btn" onclick="generateJournalAnalysis(${periodDays})"${hasGeminiKey ? '' : ' disabled'}>
-          💼 ${periodDays}日の売買分析を生成${hasGeminiKey ? '' : '（Gemini APIキー未設定）'}
-        </button>
-      `}
-
-      ${archiveCount > 0 ? `
-        <button class="ja-hist-btn" onclick="toggleJournalHistory()">
-          📚 過去の分析 <span class="ja-hist-count">(${archiveCount}件)</span>
-        </button>
-      ` : ''}
-
-      <div class="ja-note">
-        ${hasClaudeKey && hasGeminiKey
-          ? '✅ Claude / Gemini APIキー 設定済 ・ 3段分業（市場文脈 → 数値解釈 → 戦略提案）'
-          : `⚠️ ${!hasClaudeKey ? 'Claude' : ''}${!hasClaudeKey && !hasGeminiKey ? ' / ' : ''}${!hasGeminiKey ? 'Gemini' : ''} APIキー未設定（⚙️から登録）`}
-      </div>
-
-      <div id="journalAnalysisResult" class="ja-result">${
-        cached ? renderJournalFromCache(cached) : ''
-      }</div>
-    </div>
-
-    <!-- v0.10: 履歴パネル（初期非表示、toggleJournalHistory でトグル） -->
-    <div id="journalHistoryPanel" class="ja-hist-panel" style="display:none;">
-      <div class="ja-hist-panel-hdr">
-        <div class="ja-hist-panel-title">📚 過去の分析</div>
-        <button class="ja-hist-panel-close" onclick="toggleJournalHistory()" title="閉じる">×</button>
-      </div>
-      <div class="ja-hist-filter" id="journalHistoryFilter">
-        <button data-period="all" class="active" onclick="filterJournalHistory('all')">すべて</button>
-        <button data-period="7"  onclick="filterJournalHistory(7)">7日</button>
-        <button data-period="30" onclick="filterJournalHistory(30)">30日</button>
-        <button data-period="90" onclick="filterJournalHistory(90)">90日</button>
-      </div>
-      <div id="journalHistoryList" class="ja-hist-list">
-        <div class="ja-hist-empty">読込中...</div>
-      </div>
-    </div>
-  `;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  機能B B-6: キャッシュ管理 + 期間切替 + 履歴
-// ════════════════════════════════════════════════════════════════════
-
-const JOURNAL_CACHE_MAX = 3;  // LRUで保持する最大エントリー数
-
-// キャッシュ全体を取得
-function getJournalCache(){
-  return LS.get(K.journal_analysis, {});
-}
-
-// キャッシュに保存（LRU、最新のJOURNAL_CACHE_MAX件のみ保持）
-function saveJournalCache(key, data){
-  const cache = getJournalCache();
-  cache[key] = data;
-
-  // generated_at で新しい順にソートして、古いものを削除
-  const entries = Object.entries(cache)
-    .filter(([k, v]) => v && v.generated_at)
-    .sort((a, b) => (b[1].generated_at || "").localeCompare(a[1].generated_at || ""));
-
-  const pruned = {};
-  for (const [k, v] of entries.slice(0, JOURNAL_CACHE_MAX)) {
-    pruned[k] = v;
-  }
-  LS.set(K.journal_analysis, pruned);
-}
-
-// 現在の期間に対応するキャッシュキーを生成
-function getJournalCacheKey(periodDays, generatedAt){
-  const dt = generatedAt ? new Date(generatedAt) : new Date();
-  const ymd = ymdJST(dt);  // v0.16: UTC→JST（TODAY とキー整合を保つ）
-  return `${periodDays}d_${ymd}`;
-}
-
-// 指定期間のキャッシュエントリーを取得（当日生成済のものを優先）
-function findJournalCacheForPeriod(periodDays){
-  const cache = getJournalCache();
-  const entries = Object.entries(cache)
-    .filter(([k, v]) => k.startsWith(`${periodDays}d_`) && v && v.generated_at)
-    .sort((a, b) => (b[1].generated_at || "").localeCompare(a[1].generated_at || ""));
-  return entries.length > 0 ? {key: entries[0][0], ...entries[0][1]} : null;
-}
-
-// ISO日時 → 「X分前 / X時間前 / X日前」の相対表示
-function formatRelativeTime(iso){
-  if (!iso) return "";
-  const then = new Date(iso).getTime();
-  const diffSec = Math.floor((Date.now() - then) / 1000);
-  if (diffSec < 60) return "たった今";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}分前`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}時間前`;
-  const days = Math.floor(diffSec / 86400);
-  if (days < 7) return `${days}日前`;
-  // 7日以上前は日付そのもの
-  const dt = new Date(iso);
-  return `${dt.getMonth()+1}/${dt.getDate()}`;
-}
-
-// キャッシュから結果カード群を描画
-function renderJournalFromCache(cached){
-  const step1Card = cached.step1
-    ? renderStepCard(1, "市場文脈", "🌍", cached.step1, `🤖 ${GEMINI_MODEL} + Google検索`)
-    : "";
-  const step2Card = cached.step2
-    ? renderStepCard(2, "数値解釈", "📊", cached.step2, `🤖 ${GEMINI_MODEL}`)
-    : "";
-
-  let step3Card = "";
-  if (cached.step3) {
-    if (cached.step3.error) {
-      step3Card = `<div class="ja-step-card error strategy">
-        <div class="ja-step-hdr">🎯 戦略提案</div>
-        <div class="ja-step-error">⚠️ ${escapeHtml(cached.step3.error)}</div>
-      </div>`;
-    } else {
-      step3Card = `<div class="ja-step-card strategy">
-        <div class="ja-step-hdr">🎯 戦略提案</div>
-        <div class="ja-step-body">${escapeHtml(cached.step3.text)}</div>
-        <div class="ja-step-meta">🧠 ${CLAUDE_SONNET_MODEL}</div>
-      </div>`;
-    }
-  }
-
-  return step1Card + step2Card + step3Card;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  v0.10: 分析履歴（IndexedDB 永続アーカイブ、無制限保存、Markdown エクスポート）
-// ════════════════════════════════════════════════════════════════════
-
-// v0.11: 汎用 Markdown コピー関数（クリップボードAPI + フォールバック）
-//   md: コピーするテキスト
-//   label: トーストに表示する対象名（例: "朝会計画", "振り返り(7011)"）
-async function copyMarkdown(md, label="Markdown"){
-  if (!md || !md.trim()) {
-    toast("⚠️ コピー対象が空です");
-    return false;
-  }
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(md);
-      toast(`📋 ${label}をコピーしました (${md.length.toLocaleString()}字)`);
-      return true;
-    }
-    // フォールバック: execCommand
-    const ta = document.createElement("textarea");
-    ta.value = md;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    toast(ok ? `📋 ${label}をコピーしました` : "⚠️ コピー失敗（手動で選択してください）");
-    return ok;
-  } catch(e) {
-    console.error("[copy] 失敗:", e);
-    toast("⚠️ コピー失敗: " + e.message);
-    return false;
-  }
-}
-
-// モジュールスコープの状態（履歴パネル用）
-let _journalHistoryAll = [];      // IndexedDB から取得した全件（generated_at 降順）
-let _journalHistoryFilter = "all"; // "all" | 7 | 30 | 90
-
-// 履歴パネルのトグル（📚ボタンから呼ばれる）
-async function toggleJournalHistory(){
-  const panel = document.getElementById("journalHistoryPanel");
-  if (!panel) return;
-  const isOpen = panel.style.display !== "none";
-  if (isOpen) {
-    panel.style.display = "none";
-  } else {
-    panel.style.display = "block";
-    await loadJournalHistoryList();
-  }
-}
-
-// IndexedDB から全件取得してレンダリング
-async function loadJournalHistoryList(){
-  const listEl = document.getElementById("journalHistoryList");
-  if (!listEl) return;
-  listEl.innerHTML = `<div class="ja-hist-empty">読込中...</div>`;
-  try {
-    const all = await dbAll("journal_analyses");
-    // generated_at 降順（新しい順）
-    all.sort((a, b) => (b.generated_at || "").localeCompare(a.generated_at || ""));
-    _journalHistoryAll = all;
-    renderJournalHistoryList();
-  } catch(e) {
-    console.error("[v0.10] 履歴読込失敗:", e);
-    listEl.innerHTML = `<div class="ja-hist-empty">⚠️ 読込失敗: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-// 期間フィルタ切替
-function filterJournalHistory(period){
-  _journalHistoryFilter = period;
-  // フィルタボタンの active 切替
-  const filterBar = document.getElementById("journalHistoryFilter");
-  if (filterBar) {
-    filterBar.querySelectorAll("button").forEach(btn => {
-      const p = btn.dataset.period;
-      const isActive = (p === "all" && period === "all") || (Number(p) === Number(period));
-      btn.classList.toggle("active", isActive);
-    });
-  }
-  renderJournalHistoryList();
-}
-
-// フィルタ適用後の一覧を描画
-function renderJournalHistoryList(){
-  const listEl = document.getElementById("journalHistoryList");
-  if (!listEl) return;
-
-  let items = _journalHistoryAll;
-  if (_journalHistoryFilter !== "all") {
-    const n = Number(_journalHistoryFilter);
-    items = items.filter(it => Number(it.period_days) === n);
-  }
-
-  if (items.length === 0) {
-    listEl.innerHTML = `<div class="ja-hist-empty">
-      ${_journalHistoryFilter === "all"
-        ? "まだ保存された分析はありません"
-        : `「${_journalHistoryFilter}日」の分析はありません`}
-    </div>`;
-    return;
-  }
-
-  listEl.innerHTML = items.map(it => renderJournalHistoryRow(it)).join("");
-}
-
-// 一覧の 1 行（折りたたみ式）
-function renderJournalHistoryRow(entry){
-  const dt = new Date(entry.generated_at);
-  const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-  const timeStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-
-  const s = entry.stats_snapshot;
-  let metaHtml;
-  if (s) {
-    const pnlClass = s.realized_pnl > 0 ? 'up' : (s.realized_pnl < 0 ? 'dn' : '');
-    const pnlSign = s.realized_pnl > 0 ? '+' : '';
-    metaHtml = `${s.total_trades}取引 ・ <span class="${pnlClass}">${pnlSign}¥${fmt(s.realized_pnl)}</span> ・ 勝率${Math.round((s.win_rate || 0) * 100)}%`;
-  } else {
-    // v0.8 から移行してきた旧データは stats_snapshot なし
-    metaHtml = `<span class="ja-hist-legacy">（v0.8 から移行・統計なし）</span>`;
-  }
-
-  return `
-    <div class="ja-hist-item" id="histItem_${entry.id}">
-      <div class="ja-hist-head" onclick="toggleJournalHistoryDetail(${entry.id})">
-        <div class="ja-hist-date">${dateStr}<br><span style="font-size:9px;color:var(--t3);font-weight:400;">${timeStr}</span></div>
-        <div class="ja-hist-period">${entry.period_days}日</div>
-        <div class="ja-hist-meta">${metaHtml}</div>
-        <div class="ja-hist-chev">▼</div>
-      </div>
-      <div class="ja-hist-detail" id="histDetail_${entry.id}" style="display:none;">
-        <div class="ja-hist-empty" style="padding:8px;">タップして展開...</div>
-      </div>
-    </div>
-  `;
-}
-
-// 行タップ: 詳細の折りたたみ/展開
-async function toggleJournalHistoryDetail(id){
-  const item = document.getElementById(`histItem_${id}`);
-  const detail = document.getElementById(`histDetail_${id}`);
-  if (!item || !detail) return;
-
-  const isOpen = item.classList.contains("open");
-  if (isOpen) {
-    item.classList.remove("open");
-    detail.style.display = "none";
-    return;
-  }
-
-  // 初回展開時に IndexedDB から詳細を取得（本体は重いので遅延ロード）
-  item.classList.add("open");
-  detail.style.display = "block";
-
-  if (detail.dataset.loaded === "1") return;  // 再展開では再描画不要
-  try {
-    const entry = await dbGet("journal_analyses", id);
-    if (!entry) {
-      detail.innerHTML = `<div class="ja-hist-empty">⚠️ データが見つかりません</div>`;
-      return;
-    }
-    const cardsHtml = renderJournalFromCache(entry);
-    detail.innerHTML = `
-      ${cardsHtml || '<div class="ja-hist-empty">分析データが空です</div>'}
-      <div class="ja-hist-actions">
-        <button onclick="copyJournalAsMarkdown(${id})">📋 Markdown コピー</button>
-        <button onclick="drilldownChatJournalAnalysis(${id})">💬 この戦略を深掘り</button>
-        <button class="ja-hist-del" onclick="deleteJournalHistoryEntry(${id})">🗑 削除</button>
-      </div>
-    `;
-    detail.dataset.loaded = "1";
-  } catch(e) {
-    console.error("[v0.10] 詳細取得失敗:", e);
-    detail.innerHTML = `<div class="ja-hist-empty">⚠️ 取得失敗: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-// レコード削除
-async function deleteJournalHistoryEntry(id){
-  if (!confirm("この分析結果を削除しますか？\n（この操作は取り消せません）")) return;
-  try {
-    await dbDelete("journal_analyses", id);
-    toast("🗑 削除しました");
-    // リロード
-    await loadJournalHistoryList();
-    // タブ全体の件数バッジも更新したいので、親タブを再描画
-    if (typeof refreshReviewModal === "function") {
-      refreshReviewModal();
-    }
-  } catch(e) {
-    console.error("[v0.10] 削除失敗:", e);
-    toast("⚠️ 削除失敗: " + e.message);
-  }
-}
-
-// Markdown 生成（エクスポート用）
-function buildJournalMarkdown(entry){
-  const dt = new Date(entry.generated_at);
-  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-  const label = entry.period_label || formatPeriodRange(entry.period_days);
-
-  const lines = [];
-  lines.push(`# 売買分析: ${label} (${entry.period_days}日)`);
-  lines.push(``);
-  lines.push(`- 生成日時: ${dtStr}`);
-  lines.push(`- 生成モデル: Gemini 2.5 Flash (Step1/2) + Claude Sonnet 4.6 (Step3)`);
-  lines.push(``);
-
-  const s = entry.stats_snapshot;
-  if (s) {
-    const pnlSign = s.realized_pnl > 0 ? '+' : '';
-    lines.push(`## 📊 サマリー`);
-    lines.push(``);
-    lines.push(`- 取引: ${s.total_trades}回（買 ${s.buy_count} / 売 ${s.sell_count}）`);
-    lines.push(`- 確定損益: ${pnlSign}¥${fmt(s.realized_pnl)}`);
-    lines.push(`- 勝率: ${Math.round((s.win_rate || 0) * 100)}%`);
-    if (s.profit_factor != null) {
-      lines.push(`- プロフィットファクター: ${s.profit_factor}`);
-    }
-    lines.push(`- 保有中: ${s.holdings_count}銘柄${s.total_unrealized_pnl != null
-      ? `（含み ${s.total_unrealized_pnl >= 0 ? '+' : ''}¥${fmt(s.total_unrealized_pnl)}）` : ''}`);
-    lines.push(``);
-  }
-
-  if (entry.step1) {
-    lines.push(`## 🌍 Step1: 市場文脈 (Gemini + Google検索)`);
-    lines.push(``);
-    lines.push(entry.step1.error ? `⚠️ ${entry.step1.error}` : (entry.step1.text || ""));
-    lines.push(``);
-  }
-  if (entry.step2) {
-    lines.push(`## 📊 Step2: 数値解釈 (Gemini)`);
-    lines.push(``);
-    lines.push(entry.step2.error ? `⚠️ ${entry.step2.error}` : (entry.step2.text || ""));
-    lines.push(``);
-  }
-  if (entry.step3) {
-    lines.push(`## 🎯 Step3: 戦略提案 (Claude Sonnet 4.6)`);
-    lines.push(``);
-    lines.push(entry.step3.error ? `⚠️ ${entry.step3.error}` : (entry.step3.text || ""));
-    lines.push(``);
-  }
-
-  lines.push(`---`);
-  lines.push(`_trade-journal morning.html v0.10 で生成_`);
-  return lines.join("\n");
-}
-
-// クリップボードコピー
-async function copyJournalAsMarkdown(id){
-  try {
-    const entry = await dbGet("journal_analyses", id);
-    if (!entry) {
-      toast("⚠️ データが見つかりません");
-      return;
-    }
-    const md = buildJournalMarkdown(entry);
-    await copyMarkdown(md, "売買分析");
-  } catch(e) {
-    console.error("[v0.10] コピー失敗:", e);
-    toast("⚠️ コピー失敗: " + e.message);
-  }
-}
-
-// localStorage LRU → IndexedDB ワンショット移行（起動時に 1 回だけ実行）
-async function migrateJournalCacheToIndexedDB(){
-  if (LS.get(K.journal_migrated, false)) return;
-
-  try {
-    const cache = LS.get(K.journal_analysis, {});
-    const entries = Object.values(cache).filter(v => v && v.generated_at);
-    if (entries.length === 0) {
-      LS.set(K.journal_migrated, true);
-      return;
-    }
-
-    // 既存 IndexedDB の generated_at で重複排除
-    const existing = await dbAll("journal_analyses");
-    const existingTimes = new Set(existing.map(e => e.generated_at));
-
-    let migrated = 0;
-    for (const entry of entries) {
-      if (existingTimes.has(entry.generated_at)) continue;
-      await dbAdd("journal_analyses", {
-        generated_at: entry.generated_at,
-        period_days: entry.period_days,
-        period_label: formatPeriodRange(entry.period_days),
-        stats_snapshot: null,  // 旧データには snapshot がないので null
-        step1: entry.step1 || null,
-        step2: entry.step2 || null,
-        step3: entry.step3 || null,
-        migrated_from_localStorage: true,
-      });
-      migrated++;
-    }
-    LS.set(K.journal_migrated, true);
-    if (migrated > 0) {
-      console.log(`[v0.10] ${migrated}件の分析を localStorage から IndexedDB に移行しました`);
-    }
-  } catch(e) {
-    console.warn("[v0.10] journal_analysis 移行エラー:", e);
-    // 失敗時はフラグを立てない → 次回起動時に再試行
-  }
-}
-
-// 期間の開始日〜終了日を "YYYY-MM-DD 〜 YYYY-MM-DD" で返す
-function formatPeriodRange(periodDays){
-  const now = new Date();
-  const start = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
-  const fmt = d => ymdJST(d);  // v0.16: UTC→JST
-  return `${fmt(start)} 〜 ${fmt(now)}`;
-}
-
-// 取引銘柄の一覧を「コード 名前」形式で抽出（重複排除）
-function extractUniqueCodeNames(trades){
-  const seen = new Map();
-  for (const t of trades) {
-    if (!t.cd) continue;
-    if (!seen.has(t.cd)) seen.set(t.cd, t.nm || "");
-  }
-  return Array.from(seen.entries()).map(([cd, nm]) => `${cd} ${nm}`.trim());
-}
-
-// Step1 Gemini: 市場文脈プロンプト（Google検索 ON）
-function buildGeminiMarketContextPrompt(data){
-  const {period_days, trades, stats} = data;
-  const range = formatPeriodRange(period_days);
-  const codeNames = extractUniqueCodeNames(trades);
-  const topCodes = codeNames.slice(0, 15);  // 検索負荷を考えて上位15銘柄まで
-
-  return `あなたは日本株市場のシニアアナリストです。
-以下のトレード履歴の期間について、Google検索で簡潔にまとめてください。
-
-【期間】${range}
-
-【検索対象】
-1. 期間内の主要相場イベント（FOMC・日銀政策・主要経済指標・地政学イベント）
-2. 取引銘柄の当時の固有材料（以下の銘柄について、この期間に該当するもの）
-${topCodes.length > 0 ? topCodes.map(c => "   - " + c).join("\n") : "   （なし）"}
-3. 期間中の日経平均・グロース指数の概況
+async function analyzeScreenshots() {
+  if(!ssImageList.length){toast('⚠️ 画像を選んでください');return;}
+  if(!GK){openKeyModal();return;}
+  const btn=document.getElementById('ssAnalyzeBtn');
+  btn.disabled=true;
+  const prompts={
+    spot:`SBI証券アプリ「保有証券」タブのスクリーンショットです。画面の一部が切れていても、読み取れる情報をすべて抽出してください。
+表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
+
+【画面レイアウト（1銘柄あたり3カラム×複数行）】
+■ 銘柄カラム（1〜2行）
+  1行目: 銘柄名（例: ＡｉロボティクスЕヤマダＨＤ／三菱ＵＦＪ／アイスタイル など、全角・カタカナ・漢字混在あり）
+  2行目: 「コード 特定」または「コード NISA」または「コード 一般」（例: 247A 特定 / 7011 特定 / 3660 NISA）
+■ 保有株数カラム（2行）
+  1行目: 「○○○株」← これが保有株数
+  2行目: 「(○○○)」← 注文中株数。これは絶対に shares に使わない
+■ 評価額カラム（2行）
+  1行目: 評価額「○○○,○○○円」
+  2行目: 評価額前日比「+○○○円(+○.○○%)」または「-○○○円(-○.○○%)」
 
 【出力形式】
-各項目を簡潔に3〜5行、全体で合計500字以内で。
-マークダウン見出し（##）を使ってセクション分け。
-重要: 必ず最後まで書き切ってください。途中で切れないよう、簡潔にまとめること。`;
-}
-
-// Step2 Gemini: 数値解釈プロンプト（Google検索 OFF）
-function buildGeminiStatsInterpretationPrompt(data){
-  const {stats, holdings_summary} = data;
-  const pf = stats.profit_factor != null ? stats.profit_factor : "∞（全勝）";
-  const avgHold = "—"; // 保有日数計算は将来追加、今回は省略
-
-  return `あなたは日本株のクオンツアナリストです。以下のトレード統計を解釈してください。
-
-【期間統計】
-- 取引回数: ${stats.total_trades}回（買 ${stats.buy_count} / 売 ${stats.sell_count}）
-- 対象銘柄数: ${stats.unique_codes}
-- 確定損益: ¥${fmt(stats.realized_pnl)}
-- 勝率: ${Math.round(stats.win_rate * 100)}% (${stats.wins}勝${stats.losses}敗)
-- 平均利益: ¥${fmt(stats.avg_win)} / 平均損失: ¥${fmt(stats.avg_loss)}
-- プロフィットファクター(PF): ${pf}
-- 最大利益: ${stats.biggest_win ? `¥${fmt(stats.biggest_win.pnl)} (${stats.biggest_win.code} ${stats.biggest_win.name})` : "—"}
-- 最大損失: ${stats.biggest_loss ? `¥${fmt(stats.biggest_loss.pnl)} (${stats.biggest_loss.code} ${stats.biggest_loss.name})` : "—"}
-
-【現状ポジション】
-- 保有銘柄数: ${holdings_summary.count}
-- 合計含み損益: ${holdings_summary.total_unrealized_pnl != null ? `¥${fmt(holdings_summary.total_unrealized_pnl)}` : "不明"}
-
-【分析項目（各2〜3行、全体で500字以内）】
-## ① トレードスタイルの特徴
-（これらの数値が示すスタイル）
-
-## ② 強み
-（数値的に優れている点）
-
-## ③ 弱み
-（改善余地のある数値）
-
-## ④ 統計的持続可能性
-（このまま続けて期待値プラスか、PFと勝率から評価）
-
-重要: 必ず4セクション全部を最後まで書き切ってください。`;
-}
-
-// 結果カードを構築（Step別）
-function renderStepCard(step, title, icon, content, meta){
-  if (content.error) {
-    return `
-      <div class="ja-step-card error">
-        <div class="ja-step-hdr">${icon} ${title}</div>
-        <div class="ja-step-error">⚠️ ${escapeHtml(content.error)}</div>
-      </div>
-    `;
-  }
-  return `
-    <div class="ja-step-card">
-      <div class="ja-step-hdr">${icon} ${title}</div>
-      <div class="ja-step-body">${escapeHtml(content.text)}</div>
-      <div class="ja-step-meta">${meta}</div>
-    </div>
-  `;
-}
-
-// Step3 Claude Sonnet: 統合戦略プロンプト
-function buildClaudeStrategyPrompt(data, geminiContext, geminiStats){
-  const {period_days, stats, holdings_summary, morning_judgments, evening_matches} = data;
-
-  // 朝会判定との一貫性サマリー
-  const judgmentCounts = {hold: 0, consider_cut: 0, consider_sell: 0};
-  for (const j of morning_judgments) {
-    if (j.judgment) judgmentCounts[j.judgment] = (judgmentCounts[j.judgment] || 0) + 1;
-  }
-
-  // 夕会のドリフト（先送り・方針変更）サマリー
-  const driftCounts = {consistent: 0, postponed: 0, changed: 0, unjudged: 0};
-  for (const m of evening_matches) {
-    if (m.match_type) driftCounts[m.match_type] = (driftCounts[m.match_type] || 0) + 1;
-  }
-
-  // 取引の銘柄リスト（最大10件）
-  const tradeLines = data.trades.slice(0, 10).map(t => {
-    const action = t.a === "sell" ? "売" : "買";
-    const pnl = t.pnl != null ? `（pnl: ${t.pnl >= 0 ? '+' : ''}¥${fmt(t.pnl)}）` : '';
-    return `- ${t.dt} ${action} ${t.cd} ${t.nm || ''} ${t.sh || '?'}株 @¥${fmt(t.p || 0)}${pnl}`;
-  }).join("\n");
-
-  return `あなたは運用歴25年の日本株シニアファンドマネージャーです。
-ひろき様（個人投資家・短期回転重視スイング）の過去${period_days}日間のトレードを統合的に分析し、戦略アドバイスを書いてください。
-
-${buildStrategyContext()}
-
-## 📊 数値統計（参考）
-- 取引: ${stats.total_trades}回（買 ${stats.buy_count} / 売 ${stats.sell_count}）
-- 確定損益: ¥${fmt(stats.realized_pnl)}・勝率 ${Math.round(stats.win_rate * 100)}%
-- 保有中: ${holdings_summary.count}銘柄${holdings_summary.total_unrealized_pnl != null ? `（含み ${holdings_summary.total_unrealized_pnl >= 0 ? '+' : ''}¥${fmt(holdings_summary.total_unrealized_pnl)}）` : ''}
-
-## 📋 朝会判定の分布
-- 継続保有: ${judgmentCounts.hold || 0}件 / 損切検討: ${judgmentCounts.consider_cut || 0}件 / 利確検討: ${judgmentCounts.consider_sell || 0}件
-
-## 🎯 夕会の判定 vs 行動
-- 一致: ${driftCounts.consistent || 0}件 / 先送り: ${driftCounts.postponed || 0}件 / 方針変更: ${driftCounts.changed || 0}件 / 判定外行動: ${driftCounts.unjudged || 0}件
-
-## 💼 取引履歴（直近10件）
-${tradeLines || "(なし)"}
-
-## 🌍 市場文脈（Gemini調べ）
-${geminiContext || "(取得失敗)"}
-
-## 📊 数値解釈（Gemini調べ）
-${geminiStats || "(取得失敗)"}
-
----
-
-【出力形式（必ずマークダウン、合計600字以内）】
-
-## 総評
-（このトレーダーの今期間の特徴、3〜4行）
-
-## 強みの再現性
-（再現可能な勝ちパターン、具体的な数値・銘柄を引用、3〜5行）
-
-## 改善すべき弱み
-（繰り返し発生している負けパターン、具体例付き、3〜5行）
-
-## 朝会判定の活用度
-（朝の判定をどれだけ実行に移せているか、ズレの傾向、2〜3行）
-
-## 来期戦略提案
-（具体的アクション3つ、それぞれ条件・サイズ含む）
-1. ...
-2. ...
-3. ...
+[{"code":"247A","name":"Aiロボティクス","shares":100,"buy_price":null,"eval":128000,"chg_amt":4500,"chg_pct":3.64}]
 
 【ルール】
-- データの数字を必ず根拠として引用する
-- 抽象論でなく、具体的な銘柄名・水準・行動を含める
-- 励ましつつも率直に、ひろき様への口調は丁寧に
-- 必ず最後まで書き切る`;
-}
+- code: 「特定」「NISA」「一般」の直前の英数字（4桁数字 or 3桁数字+英字、例: 135A, 247A, 3660, 7011）
+- name: 銘柄名そのまま（全角/半角は変換不要、ひらがな・カタカナ・漢字いずれも忠実に）
+- shares: 保有株数カラム1行目の数字のみ（カンマ・株マークなし）。括弧内の注文数(0)等は絶対に使わない
+- buy_price: 取得単価。デフォルト画面では非表示の場合がほとんど → 表示が見当たらなければ必ず null（eval/shares から計算して埋めるのは禁止、推測も禁止）
+- eval: 評価額の数字のみ（カンマ・円なし）
+- chg_amt: 評価額前日比の円額（符号付き整数、カンマなし。マイナスは負数）
+- chg_pct: 評価額前日比の％（符号付き、数字のみ）
+- 「買建」「売建」「信用建玉」が含まれる銘柄は信用なので絶対に含めない（このタブは現物のみ）
+- 「評価損益合計」「明細数」などのサマリー・ヘッダ行は含めない（個別銘柄行のみ）
+- 読み取れない項目は null（推測禁止）`,
 
-// 売買分析メイン実行（B-5: Gemini 2段 + Claude Sonnet 統合戦略の3段分業）
-// B-6: force=true でキャッシュ無視して強制再生成
-async function generateJournalAnalysis(periodDays, force=false){
-  const sec = document.getElementById("journalAnalysisResult");
-  if (!sec) return;
+    margin:`SBI証券アプリ「信用建玉」タブのスクリーンショットです。画面の一部が切れていても、読み取れる情報をすべて抽出してください。
+表示されているすべての建玉を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
 
-  // B-6: force でなければキャッシュ確認（念のため、通常は renderJournalTab で既に表示済み）
-  if (!force) {
-    const cached = findJournalCacheForPeriod(periodDays);
-    if (cached) {
-      sec.innerHTML = renderJournalFromCache(cached);
-      return;
-    }
-  }
+【画面レイアウト（1建玉あたり3カラム×複数行）】
+■ 銘柄カラム（通常3行）
+  1行目: 銘柄名（例: 稀元素／ミナトＨＤ／カカクコム／コーエーテクモ／三菱重 など）
+  2行目: 「コード 買建/特定」または「コード 売建/特定」（NISA・一般もありうる。例: 4082 買建/特定 / 6862 買建/特定 / 2371 買建/特定）
+  3行目: 「6ヵ月」または「1ヵ月」「無期限」等の返済期限ラベル ← 抽出対象外（無視）
+■ 建株数カラム（2行）
+  1行目: 「○○○株」← これが建株数
+  2行目: 「(○○○)」← 注文中株数。これは絶対に shares に使わない（200株 (200) の括弧内200は無視）
+■ 評価額カラム（2行）
+  1行目: 評価額「○○○,○○○円」
+  2行目: 評価額前日比「+○○○円(+○.○○%)」または「-○○○円(-○.○○%)」
 
-  // APIキー確認
-  const geminiKey = LS.raw(K.api_gemini);
-  const claudeKey = LS.raw(K.api_claude);
-  if (!geminiKey || !geminiKey.trim()) {
-    sec.innerHTML = `<div class="ja-step-card error">
-      <div class="ja-step-error">⚠️ Gemini APIキーが未設定です。⚙️から登録してください。</div>
-    </div>`;
-    return;
-  }
+【出力形式】
+[{"code":"4082","name":"稀元素","shares":200,"buy_price":null,"eval":471400,"chg_amt":20600,"chg_pct":4.57},{"code":"6862","name":"ミナトHD","shares":100,"buy_price":null,"eval":262200,"chg_amt":-7400,"chg_pct":-2.74}]
 
-  // 集計データ取得
-  let data;
-  try {
-    data = await aggregateAllForJournal(periodDays);
-  } catch(e) {
-    sec.innerHTML = `<div class="ja-step-card error">
-      <div class="ja-step-error">⚠️ 集計エラー: ${escapeHtml(e.message)}</div>
-    </div>`;
-    return;
-  }
+【ルール】
+- code: 「買建/」または「売建/」の直前の英数字（4桁数字 or 3桁数字+英字、例: 4082, 6862, 2371, 3635, 7011, 247A）
+- name: 銘柄ブロックの1行目（全角/半角・漢字・カタカナそのまま）
+- shares: 建株数カラム1行目の数字のみ（カンマ・株マークなし）。括弧内の注文数(0)・(200)等は絶対に使わない
+- buy_price: 建値（平均建単価）。**デフォルト画面では右にスクロールしないと見えないため、ほぼ非表示** → 画面に直接表示されていなければ必ず null。eval/shares から計算して埋めるのは厳禁、chg_amt から推測するのも厳禁、推測一切禁止
+- eval: 評価額カラム1行目の数字のみ（カンマ・円なし）
+- chg_amt: 評価額前日比の円額（符号付き整数、カンマなし。マイナスは負数で）
+- chg_pct: 評価額前日比の％（符号付き、数字のみ）
+- 「評価損益合計」「明細数」「6ヵ月」「(注文数)」等のヘッダ・サマリー・ラベル行は絶対に含めない（個別建玉行のみ）
+- 売建（空売り）も同じ形式で出力（shares は正の数のまま）
+- 読み取れない項目は null（推測禁止）`,
 
-  if (data.stats.total_trades === 0) {
-    sec.innerHTML = `<div class="ja-step-card error">
-      <div class="ja-step-error">⚠️ 売買記録なし。分析対象がありません。</div>
-    </div>`;
-    return;
-  }
+    hist:`SBI証券アプリの約定履歴・取引履歴画面のスクリーンショットです。各約定行を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止、JSONだけ）。
 
-  // 実行開始
-  sec.innerHTML = `<div class="ja-step-card loading">
-    <div class="ja-step-hdr">🌍 市場文脈</div>
-    <div class="ja-step-body"><span class="loading">Gemini + Google検索で情報取得中...</span></div>
-  </div>`;
+各約定の表示例:
+  日付: 26/04/28 / 2026/04/28 / 04/28
+  取引種別: 株式買付 / 現物買 / 信用新規買 / 株式売却 / 現物売 / 信用返済売 / 信買 / 信売 など
+  銘柄行: 3778 さくらインターネット / 247A Aiロボティクス
+  株数: 100株
+  約定単価: 2,850円
 
-  // ── Step1: 市場文脈（Gemini + Google検索） ──
-  let step1Result;
-  try {
-    const prompt1 = buildGeminiMarketContextPrompt(data);
-    const text1 = await callGemini(geminiKey, prompt1, {
-      useSearch: true,
-      maxTokens: 3000,
-    });
-    step1Result = {text: text1, generated_at: new Date().toISOString()};
-  } catch(e) {
-    console.error("[journal] Step1 failed:", e);
-    step1Result = {error: `市場文脈取得失敗: ${e.message}`};
-  }
+[{"action":"buy","code":"3778","name":"さくらインターネット","shares":100,"price":2850,"date":"2026-04-28","type":"spot"}]
 
-  // Step1 結果表示 + Step2 ローディング
-  sec.innerHTML = `
-    ${renderStepCard(1, "市場文脈", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)}
-    <div class="ja-step-card loading">
-      <div class="ja-step-hdr">📊 数値解釈</div>
-      <div class="ja-step-body"><span class="loading">Gemini が統計数値を解釈中...</span></div>
-    </div>
-  `;
+ルール:
+- action: 「買付」「現物買」「信用新規買」「信買」「買」を含む → "buy"。「売却」「現物売」「信用返済売」「信売」「売」を含む → "sell"
+- code: 4桁数字または3桁数字+英字（例: 3778, 247A, 135A）
+- name: 銘柄名そのまま
+- shares: 約定株数の数字のみ
+- price: 約定単価の数字のみ（カンマ・円なし）
+- date: YYYY-MM-DD形式。年が表示されてない場合は今年（${new Date().getFullYear()}年）
+- type: 「信用」「建玉」「信買」「信売」を含めば "margin"、それ以外は "spot"
+- 注文中・約定待ちは除外（実際に約定した取引のみ）
+- 同じ銘柄の複数行はすべて別取引として記録
+- 読み取れない項目はnull（推測禁止）`,
 
-  // ── Step2: 数値解釈（Gemini 検索なし） ──
-  let step2Result;
-  try {
-    const prompt2 = buildGeminiStatsInterpretationPrompt(data);
-    const text2 = await callGemini(geminiKey, prompt2, {
-      useSearch: false,
-      maxTokens: 2000,
-    });
-    step2Result = {text: text2, generated_at: new Date().toISOString()};
-  } catch(e) {
-    console.error("[journal] Step2 failed:", e);
-    step2Result = {error: `数値解釈失敗: ${e.message}`};
-  }
+    pnl:`SBI証券アプリの損益履歴・実現損益画面のスクリーンショットです。各行を読み取り、以下のJSON配列のみ返してください（前置き・解説・コードブロック禁止）。
 
-  // Step1+2 結果表示 + Step3 ローディング（または APIキー不足表示）
-  if (!claudeKey || !claudeKey.trim()) {
-    sec.innerHTML = `
-      ${renderStepCard(1, "市場文脈", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)}
-      ${renderStepCard(2, "数値解釈", "📊", step2Result, `🤖 ${GEMINI_MODEL}`)}
-      <div class="ja-step-card error">
-        <div class="ja-step-hdr">🎯 戦略提案</div>
-        <div class="ja-step-error">⚠️ Claude APIキーが未設定のため、統合戦略はスキップしました。⚙️で登録すると次回から実行されます。</div>
-      </div>
-    `;
-    return;
-  }
+[{"code":"3778","name":"さくらインターネット","realized_pnl":15000,"shares":100,"sell_price":2850,"buy_price":2700,"date":"2026-04-28"}]
 
-  sec.innerHTML = `
-    ${renderStepCard(1, "市場文脈", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)}
-    ${renderStepCard(2, "数値解釈", "📊", step2Result, `🤖 ${GEMINI_MODEL}`)}
-    <div class="ja-step-card loading strategy">
-      <div class="ja-step-hdr">🎯 戦略提案</div>
-      <div class="ja-step-body"><span class="loading">Claude Sonnet が統合戦略を策定中...</span></div>
-    </div>
-  `;
+ルール:
+- code: 4桁数字または3桁数字+英字
+- realized_pnl: 実現損益の数値（プラス/マイナス符号付き、カンマなし）
+- date: YYYY-MM-DD（年がなければ${new Date().getFullYear()}年）
+- 読み取れない項目はnull`,
 
-  // ── Step3: 統合戦略（Claude Sonnet 4.6） ──
-  let step3Result;
-  try {
-    const prompt3 = buildClaudeStrategyPrompt(
-      data,
-      step1Result.text || "",
-      step2Result.text || ""
-    );
-    const text3 = await callClaude(claudeKey, prompt3, {
-      model: CLAUDE_SONNET_MODEL,
-      maxTokens: 2500,
-    });
-    step3Result = {text: text3, generated_at: new Date().toISOString()};
-  } catch(e) {
-    console.error("[journal] Step3 failed:", e);
-    step3Result = {error: `統合戦略失敗: ${e.message}`};
-  }
+    watch:`この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください（前置き禁止）。
+[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]
+読み取れない項目はnull。`,
 
-  // 最終結果表示（3カード揃い）
-  const step3Card = step3Result.error
-    ? `<div class="ja-step-card error strategy">
-        <div class="ja-step-hdr">🎯 戦略提案</div>
-        <div class="ja-step-error">⚠️ ${escapeHtml(step3Result.error)}</div>
-      </div>`
-    : `<div class="ja-step-card strategy">
-        <div class="ja-step-hdr">🎯 戦略提案</div>
-        <div class="ja-step-body">${escapeHtml(step3Result.text)}</div>
-        <div class="ja-step-meta">🧠 ${CLAUDE_SONNET_MODEL}</div>
-      </div>`;
-
-  sec.innerHTML = `
-    ${renderStepCard(1, "市場文脈", "🌍", step1Result, `🤖 ${GEMINI_MODEL} + Google検索`)}
-    ${renderStepCard(2, "数値解釈", "📊", step2Result, `🤖 ${GEMINI_MODEL}`)}
-    ${step3Card}
-  `;
-
-  // B-6: キャッシュに保存（3段とも結果あれば）
-  const generatedAt = new Date().toISOString();
-  const cacheData = {
-    generated_at: generatedAt,
-    period_days: periodDays,
-    step1: step1Result,
-    step2: step2Result,
-    step3: step3Result,
+    cash:`SBI証券アプリの「余力」「口座管理」画面のスクリーンショットです。以下のJSONのみ返してください（配列ではなくオブジェクト、前置き禁止）。
+{"buying_power":買付余力の数値,"cash":委託保証金現金または現引可能額の数値,"margin_power":信用建余力の数値}
+数値のみ（円マーク・カンマなし）。読み取れない項目は0。`
   };
-  const cacheKey = getJournalCacheKey(periodDays, generatedAt);
-  saveJournalCache(cacheKey, cacheData);
-
-  // v0.10: IndexedDB にもアーカイブ保存（永続、無制限）
-  // localStorage は当日キャッシュとしての役割を維持（モーダル再オープンの即時復元用）
-  try {
-    await dbAdd("journal_analyses", {
-      generated_at: generatedAt,
-      period_days: periodDays,
-      period_label: formatPeriodRange(periodDays),
-      stats_snapshot: {
-        total_trades:         data.stats.total_trades,
-        buy_count:            data.stats.buy_count,
-        sell_count:           data.stats.sell_count,
-        realized_pnl:         data.stats.realized_pnl,
-        win_rate:             data.stats.win_rate,
-        profit_factor:        data.stats.profit_factor,
-        holdings_count:       data.holdings_summary.count,
-        total_unrealized_pnl: data.holdings_summary.total_unrealized_pnl,
-      },
-      step1: step1Result,
-      step2: step2Result,
-      step3: step3Result,
-    });
-    console.log("[v0.10] journal_analyses にアーカイブ保存しました");
-  } catch(e) {
-    // localStorage には保存済なので致命的ではない。UIは正常表示のまま
-    console.warn("[v0.10] journal_analyses 保存失敗（localStorage は保存済）:", e);
-  }
-
-  // 再生成ボタンに切り替えるため、タブ全体を再描画
-  // ただし、結果表示エリアはそのまま維持（すでに表示済み）
-  // → 次回モーダル開いたとき、または期間切替したときに反映される
-}
-
-async function renderReviewBody(stats){
-  if (stats.total === 0) {
-    return `<div class="empty">
-      <div class="ei">📊</div>
-      まだ判定履歴がありません<br>
-      <span style="font-size:11px;color:var(--t3);">朝会を完了すると判定が記録されます</span>
-    </div>`;
-  }
-
-  // 期間切り替えタブ
-  const periodHtml = `
-    <div class="period-tabs">
-      ${[7, 30, 90].map(d => `
-        <button class="ptab ${d === _reviewCurrentPeriod ? 'active' : ''}"
-                onclick="changeReviewPeriod(${d})">過去${d}日</button>
-      `).join("")}
-    </div>
-  `;
-
-  // 注目パターン（並列表示）
-  const tooEarlyAvg = stats.too_early.length > 0
-    ? stats.too_early.reduce((s,j) => s + (j.outcome_score||0), 0) / stats.too_early.length
-    : 0;
-  const heldWrongAvg = stats.held_wrong.length > 0
-    ? stats.held_wrong.reduce((s,j) => s + (j.outcome_score||0), 0) / stats.held_wrong.length
-    : 0;
-
-  const renderPatRow = (j, scoreClass) => `
-    <div class="pat-row">
-      <span class="pr-code">${escapeHtml(code4to5(j.code))}</span>
-      <span class="pr-name">${escapeHtml(j.name || '-')}</span>
-      <span class="pr-score ${scoreClass}">${j.outcome_score >= 0 ? '+' : ''}${fmt(j.outcome_score, 1)}%</span>
-    </div>
-  `;
-
-  const patternsHtml = `
-    <div class="modal-sec">
-      <div class="modal-sec-title">🎯 注目パターン</div>
-      <div class="pattern-grid">
-        <div class="pattern-card too-early">
-          <div class="pat-hdr">
-            <div class="pat-icon">⚠️</div>
-            <div class="pat-title">手放した</div>
-          </div>
-          <div class="pat-stat">
-            <div class="pat-num">${stats.too_early.length}<span>件</span></div>
-            <div class="pat-avg ${tooEarlyAvg >= 0 ? 'up' : 'dn'}">
-              平均 ${tooEarlyAvg >= 0 ? '+' : ''}${fmt(tooEarlyAvg, 1)}%
-            </div>
-          </div>
-          ${stats.too_early.length === 0
-            ? `<div class="pat-empty">該当なし 👍</div>`
-            : `<div class="pat-list">${stats.too_early.slice(0, 3).map(j => renderPatRow(j, 'up')).join("")}</div>`}
-        </div>
-        <div class="pattern-card held-wrong">
-          <div class="pat-hdr">
-            <div class="pat-icon">❌</div>
-            <div class="pat-title">抱えた</div>
-          </div>
-          <div class="pat-stat">
-            <div class="pat-num">${stats.held_wrong.length}<span>件</span></div>
-            <div class="pat-avg ${heldWrongAvg >= 0 ? 'up' : 'dn'}">
-              平均 ${heldWrongAvg >= 0 ? '+' : ''}${fmt(heldWrongAvg, 1)}%
-            </div>
-          </div>
-          ${stats.held_wrong.length === 0
-            ? `<div class="pat-empty">該当なし 👍</div>`
-            : `<div class="pat-list">${stats.held_wrong.slice(0, 3).map(j => renderPatRow(j, 'dn')).join("")}</div>`}
-        </div>
-      </div>
-    </div>
-  `;
-
-  // 全体集計
-  const correctPct = stats.evaluated > 0 ? Math.round(stats.correct_rate * 100) : 0;
-  const summaryHtml = `
-    <div class="modal-sec">
-      <div class="modal-sec-title">📈 全体集計</div>
-      <div class="summary-grid">
-        <div class="sum-item">
-          <div class="sum-lbl">評価済み</div>
-          <div class="sum-val">${stats.evaluated}<span>/${stats.total}</span></div>
-        </div>
-        <div class="sum-item">
-          <div class="sum-lbl">正解率</div>
-          <div class="sum-val ${correctPct >= 50 ? 'up' : 'dn'}">${correctPct}<span>%</span></div>
-        </div>
-        <div class="sum-item">
-          <div class="sum-lbl">平均成績</div>
-          <div class="sum-val ${stats.avg_score >= 0 ? 'up' : 'dn'}">
-            ${stats.avg_score >= 0 ? '+' : ''}${fmt(stats.avg_score, 1)}<span>%</span>
-          </div>
-        </div>
-      </div>
-      ${stats.pending > 0 ? `
-        <div class="review-pending-note">
-          ⏳ 評価待ち: ${stats.pending}件（判定後${EVAL_DAYS}日経過で評価）
-        </div>
-      ` : ""}
-    </div>
-  `;
-
-  // 月次 Claude 分析（v0.6 で実装）
-  const monthlyHtml = `
-    <div class="modal-sec">
-      <div class="modal-sec-title">🧠 月次 Claude 分析（${currentYearMonth()}）</div>
-      <div id="monthlyAnalysisSection">${renderMonthlyAnalysisSection(stats)}</div>
-    </div>
-  `;
-
-  // 個別判定一覧
-  const limit = 20;
-  const listHtml = `
-    <div class="modal-sec">
-      <div class="modal-sec-title">📋 個別判定（${Math.min(limit, stats.all.length)}件 / 全${stats.all.length}件）</div>
-      <div class="judg-list">
-        ${stats.all.slice(0, limit).map(j => {
-          const o = OUTCOME_INFO[j.outcome] || OUTCOME_INFO.pending;
-          const date = (j._date || "").slice(5);  // MM-DD
-          const scoreClass = j.outcome_score == null ? 'muted' : (j.outcome_score > 0 ? 'up' : (j.outcome_score < 0 ? 'dn' : ''));
-          const scoreText = j.outcome_score != null
-            ? (j.outcome_score >= 0 ? '+' : '') + fmt(j.outcome_score, 1) + '%'
-            : '⏳';
-          return `
-            <div class="judg-row" title="${escapeHtml(j.name || '')} / ${JUDGE_LABELS[j.judgment] || ''} / ${o.label}">
-              <span class="jr-date">${date}</span>
-              <span class="jr-code">${escapeHtml(code4to5(j.code))}</span>
-              <span class="jr-judge">${JUDGE_ICONS[j.judgment] || '?'}</span>
-              <span class="jr-out">${o.icon}</span>
-              <span class="jr-score ${scoreClass}">${scoreText}</span>
-            </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-  `;
-
-  // 機能B サブタブ + タブ内容（v0.8 Phase 3 B-2）
-  const subTabHtml = `
-    <div class="sub-tabs">
-      <button class="stab ${_reviewCurrentTab === 'judgment' ? 'active' : ''}"
-              onclick="changeReviewTab('judgment')">📊 判定分析</button>
-      <button class="stab ${_reviewCurrentTab === 'journal' ? 'active' : ''}"
-              onclick="changeReviewTab('journal')">💼 売買分析</button>
-    </div>
-  `;
-
-  const tabContent = _reviewCurrentTab === 'journal'
-    ? await renderJournalTab(_reviewCurrentPeriod)
-    : (patternsHtml + summaryHtml + monthlyHtml + listHtml);
-
-  return periodHtml + subTabHtml + tabContent;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  夕会 (v0.7 Step 1: 読み取り専用ビュー)
-//  - v1 localStorage["tj_t5"] から当日売買を取得
-//  - 当日 daily_sessions と突合して match_type を判定
-//  - サマリー + 銘柄別マッチング表示（メモ・Claude振り返りはStep2/3で追加）
-// ════════════════════════════════════════════════════════════════════
-
-const EV_LABELS = {
-  consistent: "✅ 一致",
-  postponed:  "⚠️ 先送り",
-  changed:    "⚡ 方針変更",
-  unjudged:   "🆕 判定外",
-};
-
-const ACTION_LABELS = {
-  acted_sell:      "売却",
-  acted_buy_more:  "買い増し",
-  no_action:       "no_action",
-};
-
-// ════════════════════════════════════════════════════════════════════
-//  売買分析（機能B・Phase 3）Step 1: 集計レイヤー
-//  v1 tj_t5（売買履歴）+ v2 daily_sessions + tj_h5（保有）を統合
-//  Sonnet 分析に渡すデータを生成（UIは Step 2 以降）
-// ════════════════════════════════════════════════════════════════════
-
-// 期間（日数）内の売買を v1 tj_t5 から抽出
-function loadTradesInPeriod(periodDays){
-  let raw;
-  try { raw = LS.raw("tj_t5"); } catch(e) { return []; }
-  if (!raw) return [];
-  let arr;
-  try { arr = JSON.parse(raw) || []; } catch(e) {
-    console.warn("[journal] tj_t5 parse error:", e);
-    return [];
-  }
-  const cutoffMs = Date.now() - periodDays * 24 * 60 * 60 * 1000;
-  return arr.filter(t => {
-    if (!t || !t.dt) return false;
-    const ts = new Date(t.dt + "T00:00:00+09:00").getTime();
-    return !isNaN(ts) && ts >= cutoffMs;
-  }).sort((a,b) => (a.dt || "").localeCompare(b.dt || ""));
-}
-
-// 売買リストから統計を計算（実現損益ベース）
-function aggregateTradeStats(trades){
-  const sells = trades.filter(t => t.a === "sell" && typeof t.pnl === "number");
-  const buys  = trades.filter(t => t.a === "buy");
-
-  const pnls = sells.map(t => t.pnl);
-  const wins = pnls.filter(p => p > 0);
-  const losses = pnls.filter(p => p < 0);
-  const totalPnl = pnls.reduce((s,p) => s+p, 0);
-  const sumWin = wins.reduce((s,p) => s+p, 0);
-  const sumLoss = Math.abs(losses.reduce((s,p) => s+p, 0));
-
-  // 最大益 / 最大損
-  let biggestWin = null, biggestLoss = null;
-  for (const t of sells) {
-    if (biggestWin === null || t.pnl > biggestWin.pnl) biggestWin = t;
-    if (biggestLoss === null || t.pnl < biggestLoss.pnl) biggestLoss = t;
-  }
-
-  const uniqueCodes = new Set(trades.map(t => t.cd).filter(Boolean));
-
-  return {
-    total_trades: trades.length,
-    buy_count: buys.length,
-    sell_count: sells.length,
-    unique_codes: uniqueCodes.size,
-    realized_pnl: Math.round(totalPnl),
-    wins: wins.length,
-    losses: losses.length,
-    win_rate: sells.length > 0 ? +(wins.length / sells.length).toFixed(3) : 0,
-    avg_win: wins.length > 0 ? Math.round(sumWin / wins.length) : 0,
-    avg_loss: losses.length > 0 ? Math.round(-sumLoss / losses.length) : 0,
-    profit_factor: sumLoss > 0 ? +(sumWin / sumLoss).toFixed(2)
-                   : (sumWin > 0 ? null : 0),  // 全勝時は null（= ∞扱い）
-    biggest_win: biggestWin ? {
-      code: biggestWin.cd, name: biggestWin.nm,
-      pnl: biggestWin.pnl, date: biggestWin.dt
-    } : null,
-    biggest_loss: biggestLoss ? {
-      code: biggestLoss.cd, name: biggestLoss.nm,
-      pnl: biggestLoss.pnl, date: biggestLoss.dt
-    } : null,
-  };
-}
-
-// 現状の保有ポジションサマリー（論点2②: 件数・合計含み損益のみ）
-// HOLDINGS + PRICES を前提（モーダル開く時点で loadHoldings 済み）
-function aggregateHoldingsSummary(){
-  const total = Array.isArray(HOLDINGS) ? HOLDINGS.length : 0;
-  if (total === 0) return {count: 0, priced_count: 0, total_unrealized_pnl: null};
-
-  let totalUnrealized = 0;
-  let priced = 0;
-  for (const h of HOLDINGS) {
-    const p = getPrice(h.code);
-    if (p && typeof h.buy_price === "number" && typeof h.shares === "number") {
-      totalUnrealized += (p.close - h.buy_price) * h.shares;
-      priced++;
-    }
-  }
-  return {
-    count: total,
-    priced_count: priced,
-    total_unrealized_pnl: priced > 0 ? Math.round(totalUnrealized) : null,
-  };
-}
-
-// 期間内の朝会判定 & 夕会マッチングを daily_sessions から集約
-async function aggregateSessionDataForJournal(periodDays){
-  let sessions;
-  try { sessions = await dbAll("daily_sessions"); } catch(e) {
-    console.warn("[journal] dbAll failed:", e);
-    return {judgments: [], matches: []};
-  }
-  const cutoffMs = Date.now() - periodDays * 24 * 60 * 60 * 1000;
-  const filtered = sessions.filter(s => {
-    const t = new Date(s.date + "T00:00:00+09:00").getTime();
-    return !isNaN(t) && t >= cutoffMs;
-  });
-
-  const judgments = [];
-  const matches = [];
-  for (const s of filtered) {
-    if (Array.isArray(s.judgments)) {
-      for (const j of s.judgments) {
-        judgments.push({
-          date: s.date,
-          code: j.code,
-          name: j.name,
-          judgment: j.judgment,
-          outcome: j.outcome || null,
-          outcome_score: j.outcome_score != null ? +j.outcome_score.toFixed(2) : null,
-        });
+  const resEl=document.getElementById('ssResult');
+  resEl.classList.add('show');
+  resEl.textContent='';
+  parsedItems=[];
+  let ok=0;
+  for(let i=0;i<ssImageList.length;i++){
+    const img=ssImageList[i];
+    btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
+    resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
+    try{
+      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:4000,temperature:0.0,responseMimeType:"application/json"}};
+      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok){
+        const e=await r.json().catch(()=>({}));
+        throw new Error(e.error?.message || 'HTTP '+r.status+' - APIキー等を確認してください');
       }
-    }
-    if (s.evening && Array.isArray(s.evening.matches)) {
-      for (const m of s.evening.matches) {
-        matches.push({
-          date: s.date,
-          code: m.code4 || m.code,
-          name: m.name,
-          judgment: m.judgment || null,
-          action: m.action,
-          match_type: m.match_type,
-          pnl: m.executed_pnl != null ? Math.round(m.executed_pnl) : null,
-          memo: m.memo || "",
-        });
-      }
-    }
-  }
-  return {judgments, matches};
-}
-
-// 統合: Sonnet 分析プロンプトに渡すデータセット（Step 3 で使う）
-async function aggregateAllForJournal(periodDays){
-  const trades = loadTradesInPeriod(periodDays);
-  const stats = aggregateTradeStats(trades);
-  const holdings_summary = aggregateHoldingsSummary();
-  const {judgments, matches} = await aggregateSessionDataForJournal(periodDays);
-
-  return {
-    period_days: periodDays,
-    generated_at: new Date().toISOString(),
-    trades,
-    stats,
-    holdings_summary,
-    morning_judgments: judgments,
-    evening_matches: matches,
-  };
-}
-
-// v1 localStorage["tj_t5"] から指定日の売買を抽出
-function loadV1Trades(date){
-  let raw;
-  try { raw = LS.raw("tj_t5"); } catch(e) { return []; }
-  if (!raw) return [];
-  let arr;
-  try { arr = JSON.parse(raw) || []; } catch(e) {
-    console.warn("[evening] tj_t5 parse error:", e);
-    return [];
-  }
-  return arr.filter(t => t && t.dt === date);
-}
-
-// 当日の daily_sessions を取得（最新 1 件）
-async function getTodaySession(){
-  let sessions;
-  try { sessions = await dbAll("daily_sessions"); } catch(e) {
-    console.warn("[evening] dbAll failed:", e);
-    return null;
-  }
-  // 同日複数あれば completed_at が最新のものを採用
-  const today = sessions
-    .filter(s => s.date === TODAY)
-    .sort((a,b) => (b.completed_at||"").localeCompare(a.completed_at||""));
-  return today[0] || null;
-}
-
-// 朝会判定 × 当日売買 → match 配列を生成
-// judgments: session.judgments（5桁code）、 trades: tj_t5の当日分（4桁cd）
-function matchTradesToJudgments(judgments, trades){
-  // judgmentコードを4桁化したマップを作る（突合キーは4桁ベース）
-  const judgeMap = new Map();
-  for (const j of judgments) {
-    const c4 = String(j.code || "").replace(/0$/, "").length === 4
-      ? String(j.code).slice(0, 4)
-      : String(j.code);
-    // 4桁正規化: 末尾0付き5桁なら頭4桁を採用、それ以外はそのまま
-    const code4 = String(j.code).length === 5 && /^\d{4}0$/.test(j.code)
-      ? j.code.slice(0,4)
-      : (String(j.code).length === 5 && /^\d{3}[A-Za-z]0$/.test(j.code))
-        ? j.code.slice(0,4)
-        : String(j.code);
-    judgeMap.set(code4, j);
-  }
-
-  // 当日売買を銘柄ごとに集約（売り優先、複数なら金額合算）
-  const tradeMap = new Map();
-  for (const t of trades) {
-    const cd = String(t.cd);
-    const cur = tradeMap.get(cd);
-    if (!cur) {
-      tradeMap.set(cd, {
-        cd,
-        nm: t.nm,
-        type: t.type || "spot",
-        sells: t.a === "sell" ? [t] : [],
-        buys:  t.a === "buy"  ? [t] : [],
-      });
-    } else {
-      if (t.a === "sell") cur.sells.push(t);
-      else cur.buys.push(t);
-    }
-  }
-
-  const matches = [];
-  const usedTradeCodes = new Set();
-
-  // 朝会判定ベースでマッチング
-  for (const [code4, j] of judgeMap) {
-    const tinfo = tradeMap.get(code4);
-    let action = "no_action";
-    let executed_price = null;
-    let executed_pnl = null;
-
-    if (tinfo) {
-      usedTradeCodes.add(code4);
-      if (tinfo.sells.length > 0) {
-        action = "acted_sell";
-        // 加重平均価格と pnl 合算
-        const totalSh = tinfo.sells.reduce((s,x) => s + (x.sh||0), 0);
-        const totalAmt = tinfo.sells.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
-        executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
-        executed_pnl = tinfo.sells.reduce((s,x) => s + (x.pnl||0), 0);
-      } else if (tinfo.buys.length > 0) {
-        action = "acted_buy_more";
-        const totalSh = tinfo.buys.reduce((s,x) => s + (x.sh||0), 0);
-        const totalAmt = tinfo.buys.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
-        executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
-      }
-    }
-
-    // match_type 判定
-    let match_type;
-    const jKind = j.judgment;
-    if (jKind === "consider_cut") {
-      match_type = (action === "acted_sell") ? "consistent" : "postponed";
-    } else if (jKind === "consider_sell") {
-      match_type = (action === "acted_sell") ? "consistent" : "postponed";
-    } else if (jKind === "hold") {
-      match_type = (action === "no_action") ? "consistent" : "changed";
-    } else {
-      match_type = "unjudged";
-    }
-
-    matches.push({
-      code: j.code,
-      code4,
-      name: j.name,
-      judgment: jKind,
-      action,
-      executed_price,
-      executed_pnl,
-      match_type,
-      // 参考情報
-      change_pct: j.change_pct,
-      price_at_judgment: j.price_at_judgment,
-    });
-  }
-
-  // 朝会判定外の売買（unjudged）
-  for (const [code4, tinfo] of tradeMap) {
-    if (usedTradeCodes.has(code4)) continue;
-    let action, executed_price, executed_pnl;
-    if (tinfo.sells.length > 0) {
-      action = "acted_sell";
-      const totalSh = tinfo.sells.reduce((s,x) => s + (x.sh||0), 0);
-      const totalAmt = tinfo.sells.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
-      executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
-      executed_pnl = tinfo.sells.reduce((s,x) => s + (x.pnl||0), 0);
-    } else {
-      action = "acted_buy_more";
-      const totalSh = tinfo.buys.reduce((s,x) => s + (x.sh||0), 0);
-      const totalAmt = tinfo.buys.reduce((s,x) => s + (x.p||0)*(x.sh||0), 0);
-      executed_price = totalSh > 0 ? Math.round(totalAmt/totalSh) : null;
-      executed_pnl = null;
-    }
-    matches.push({
-      code: code4to5(code4),
-      code4,
-      name: tinfo.nm,
-      judgment: null,
-      action,
-      executed_price,
-      executed_pnl,
-      match_type: "unjudged",
-      change_pct: null,
-      price_at_judgment: null,
-    });
-  }
-
-  return matches;
-}
-
-// サマリー集計
-function summarizeMatches(matches){
-  const s = {
-    judged_count: 0,
-    consistent: 0, postponed: 0, changed: 0, unjudged_actions: 0,
-    realized_pnl_today: 0,
-  };
-  for (const m of matches) {
-    if (m.match_type === "unjudged") s.unjudged_actions++;
-    else s.judged_count++;
-    if (m.match_type === "consistent") s.consistent++;
-    if (m.match_type === "postponed")  s.postponed++;
-    if (m.match_type === "changed")    s.changed++;
-    if (m.executed_pnl != null) s.realized_pnl_today += m.executed_pnl;
-  }
-  return s;
-}
-
-// 損益数値のフォーマット（円・符号付き）
-function fmtPnl(n){
-  if (n == null || isNaN(n)) return "-";
-  const sign = n > 0 ? "+" : (n < 0 ? "-" : "±");
-  return `${sign}¥${Math.abs(Math.round(n)).toLocaleString()}`;
-}
-
-function pnlClass(n){
-  if (n == null || isNaN(n) || n === 0) return "zero";
-  return n > 0 ? "pos" : "neg";
-}
-
-// モーダル本体のレンダリング
-function renderEveningBody(session, trades, matches){
-  const noSession = !session;
-  const noJudgments = session && (!session.judgments || session.judgments.length === 0);
-
-  // 警告バナー
-  let warn = "";
-  if (noSession) {
-    warn = `<div class="ev-warn">⚠️ 今日の朝会記録がありません。先に朝会を完了すると、判定 vs 行動のマッチングが表示されます。</div>`;
-  } else if (noJudgments) {
-    warn = `<div class="ev-warn">⚠️ 今日の朝会で判定済み銘柄がありません。</div>`;
-  }
-
-  // 何もない場合（朝会なし＆売買なし）
-  //   v0.18 Phase 3: matchesが0件でも明日の注目ポイントは有用なので、その入口を提供する
-  if (matches.length === 0) {
-    const hasContext = (HOLDINGS && HOLDINGS.length > 0) || (WATCH_ITEMS && WATCH_ITEMS.length > 0);
-    return warn + `
-      <div class="ev-empty">
-        <span class="ee-icon">🌙</span>
-        今日は朝会判定も売買もありません。<br>
-        お疲れ様でした。
-      </div>
-      ${hasContext ? renderTomorrowFocusCard(session) : ""}
-    `;
-  }
-
-  // Step2: 下書き or 保存済みからメモを取り出す
-  // 優先: session.evening.matches（保存済み）> tjm_evening_draft（下書き）
-  const memos = loadEveningMemos(session);
-  // Step3: 保存済みのClaudeレビューを取り出す
-  const claudeReviews = loadClaudeReviews(session);
-  // A-α (v0.9): 保存済みの Gemini 市場背景を取り出す
-  const geminiBriefs = loadGeminiBriefs(session);
-
-  // サマリー
-  const s = summarizeMatches(matches);
-  const summary = `
-    <div class="ev-summary">
-      <div class="ev-summary-title">📊 サマリー</div>
-      <div class="ev-summary-grid">
-        <div class="ev-stat consistent">
-          <div class="ev-stat-num">${s.consistent}</div>
-          <div class="ev-stat-lbl">✅ 一致</div>
-        </div>
-        <div class="ev-stat postponed">
-          <div class="ev-stat-num">${s.postponed}</div>
-          <div class="ev-stat-lbl">⚠️ 先送り</div>
-        </div>
-        <div class="ev-stat changed">
-          <div class="ev-stat-num">${s.changed}</div>
-          <div class="ev-stat-lbl">⚡ 方針変更</div>
-        </div>
-        <div class="ev-stat unjudged">
-          <div class="ev-stat-num">${s.unjudged_actions}</div>
-          <div class="ev-stat-lbl">🆕 判定外</div>
-        </div>
-      </div>
-      <div class="ev-pnl-row">
-        <span class="ev-pnl-lbl">当日確定損益</span>
-        <span class="ev-pnl-val ${pnlClass(s.realized_pnl_today)}">${fmtPnl(s.realized_pnl_today)}</span>
-      </div>
-    </div>`;
-
-  // 銘柄別カード（一致以外を上、一致は折りたたみで下）
-  const order = ["postponed", "changed", "unjudged", "consistent"];
-  const sorted = [...matches].sort((a,b) =>
-    order.indexOf(a.match_type) - order.indexOf(b.match_type)
-  );
-
-  const cards = sorted.map(m => renderMatchCard(m, memos[m.code4], geminiBriefs[m.code4], claudeReviews[m.code4])).join("");
-
-  // Step2: 保存ボタン（朝会済みのときのみ表示）
-  let saveBar = "";
-  if (session) {
-    const savedAt = session.evening && session.evening.completed_at;
-    const savedInfo = savedAt
-      ? `<div class="ev-saved-info">前回保存: ${formatJpDateTime(savedAt)}</div>`
-      : "";
-    saveBar = `
-      <div class="ev-save-bar">
-        <button class="ev-save-btn" id="evSaveBtn" onclick="saveEveningSession()">
-          💾 夕会を保存
-        </button>
-        ${savedInfo}
-      </div>`;
-  }
-
-  return warn + summary + `
-    ${renderDaySummaryCard(session)}
-    ${renderTomorrowFocusCard(session)}
-    <div class="ev-section-title">🔍 銘柄別マッチング (${matches.length}件)</div>
-    ${cards}
-    ${saveBar}
-  `;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  v0.18 Phase 3: 🌅 一日の総括 (Claude) + 🔭 明日の注目ポイント (Gemini)
-// ════════════════════════════════════════════════════════════════════
-
-// ── ストレージユーティリティ ──────────────────────────
-//   保存済み: session.evening.day_summary / session.evening.tomorrow_focus
-//   下書き  : LS[K.evening_meta_today] = {date, day_summary, tomorrow_focus}
-function loadEveningMeta(session){
-  // session 優先（保存済み）→ 下書き → null
-  const saved = session?.evening || {};
-  const draftRaw = LS.get(K.evening_meta_today, null);
-  const draft = (draftRaw && draftRaw.date === TODAY) ? draftRaw : {};
-  return {
-    day_summary:    saved.day_summary    || draft.day_summary    || null,
-    tomorrow_focus: saved.tomorrow_focus || draft.tomorrow_focus || null,
-  };
-}
-
-function saveEveningMetaDraft(patch){
-  const cur = LS.get(K.evening_meta_today, {}) || {};
-  if (cur.date !== TODAY) {
-    // 日が変わったらリセット
-    LS.set(K.evening_meta_today, {date: TODAY, ...patch});
-  } else {
-    LS.set(K.evening_meta_today, {...cur, date: TODAY, ...patch});
-  }
-}
-
-// ── 🌅 一日の総括カード ────────────────────────────────
-function renderDaySummaryCard(session){
-  const meta = loadEveningMeta(session);
-  const cur = meta.day_summary;
-  const id = "evDaySummary";
-
-  let body = "";
-  if (cur && cur.text) {
-    body = `
-      <div class="ev-meta-result" id="${id}-body">${formatNewsBody(cur.text)}</div>
-      <div class="ev-meta-actions">
-        <button onclick="copyEveningMetaText('day')">📋 コピー</button>
-        <button onclick="fetchDaySummary(true)">🔄 再生成</button>
-      </div>`;
-  } else if (cur && cur.error) {
-    body = `
-      <div class="ev-meta-error" id="${id}-body">⚠️ ${escapeHtml(cur.error)}
-        <button onclick="fetchDaySummary(true)" style="background:transparent;border:1px solid var(--red);color:#fca5a5;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;align-self:flex-start;">🔄 再試行</button>
-      </div>`;
-  } else if (cur && cur.loading) {
-    body = `<div class="ev-meta-loading" id="${id}-body"><span class="loading"></span> Claude が一日を振り返り中...</div>`;
-  } else {
-    body = `<button class="ev-meta-fetch-btn day" id="${id}-btn" onclick="fetchDaySummary(false)">🌅 一日の総括を生成（Claude）</button>`;
-  }
-
-  const meta_str = (cur && cur.generated_at) ? formatJpDateTime(cur.generated_at) : "";
-  return `
-    <div class="ev-meta-section" id="${id}">
-      <div class="ev-meta-hdr">
-        <div class="ev-meta-title"><span class="em-ico">🌅</span>一日の総括</div>
-        <div class="ev-meta-meta">${meta_str}</div>
-      </div>
-      ${body}
-    </div>`;
-}
-
-// ── 🔭 明日の注目ポイントカード ─────────────────────────
-function renderTomorrowFocusCard(session){
-  const meta = loadEveningMeta(session);
-  const cur = meta.tomorrow_focus;
-  const id = "evTomorrowFocus";
-
-  let body = "";
-  if (cur && cur.text) {
-    body = `
-      <div class="ev-meta-result" id="${id}-body">${formatNewsBody(cur.text)}</div>
-      <div class="ev-meta-actions">
-        <button onclick="copyEveningMetaText('tomorrow')">📋 コピー</button>
-        <button onclick="fetchTomorrowFocus(true)">🔄 再生成</button>
-      </div>`;
-  } else if (cur && cur.error) {
-    body = `
-      <div class="ev-meta-error" id="${id}-body">⚠️ ${escapeHtml(cur.error)}
-        <button onclick="fetchTomorrowFocus(true)" style="background:transparent;border:1px solid var(--red);color:#fca5a5;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;align-self:flex-start;">🔄 再試行</button>
-      </div>`;
-  } else if (cur && cur.loading) {
-    body = `<div class="ev-meta-loading" id="${id}-body"><span class="loading"></span> Gemini が明日の材料を Google検索中...</div>`;
-  } else {
-    body = `<button class="ev-meta-fetch-btn tomorrow" id="${id}-btn" onclick="fetchTomorrowFocus(false)">🔭 明日の注目ポイントを取得（Gemini + 検索）</button>`;
-  }
-
-  const meta_str = (cur && cur.generated_at) ? formatJpDateTime(cur.generated_at) : "";
-  return `
-    <div class="ev-meta-section" id="${id}">
-      <div class="ev-meta-hdr">
-        <div class="ev-meta-title"><span class="em-ico">🔭</span>明日の注目ポイント</div>
-        <div class="ev-meta-meta">${meta_str}</div>
-      </div>
-      ${body}
-    </div>`;
-}
-
-// ── 🌅 fetchDaySummary: Claude に一日の総括を作らせる ────
-async function fetchDaySummary(force){
-  const claudeKey = (LS.raw(K.api_claude) || "").trim();
-  if (!claudeKey) {
-    toast("⚠️ Claude APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  const session = await getTodaySession();
-  const meta = loadEveningMeta(session);
-  if (!force && meta.day_summary?.text) {
-    return;  // 既に取得済み
-  }
-
-  // ローディング表示
-  saveEveningMetaDraft({day_summary: {loading: true}});
-  refreshEveningMetaSection("day");
-
-  try {
-    // 文脈データを集める
-    const trades = loadV1Trades(TODAY);
-    const judgments = (session && session.judgments) || [];
-    const matches = matchTradesToJudgments(judgments, trades);
-    const summary = summarizeMatches(matches);
-
-    const prompt = buildDaySummaryPrompt({session, matches, summary, judgments});
-    const text = await callClaude(claudeKey, prompt, {maxTokens: 1500});
-
-    const result = {text: text.trim(), generated_at: new Date().toISOString()};
-    saveEveningMetaDraft({day_summary: result});
-    refreshEveningMetaSection("day");
-    toast("🌅 一日の総括 生成完了");
-  } catch(e) {
-    console.warn("[day_summary] failed:", e);
-    saveEveningMetaDraft({day_summary: {error: e.message || String(e), generated_at: new Date().toISOString()}});
-    refreshEveningMetaSection("day");
-    toast("⚠️ 一日の総括 生成失敗: " + (e.message || e));
-  }
-}
-
-// ── 🔭 fetchTomorrowFocus: Gemini + Google検索で明日の材料を集める ──
-async function fetchTomorrowFocus(force){
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  if (!geminiKey) {
-    toast("⚠️ Gemini APIキーが未設定です（⚙️から登録）");
-    return;
-  }
-  const session = await getTodaySession();
-  const meta = loadEveningMeta(session);
-  if (!force && meta.tomorrow_focus?.text) {
-    return;
-  }
-
-  saveEveningMetaDraft({tomorrow_focus: {loading: true}});
-  refreshEveningMetaSection("tomorrow");
-
-  try {
-    const prompt = buildTomorrowFocusPrompt();
-    // Gemini 2.5 Flash + Google検索: thinking tokens を大量に消費するため maxTokens は十分に厚く
-    //   3000では本文冒頭で切れる事象が確認されたため 8000 に拡大（出力上限65,536の範囲内）
-    const text = await callGemini(geminiKey, prompt, {useSearch: true, maxTokens: 8000});
-
-    const result = {text: text.trim(), generated_at: new Date().toISOString()};
-    saveEveningMetaDraft({tomorrow_focus: result});
-    refreshEveningMetaSection("tomorrow");
-    toast("🔭 明日の注目ポイント 生成完了");
-  } catch(e) {
-    console.warn("[tomorrow_focus] failed:", e);
-    saveEveningMetaDraft({tomorrow_focus: {error: e.message || String(e), generated_at: new Date().toISOString()}});
-    refreshEveningMetaSection("tomorrow");
-    toast("⚠️ 明日の注目ポイント 生成失敗: " + (e.message || e));
-  }
-}
-
-// 部分再描画（夕会全体は再構築せず、対象セクションだけ差し替え）
-async function refreshEveningMetaSection(which){
-  const session = await getTodaySession();
-  const targetId = which === "day" ? "evDaySummary" : "evTomorrowFocus";
-  const cur = document.getElementById(targetId);
-  if (!cur) return;
-  const html = which === "day" ? renderDaySummaryCard(session) : renderTomorrowFocusCard(session);
-  cur.outerHTML = html;
-}
-
-// ── プロンプトビルダー ─────────────────────────────────
-
-function buildDaySummaryPrompt({session, matches, summary, judgments}){
-  const lines = [];
-  lines.push(`今日（${TODAY}）の取引・判断を振り返ってください。`);
-  lines.push("");
-  lines.push("# 文脈データ");
-  lines.push("");
-
-  // マクロ
-  if (MACRO) {
-    const info = REGIME_INFO[MACRO.regime] || {};
-    lines.push(`## 今朝のマクロ`);
-    lines.push(`- レジーム: ${MACRO.regime} (${info.name || ''})`);
-    if (MACRO.hv_20d != null) lines.push(`- 日経HV20: ${MACRO.hv_20d.toFixed(1)}%`);
-    if (MACRO.ma25_dev != null) lines.push(`- 日経MA25乖離: ${MACRO.ma25_dev >= 0 ? '+' : ''}${MACRO.ma25_dev.toFixed(1)}%`);
-    if (MACRO.trend) lines.push(`- 一言: ${MACRO.trend}`);
-    lines.push("");
-  }
-
-  // 集計
-  lines.push(`## 当日サマリー`);
-  lines.push(`- 朝会で判定: ${summary.judged_count}銘柄`);
-  lines.push(`  - ✅ 一致: ${summary.consistent} / ⚠️ 先送り: ${summary.postponed} / ⚡ 方針変更: ${summary.changed}`);
-  lines.push(`- 朝会判定外の売買: ${summary.unjudged_actions}件`);
-  const pnlSign = summary.realized_pnl_today > 0 ? '+' : (summary.realized_pnl_today < 0 ? '-' : '±');
-  lines.push(`- 当日確定損益: ${pnlSign}¥${Math.abs(Math.round(summary.realized_pnl_today || 0)).toLocaleString()}`);
-  lines.push("");
-
-  // 銘柄別（matchesから抜粋。長すぎるとトークン無駄なので20件まで）
-  if (matches.length > 0) {
-    lines.push(`## 銘柄別マッチング (上位${Math.min(matches.length, 20)}件)`);
-    const order = ["postponed", "changed", "unjudged", "consistent"];
-    const sorted = [...matches].sort((a,b) =>
-      order.indexOf(a.match_type) - order.indexOf(b.match_type)
-    ).slice(0, 20);
-    for (const m of sorted) {
-      const pnl = (m.executed_pnl != null)
-        ? `${m.executed_pnl >= 0 ? '+' : ''}¥${Math.round(m.executed_pnl).toLocaleString()}`
-        : (m.change_pct != null ? `${m.change_pct >= 0 ? '+' : ''}${m.change_pct.toFixed(2)}%` : '-');
-      const judgeText = m.judgment ? (JUDGE_LABELS[m.judgment] || m.judgment) : '(朝会判定なし)';
-      const actionText = ACTION_LABELS[m.action] || m.action;
-      lines.push(`- [${EV_LABELS[m.match_type]}] ${m.name || ''} (${m.code4}) | 朝判定:${judgeText} → 行動:${actionText} | 損益/変化:${pnl}`);
-    }
-    lines.push("");
-  }
-
-  // 現在の保有状況
-  if (HOLDINGS && HOLDINGS.length > 0) {
-    lines.push(`## 引け後の保有銘柄 (${HOLDINGS.length}件)`);
-    for (const h of HOLDINGS) {
-      if (h.is_yutai) continue;
-      const cur = (getPrice(h.code)?.close ?? null);
-      const pnlPct = (h.buy_price && cur) ? ((cur - h.buy_price) / h.buy_price * 100).toFixed(2) : '-';
-      const days = (h.holding_days != null) ? `${h.holding_days}日` : '?';
-      lines.push(`- ${h.name} (${h.code}) | 買付:¥${h.buy_price || '-'} 現在:¥${cur ?? '-'} | 含損益:${pnlPct}% | 保有${days} | ${h.type === 'margin' ? '信用' : '現物'}`);
-    }
-    lines.push("");
-  }
-
-  lines.push(`# 出力フォーマット`);
-  lines.push("");
-  lines.push(`以下の3ブロックで、合計400〜600字に収めてください。簡潔に。`);
-  lines.push("");
-  lines.push(`## 🎯 今日の意思決定の質`);
-  lines.push(`- 朝の判定 vs 実際の行動の乖離（先送り・方針変更）に対するコメント`);
-  lines.push(`- ルール通り動けたか、感情で動いたかを 2〜3 行で`);
-  lines.push("");
-  lines.push(`## 📊 今日のポジション影響`);
-  lines.push(`- 当日損益と、保有銘柄の含み損益の主だった変化`);
-  lines.push(`- 特に反省すべき or 評価できる動きを 1〜2件`);
-  lines.push("");
-  lines.push(`## 💡 学び・改善点`);
-  lines.push(`- 明日以降の運用に活かす具体的な学びを 1〜2 行で`);
-  lines.push("");
-  lines.push(`## 執筆ルール（厳守）`);
-  lines.push(`- 結論先行、具体的な銘柄名・数値を引用してリアルに`);
-  lines.push(`- ユーザーの短期ローテ戦略（-8%損切 / RR1:2 / 数日〜数週間 / 勝率50%目標）に整合させて評価`);
-  lines.push(`- 慰めや励ましは不要。冷静で建設的に`);
-  lines.push(`- 字数厳守、最後まで書き切る`);
-  return lines.join("\n");
-}
-
-function buildTomorrowFocusPrompt(){
-  const lines = [];
-  // 翌営業日の見当（土日越え）
-  const next = nextBusinessDayJST(new Date());
-  lines.push(`明日（${next}）の日本株市場で注目すべきポイントを Google検索で調べて整理してください。`);
-  lines.push("");
-  lines.push("# ユーザーの保有・関心銘柄");
-  lines.push("");
-
-  // 保有
-  if (HOLDINGS && HOLDINGS.length > 0) {
-    lines.push("## 保有銘柄");
-    for (const h of HOLDINGS) {
-      if (h.is_yutai) continue;
-      // 決算日チップ付きで
-      const f = FUND[code4to5(h.code)] || {};
-      const ned = f.ned ? ` 次回決算:${f.ned}` : '';
-      lines.push(`- ${h.name} (${h.code})${ned}`);
-    }
-    lines.push("");
-  }
-
-  // 指値ウォッチ（接近上位5件）
-  if (WATCH_ITEMS && WATCH_ITEMS.length > 0) {
-    lines.push("## 指値ウォッチ（接近中・上位）");
-    for (const it of WATCH_ITEMS.slice(0, 5)) {
-      lines.push(`- ${it.name} (${code4to5(it.code)}) | 現在¥${Math.round(it.current_price)} / 指値¥${Math.round(it.nearest.price)} / +${it.nearest.distance_pct}% / ${it.rank}ランク`);
-    }
-    lines.push("");
-  }
-
-  lines.push("# 出力フォーマット（必ず守る）");
-  lines.push("");
-  lines.push("以下の4セクションを、合計800字以内で。検索で裏取りできた事実のみ。");
-  lines.push("");
-  lines.push("## 🌐 マクロイベント");
-  lines.push("- 明日の予定（米雇用統計・FOMC・日銀会合・要人発言など）を1〜3件、時刻付き");
-  lines.push("- 海外マーケット（米株引け・為替）の今晩〜早朝の動向");
-  lines.push("");
-  lines.push("## 📅 個別決算・適時開示");
-  lines.push("- 上記の保有・指値ウォッチ銘柄で、明日が決算日 or 直前の銘柄があれば必ず明記");
-  lines.push("- 関連セクター（同業他社）で明日決算がある銘柄を1〜2件");
-  lines.push("");
-  lines.push("## 📰 今夜のニュース・材料");
-  lines.push("- 保有・指値ウォッチ銘柄に関するニュース（直近24h）");
-  lines.push("- 関連セクター・テーマで明日寄付に効きそうなニュース 2〜3件");
-  lines.push("");
-  lines.push("## 🎯 寄付き戦略のヒント");
-  lines.push("- 上記材料を踏まえた、明日寄付きの注目銘柄 or 警戒銘柄 1〜2件");
-  lines.push("- ユーザー戦略（短期ローテ・-8%損切・RR1:2）に対する一言");
-  lines.push("");
-  lines.push("# 執筆ルール");
-  lines.push("- 検索で裏取りできた情報のみ。確認できないものは「確認できず」と明記");
-  lines.push("- 各項目1〜2行、箇条書き中心。ネストせず単一階層で書く");
-  lines.push("- ** や *** などの強調マークは使わない（プレーンテキスト）");
-  lines.push("- 推奨の文言は控えめに、判断はユーザーに任せる");
-  lines.push("- 思考プロセスは出力しない、本文のみ");
-  lines.push("- 最後まで書き切ること（途中で切れない）");
-  return lines.join("\n");
-}
-
-// 翌営業日（土日スキップ。祝日は対応しない簡易版）
-function nextBusinessDayJST(d){
-  const date = new Date(d);
-  date.setDate(date.getDate() + 1);
-  while (date.getDay() === 0 || date.getDay() === 6) {
-    date.setDate(date.getDate() + 1);
-  }
-  return ymdJST(date);
-}
-
-// メタ情報のテキストコピー
-async function copyEveningMetaText(which){
-  const session = await getTodaySession();
-  const meta = loadEveningMeta(session);
-  const target = which === "day" ? meta.day_summary : meta.tomorrow_focus;
-  if (!target?.text) {
-    toast("⚠️ コピー対象がありません");
-    return;
-  }
-  const title = which === "day" ? "🌅 一日の総括" : "🔭 明日の注目ポイント";
-  await copyMarkdown(`## ${title}\n\n${target.text}`, title);
-}
-
-function renderMatchCard(m, memoVal, geminiBrief, claudeReview){
-  const judgeLabel = m.judgment ? (JUDGE_ICONS[m.judgment] + " " + JUDGE_LABELS[m.judgment]) : "(朝会判定なし)";
-  const actionLabel = ACTION_LABELS[m.action] || m.action;
-  const isOpen = m.match_type !== "consistent"; // 一致は折りたたみ
-
-  // 行詳細
-  const rows = [];
-  rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">朝の判定</span><span class="ev-row-val">${escapeHtml(judgeLabel)}</span></div>`);
-  rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">実際の行動</span><span class="ev-row-val">${escapeHtml(actionLabel)}</span></div>`);
-  if (m.executed_price != null) {
-    rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">約定価格</span><span class="ev-row-val">¥${m.executed_price.toLocaleString()}</span></div>`);
-  }
-  if (m.executed_pnl != null) {
-    rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">確定損益</span><span class="ev-row-val ${pnlClass(m.executed_pnl)}">${fmtPnl(m.executed_pnl)}</span></div>`);
-  }
-  if (m.change_pct != null && m.action === "no_action") {
-    const cls = m.change_pct >= 0 ? "pos" : "neg";
-    const sign = m.change_pct >= 0 ? "+" : "";
-    rows.push(`<div class="ev-card-row"><span class="ev-row-lbl">朝→終値変化率</span><span class="ev-row-val ${cls}">${sign}${m.change_pct.toFixed(2)}%</span></div>`);
-  }
-
-  // Step2: ズレ銘柄（一致以外）にメモ欄
-  let memoBlock = "";
-  let reviewBlock = "";
-  if (m.match_type !== "consistent") {
-    const placeholder = m.match_type === "postponed"
-      ? "なぜ実行しなかった？"
-      : (m.match_type === "changed" ? "なぜ判定を変えた？" : "売買の意図は？");
-    memoBlock = `
-      <div class="ev-memo-wrap">
-        <div class="ev-memo-lbl">
-          <span>📝 メモ</span>
-          <span class="ev-memo-saved" id="evmemo-saved-${m.code4}">下書き保存済</span>
-        </div>
-        <textarea
-          class="ev-memo"
-          id="evmemo-${m.code4}"
-          placeholder="${placeholder}"
-          oninput="onEvMemoInput('${m.code4}')"
-        >${escapeHtml(memoVal || '')}</textarea>
-      </div>`;
-
-    // A-α (v0.9): Gemini 市場背景 + Claude 振り返り の 2ブロック
-    reviewBlock = renderEveningReviewBlock(m.code4, geminiBrief, claudeReview);
-  }
-
-  return `
-    <div class="ev-card ${m.match_type} ${isOpen ? 'open' : ''}" id="evcard-${m.code4}">
-      <div class="ev-card-hdr" onclick="toggleEvCard('${m.code4}')">
-        <div class="ev-card-l">
-          <span class="ev-card-name">${escapeHtml(m.name || '(名称不明)')}</span>
-          <span class="ev-card-code">${escapeHtml(m.code4)}</span>
-        </div>
-        <span class="ev-badge ${m.match_type}">${EV_LABELS[m.match_type]}</span>
-        <span class="ev-card-arrow">▼</span>
-      </div>
-      <div class="ev-card-body">
-        ${rows.join('')}
-        ${memoBlock}
-        ${reviewBlock}
-      </div>
-    </div>`;
-}
-
-// A-α (v0.9): Gemini 市場背景カード + Claude 振り返りカード を一括描画
-//   geminiBrief は {text,generated_at} | {error} | null
-//   claudeReview は {text,generated_at,...} | null
-function renderEveningReviewBlock(code4, geminiBrief, claudeReview){
-  const geminiHtml = renderGeminiBriefCard(code4, geminiBrief);
-  const claudeHtml = renderClaudeReviewCard(code4, claudeReview);
-
-  // v0.11: セクション単位コピー（市場背景 + Claude振り返り を銘柄1つ分まとめて）
-  // v0.15: 深掘りボタンも並置
-  const hasGemini = geminiBrief && geminiBrief.text;
-  const hasClaude = claudeReview && claudeReview.text;
-  let sectionBtns = '';
-  if (hasGemini || hasClaude) {
-    sectionBtns = `
-      <button class="copy-section-btn" onclick="copyEveningStockReview('${code4}')" title="この銘柄の振り返りを一括コピー">📋 この銘柄の振り返りをコピー</button>
-      <button class="drill-section-btn" onclick="drilldownChatEveningStock('${code4}')" title="この銘柄についてチャットで深掘り">💬 この銘柄を深掘りする</button>
-    `;
-  }
-
-  return geminiHtml + claudeHtml + sectionBtns;
-}
-
-// A-α: Gemini 市場背景カード
-function renderGeminiBriefCard(code4, geminiBrief){
-  const wrapId = `evgemini-${code4}`;
-  if (!geminiBrief) {
-    // 未実行時は何も表示しない（Claude ボタンを押すと自動で Gemini も走る）
-    return `<div class="ev-gemini-wrap" id="${wrapId}"></div>`;
-  }
-  if (geminiBrief.error) {
-    return `
-      <div class="ev-gemini-wrap" id="${wrapId}">
-        <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
-        <div class="ev-gemini-error">⚠️ 取得失敗: ${escapeHtml(geminiBrief.error)}</div>
-      </div>`;
-  }
-  if (geminiBrief.text) {
-    const meta = geminiBrief.generated_at ? formatJpDateTime(geminiBrief.generated_at) : "";
-    return `
-      <div class="ev-gemini-wrap" id="${wrapId}" style="position:relative;">
-        <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
-        <button class="copy-btn-sm" onclick="copyEveningGemini('${code4}')"
-                style="position:absolute;top:10px;right:12px;" title="市場背景をコピー">📋</button>
-        <div class="ev-gemini-result">${escapeHtml(geminiBrief.text)}</div>
-        <div class="ev-gemini-meta">🤖 ${GEMINI_MODEL} + Google検索 · ${meta}</div>
-      </div>`;
-  }
-  return `<div class="ev-gemini-wrap" id="${wrapId}"></div>`;
-}
-
-// Claude 振り返りカード（旧 renderClaudeBlock を改名、機能は同等）
-function renderClaudeReviewCard(code4, claudeReview){
-  const wrapId = `evclaude-${code4}`;
-  const geminiAvailable = !!((LS.raw(K.api_gemini) || "").trim());
-  if (claudeReview && claudeReview.text) {
-    const meta = claudeReview.generated_at ? formatJpDateTime(claudeReview.generated_at) : "";
-    return `
-      <div class="ev-claude-wrap" id="${wrapId}" style="position:relative;">
-        <button class="copy-btn-sm" onclick="copyEveningClaude('${code4}')"
-                style="position:absolute;top:10px;right:12px;" title="Claude振り返りをコピー">📋</button>
-        <div class="ev-claude-result">${escapeHtml(claudeReview.text)}</div>
-        <div class="ev-claude-meta">
-          <span>🧠 ${CLAUDE_MODEL} / ${meta}</span>
-          <button class="regen-link" onclick="requestEveningReview('${code4}', true)">🔄 再生成</button>
-        </div>
-      </div>`;
-  }
-  const hint = geminiAvailable
-    ? `<div class="ev-gemini-hint">💡 Gemini で今日の市場背景も自動取得</div>`
-    : "";
-  return `
-    <div class="ev-claude-wrap" id="${wrapId}">
-      <button class="ev-claude-btn" onclick="requestEveningReview('${code4}', false)">
-        🧠 Claudeに振り返ってもらう
-      </button>
-      ${hint}
-    </div>`;
-}
-
-// v0.11: 夕会の銘柄別データを現在のセッションから取り出すヘルパー
-// 夕会モーダルを開いている状態でのみ正しく動く（matches 情報が画面と同期）
-function getEveningMatchFromDOM(code4){
-  // 画面上の要素から再構築は難しいので、再集計して該当 match を返す
-  // matches を global に持たないため、DOM テキストから復元する簡易版
-  const wrapGemini = document.getElementById(`evgemini-${code4}`);
-  const wrapClaude = document.getElementById(`evclaude-${code4}`);
-  const card = document.getElementById(`evcard-${code4}`);
-
-  const nameEl = card ? card.querySelector(".ev-card-name") : null;
-  const badgeEl = card ? card.querySelector(".ev-badge") : null;
-  const name = nameEl ? nameEl.textContent.trim() : "";
-  const badgeText = badgeEl ? badgeEl.textContent.trim() : "";
-
-  const geminiResult = wrapGemini ? wrapGemini.querySelector(".ev-gemini-result") : null;
-  const claudeResult = wrapClaude ? wrapClaude.querySelector(".ev-claude-result") : null;
-
-  const geminiText = geminiResult ? geminiResult.textContent : "";
-  const claudeText = claudeResult ? claudeResult.textContent : "";
-
-  return {code4, name, badge: badgeText, geminiText, claudeText};
-}
-
-async function copyEveningGemini(code4){
-  const {name, geminiText} = getEveningMatchFromDOM(code4);
-  if (!geminiText) { toast("⚠️ 市場背景がまだありません"); return; }
-  const md = [
-    `# 🌍 市場背景: ${name || code4} (${code4})`,
-    ``,
-    `- 日付: ${TODAY} (${WD})`,
-    `- 生成モデル: ${GEMINI_MODEL} + Google検索`,
-    ``,
-    geminiText.trim(),
-    ``,
-    `---`,
-    `_trade-journal morning.html v0.11 で生成_`,
-  ].join("\n");
-  await copyMarkdown(md, `市場背景(${code4})`);
-}
-
-async function copyEveningClaude(code4){
-  const {name, claudeText} = getEveningMatchFromDOM(code4);
-  if (!claudeText) { toast("⚠️ Claude振り返りがまだありません"); return; }
-  const md = [
-    `# 🧠 Claude 振り返り: ${name || code4} (${code4})`,
-    ``,
-    `- 日付: ${TODAY} (${WD})`,
-    `- 生成モデル: ${CLAUDE_MODEL}`,
-    ``,
-    claudeText.trim(),
-    ``,
-    `---`,
-    `_trade-journal morning.html v0.11 で生成_`,
-  ].join("\n");
-  await copyMarkdown(md, `Claude振り返り(${code4})`);
-}
-
-async function copyEveningStockReview(code4){
-  const {name, badge, geminiText, claudeText} = getEveningMatchFromDOM(code4);
-  if (!geminiText && !claudeText) { toast("⚠️ コピー対象がありません"); return; }
-  const lines = [];
-  lines.push(`# 📌 ${TODAY} 振り返り: ${name || code4} (${code4})`);
-  lines.push(``);
-  if (badge) lines.push(`- 種別: ${badge}`);
-  lines.push(``);
-  if (geminiText) {
-    lines.push(`## 🌍 今日の市場背景`);
-    lines.push(`_🤖 ${GEMINI_MODEL} + Google検索_`);
-    lines.push(``);
-    lines.push(geminiText.trim());
-    lines.push(``);
-  }
-  if (claudeText) {
-    lines.push(`## 🧠 Claude 振り返り`);
-    lines.push(`_🤖 ${CLAUDE_MODEL}_`);
-    lines.push(``);
-    lines.push(claudeText.trim());
-    lines.push(``);
-  }
-  lines.push(`---`);
-  lines.push(`_trade-journal morning.html v0.11 で生成_`);
-  await copyMarkdown(lines.join("\n"), `振り返り(${code4})`);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  v0.11: 日次まとめ（朝会計画 + 夕会レビューを1枚のMarkdownに）
-// ════════════════════════════════════════════════════════════════════
-
-// 1マッチ分の Markdown セクションを生成（当日 matches 用）
-function buildDigestMatchSection(m, memo, geminiBrief, claudeReview){
-  const EV_LABEL_MD = {
-    consistent: "✅ 一致",
-    postponed:  "⚠️ 先送り",
-    changed:    "⚡ 方針変更",
-    unjudged:   "🆕 判定外",
-  };
-  const judgeLabel = m.judgment
-    ? `${JUDGE_ICONS[m.judgment] || ''} ${JUDGE_LABELS[m.judgment] || m.judgment}`
-    : "(朝会判定なし)";
-  const actionLabel = ACTION_LABELS[m.action] || m.action || "-";
-
-  const lines = [];
-  lines.push(`### ${m.name || '(名称不明)'} (${m.code4}) — ${EV_LABEL_MD[m.match_type] || m.match_type}`);
-  lines.push(``);
-  lines.push(`- 朝の判定: ${judgeLabel}`);
-  lines.push(`- 実際の行動: ${actionLabel}`);
-  if (m.executed_price != null) {
-    lines.push(`- 約定価格: ¥${m.executed_price.toLocaleString()}`);
-  }
-  if (m.executed_pnl != null) {
-    const sign = m.executed_pnl > 0 ? '+' : (m.executed_pnl < 0 ? '-' : '±');
-    lines.push(`- 確定損益: ${sign}¥${Math.abs(Math.round(m.executed_pnl)).toLocaleString()}`);
-  }
-  if (m.change_pct != null && m.action === "no_action") {
-    const sign = m.change_pct >= 0 ? "+" : "";
-    lines.push(`- 朝→終値変化率: ${sign}${m.change_pct.toFixed(2)}%`);
-  }
-  lines.push(``);
-
-  if (memo && memo.trim()) {
-    lines.push(`**📝 メモ**`);
-    lines.push(``);
-    lines.push(memo.trim());
-    lines.push(``);
-  }
-  if (geminiBrief && geminiBrief.text) {
-    lines.push(`**🌍 今日の市場背景** (${GEMINI_MODEL} + Google検索)`);
-    lines.push(``);
-    lines.push(geminiBrief.text.trim());
-    lines.push(``);
-  }
-  if (claudeReview && claudeReview.text) {
-    lines.push(`**🧠 Claude 振り返り** (${CLAUDE_MODEL})`);
-    lines.push(``);
-    lines.push(claudeReview.text.trim());
-    lines.push(``);
-  }
-  return lines.join("\n");
-}
-
-// 日次まとめの Markdown を生成
-// session: daily_sessions の当日レコード
-// matches: matchTradesToJudgments の結果
-// planCached: tjm_last_plan (当日分のみ)
-function buildDailyDigestMarkdown(session, matches, planCached){
-  const lines = [];
-  lines.push(`# 📅 ${TODAY} (${WD}) 日次まとめ`);
-  lines.push(``);
-  lines.push(`_trade-journal morning.html v0.11 で生成_`);
-  lines.push(``);
-
-  // マクロ状態
-  if (session && session.macro) {
-    const m = session.macro;
-    const regime = m.regime || "(不明)";
-    const score = (m.score != null) ? `${m.score}` : "-";
-    lines.push(`## 🌡️ マクロ状態`);
-    lines.push(``);
-    lines.push(`- レジーム: ${regime}`);
-    lines.push(`- スコア: ${score}`);
-    lines.push(``);
-  }
-
-  // 朝会判定
-  if (session && Array.isArray(session.judgments) && session.judgments.length > 0) {
-    lines.push(`## 🌅 朝会の判定 (${session.judgments.length}銘柄)`);
-    lines.push(``);
-    for (const j of session.judgments) {
-      const icon = JUDGE_ICONS[j.judgment] || '';
-      const label = JUDGE_LABELS[j.judgment] || j.judgment;
-      lines.push(`- ${j.name || j.code} (${j.code4 || j.code}): ${icon} ${label}`);
-    }
-    lines.push(``);
-  }
-
-  // 朝会計画（tjm_last_plan から）
-  if (planCached) {
-    const step2 = planCached.step2 || {text: planCached.text};
-    if (planCached.step1 && planCached.step1.text) {
-      lines.push(`## 🌍 今朝の市場速報 (${GEMINI_MODEL} + Google検索)`);
-      lines.push(``);
-      lines.push(planCached.step1.text.trim());
-      lines.push(``);
-    }
-    if (step2 && step2.text) {
-      lines.push(`## 🧠 今朝の計画 (${CLAUDE_MODEL})`);
-      lines.push(``);
-      lines.push(step2.text.trim());
-      lines.push(``);
-    }
-  }
-
-  // 夕会サマリー
-  if (matches && matches.length > 0) {
-    const s = summarizeMatches(matches);
-    const pnlSign = s.realized_pnl_today > 0 ? '+' : (s.realized_pnl_today < 0 ? '-' : '±');
-    const pnlYen = `${pnlSign}¥${Math.abs(Math.round(s.realized_pnl_today || 0)).toLocaleString()}`;
-    lines.push(`## 🌆 夕会サマリー`);
-    lines.push(``);
-    lines.push(`- ✅ 一致: ${s.consistent}銘柄`);
-    lines.push(`- ⚠️ 先送り: ${s.postponed}銘柄`);
-    lines.push(`- ⚡ 方針変更: ${s.changed}銘柄`);
-    lines.push(`- 🆕 判定外: ${s.unjudged_actions}銘柄`);
-    lines.push(`- 当日確定損益: ${pnlYen}`);
-    lines.push(``);
-
-    // v0.18 Phase 3: 一日の総括 / 明日の注目ポイント を含める
-    const meta = loadEveningMeta(session);
-    if (meta.day_summary?.text) {
-      lines.push(`## 🌅 一日の総括 (${CLAUDE_MODEL})`);
-      lines.push(``);
-      lines.push(meta.day_summary.text.trim());
-      lines.push(``);
-    }
-    if (meta.tomorrow_focus?.text) {
-      lines.push(`## 🔭 明日の注目ポイント (${GEMINI_MODEL} + Google検索)`);
-      lines.push(``);
-      lines.push(meta.tomorrow_focus.text.trim());
-      lines.push(``);
-    }
-
-    // 銘柄別（ズレ銘柄を上、一致を下）
-    const order = ["postponed", "changed", "unjudged", "consistent"];
-    const sorted = [...matches].sort((a,b) =>
-      order.indexOf(a.match_type) - order.indexOf(b.match_type)
-    );
-
-    // メモ・Gemini・Claude を取り出す
-    const memos = loadEveningMemos(session);
-    const geminiBriefs = loadGeminiBriefs(session);
-    const claudeReviews = loadClaudeReviews(session);
-
-    lines.push(`## 🔍 銘柄別マッチング`);
-    lines.push(``);
-    for (const m of sorted) {
-      lines.push(buildDigestMatchSection(
-        m,
-        memos[m.code4],
-        geminiBriefs[m.code4],
-        claudeReviews[m.code4]
-      ));
-    }
-  }
-
-  lines.push(`---`);
-  return lines.join("\n");
-}
-
-// 日次まとめコピー実行（夕会モーダルのヘッダボタンから）
-async function copyDailyDigest(){
-  const btn = document.getElementById("evDigestBtn");
-  if (btn) btn.disabled = true;
-  try {
-    const session = await getTodaySession();
-    const trades = loadV1Trades(TODAY);
-    const judgments = session ? (session.judgments || []) : [];
-    const matches = matchTradesToJudgments(judgments, trades);
-
-    // 朝会計画は当日分のみ（日付違いなら null）
-    const planRaw = LS.get(K.last_plan, null);
-    const planCached = (planRaw && planRaw.date === TODAY) ? planRaw : null;
-
-    // 何もない場合
-    if (!session && matches.length === 0 && !planCached) {
-      toast("⚠️ 今日のデータがありません");
-      return;
-    }
-
-    const md = buildDailyDigestMarkdown(session, matches, planCached);
-    await copyMarkdown(md, "今日のまとめ");
-  } catch(e) {
-    console.error("[v0.11] 日次まとめコピー失敗:", e);
-    toast("⚠️ コピー失敗: " + e.message);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-function toggleEvCard(code4){
-  const el = document.getElementById(`evcard-${code4}`);
-  if (el) el.classList.toggle("open");
-}
-
-// ── Step2: メモ下書き管理 ──────────────────────────────────
-
-// session.evening が保存済みなら matches[].memo を、なければ tjm_evening_draft を返す
-function loadEveningMemos(session){
-  // 1) 保存済みセッションのメモ優先
-  if (session && session.evening && Array.isArray(session.evening.matches)) {
-    const result = {};
-    for (const m of session.evening.matches) {
-      const c4 = m.code4 || m.code;
-      if (c4 && m.memo) result[c4] = m.memo;
-    }
-    if (Object.keys(result).length > 0) return result;
-  }
-  // 2) 当日下書き
-  const draft = LS.get(K.evening_draft, null);
-  if (draft && draft.date === TODAY && draft.memos) return draft.memos;
-  return {};
-}
-
-function saveEveningDraft(memos){
-  LS.set(K.evening_draft, {date: TODAY, memos, updated_at: new Date().toISOString()});
-}
-
-// 入力都度の自動下書き保存（debounce 600ms）
-let _evMemoTimer = null;
-function onEvMemoInput(code4){
-  // 即座に「保存中...」フラグ
-  const flag = document.getElementById(`evmemo-saved-${code4}`);
-  if (flag) flag.classList.remove("show");
-
-  clearTimeout(_evMemoTimer);
-  _evMemoTimer = setTimeout(() => {
-    // 全てのテキストエリアからメモを集める
-    const memos = collectAllMemos();
-    saveEveningDraft(memos);
-    if (flag) {
-      flag.classList.add("show");
-      setTimeout(() => flag.classList.remove("show"), 1500);
-    }
-    // 保存ボタンを「未保存」状態に戻す
-    const btn = document.getElementById("evSaveBtn");
-    if (btn && btn.classList.contains("saved")) {
-      btn.classList.remove("saved");
-      btn.textContent = "💾 夕会を保存";
-      btn.disabled = false;
-    }
-  }, 600);
-}
-
-function collectAllMemos(){
-  const memos = {};
-  document.querySelectorAll(".ev-memo").forEach(el => {
-    const id = el.id;
-    if (!id.startsWith("evmemo-")) return;
-    const code4 = id.replace("evmemo-", "");
-    const v = el.value.trim();
-    if (v) memos[code4] = v;
-  });
-  return memos;
-}
-
-// 日時表示ヘルパー
-function formatJpDateTime(iso){
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    const m = d.getMonth()+1, day = d.getDate();
-    const hh = String(d.getHours()).padStart(2,"0");
-    const mm = String(d.getMinutes()).padStart(2,"0");
-    return `${m}/${day} ${hh}:${mm}`;
-  } catch { return iso; }
-}
-
-// ── Step2: 夕会セッションを IndexedDB に確定保存 ──────────
-async function saveEveningSession(){
-  const btn = document.getElementById("evSaveBtn");
-  if (btn) { btn.disabled = true; btn.textContent = "保存中..."; }
-
-  try {
-    const session = await getTodaySession();
-    if (!session) {
-      toast("⚠️ 今日の朝会セッションが見つかりません");
-      if (btn) { btn.disabled = false; btn.textContent = "💾 夕会を保存"; }
-      return;
-    }
-
-    // 現状のマッチングを再計算（最新のtj_t5を反映）
-    const trades = loadV1Trades(TODAY);
-    const judgments = session.judgments || [];
-    const matches = matchTradesToJudgments(judgments, trades);
-    const summary = summarizeMatches(matches);
-
-    // メモを取り込む
-    const memos = collectAllMemos();
-
-    // 既存セッションのclaude_reviewを引き継ぐためのマップ
-    const prevReviews = {};
-    const prevGeminiBriefs = {};  // A-α (v0.9)
-    if (session.evening && Array.isArray(session.evening.matches)) {
-      for (const em of session.evening.matches) {
-        const c4 = em.code4 || em.code;
-        if (c4 && em.claude_review) prevReviews[c4] = em.claude_review;
-        if (c4 && em.gemini_brief) prevGeminiBriefs[c4] = em.gemini_brief;
-      }
-    }
-
-    const matchesWithMemo = matches.map(m => ({
-      code: m.code,
-      code4: m.code4,
-      name: m.name,
-      judgment: m.judgment,
-      action: m.action,
-      executed_price: m.executed_price,
-      executed_pnl: m.executed_pnl,
-      match_type: m.match_type,
-      memo: memos[m.code4] || "",
-      gemini_brief: prevGeminiBriefs[m.code4] || null,  // A-α (v0.9): 既存があれば引き継ぐ
-      claude_review: prevReviews[m.code4] || null, // Step3: 既存があれば引き継ぐ
-    }));
-
-    // 当日売買履歴のスナップショット
-    const tradesSnapshot = trades.map(t => ({
-      code: t.cd, name: t.nm, action: t.a,
-      shares: t.sh, price: t.p, pnl: t.pnl ?? null,
-      type: t.type || "spot",
-    }));
-
-    session.evening = {
-      completed_at: new Date().toISOString(),
-      trades_today: tradesSnapshot,
-      matches: matchesWithMemo,
-      summary: summary,
-      // v0.18 Phase 3: 一日の総括 / 明日の注目ポイントを永続化
-      //   下書き(LS) → session(IndexedDB) に昇格。既存のものは引き継ぐ
-      day_summary:    (loadEveningMeta(session).day_summary)    || (session.evening && session.evening.day_summary)    || null,
-      tomorrow_focus: (loadEveningMeta(session).tomorrow_focus) || (session.evening && session.evening.tomorrow_focus) || null,
-    };
-
-    await dbPut("daily_sessions", session);
-
-    // 下書きクリア（保存済みになったので不要）
-    LS.set(K.evening_draft, null);
-
-    if (btn) {
-      btn.classList.add("saved");
-      btn.textContent = "✅ 保存完了";
-      btn.disabled = false;
-    }
-    toast(`💾 夕会を保存しました (${matchesWithMemo.length}件)`);
-
-    // 「前回保存」表示を更新するため再描画（メモは復元される）
-    setTimeout(() => refreshEveningModal(), 800);
-
-  } catch(e) {
-    console.error("[evening] save failed:", e);
-    toast("⚠️ 保存失敗: " + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = "💾 夕会を保存"; }
-  }
-}
-
-// ──────────────────────────────────────────────────────────
-
-// ── Step3: Claude 振り返り ────────────────────────────────
-
-// session.evening.matches から claude_review を {code4: {text, generated_at}} で取り出す
-function loadClaudeReviews(session){
-  const result = {};
-  if (session && session.evening && Array.isArray(session.evening.matches)) {
-    for (const m of session.evening.matches) {
-      const c4 = m.code4 || m.code;
-      if (c4 && m.claude_review && m.claude_review.text) {
-        result[c4] = m.claude_review;
-      }
-    }
-  }
-  return result;
-}
-
-// A-α (v0.9): session.evening.matches から gemini_brief を {code4: {text|error, generated_at}} で取り出す
-function loadGeminiBriefs(session){
-  const result = {};
-  if (session && session.evening && Array.isArray(session.evening.matches)) {
-    for (const m of session.evening.matches) {
-      const c4 = m.code4 || m.code;
-      if (c4 && m.gemini_brief && (m.gemini_brief.text || m.gemini_brief.error)) {
-        result[c4] = m.gemini_brief;
-      }
-    }
-  }
-  return result;
-}
-
-// マクロ要約（プロンプト用、短く）
-function summarizeMacroForPrompt(macro){
-  if (!macro) return "（マクロ情報なし）";
-  const parts = [];
-  if (macro.regime) parts.push(`レジーム=${macro.regime}`);
-  if (macro.hv_20d != null) parts.push(`HV20=${macro.hv_20d.toFixed(1)}%`);
-  if (macro.ma25_dev != null) parts.push(`MA25乖離=${macro.ma25_dev>=0?'+':''}${macro.ma25_dev.toFixed(1)}%`);
-  if (macro.trend) parts.push(`trend=${macro.trend}`);
-  return parts.join(" / ") || "（マクロ情報なし）";
-}
-
-// A-α (v0.9): Gemini 個別銘柄の当日市場背景プロンプト
-function buildGeminiStockBriefPrompt(match, macroSummary){
-  const judgeText = match.judgment ? `${JUDGE_LABELS[match.judgment]}（${match.judgment}）` : "（朝会判定なし）";
-  const actionText = ACTION_LABELS[match.action] || match.action;
-  const changeLine = (match.change_pct != null)
-    ? `${match.change_pct >= 0 ? '+' : ''}${match.change_pct.toFixed(2)}%`
-    : (match.executed_pnl != null
-        ? `確定損益 ${match.executed_pnl >= 0 ? '+' : ''}¥${match.executed_pnl.toLocaleString()}`
-        : "（変化率不明）");
-
-  return `日本株「${match.name || ''} (${match.code4})」の ${TODAY} の株価変動理由を、
-Google検索で直近24時間のデータを基に簡潔に説明してください。
-
-## 文脈
-- 今日の朝→終値変化率: ${changeLine}
-- 今朝のマクロ: ${macroSummary}
-- トレーダーの朝の判定: ${judgeText}
-- 実際の行動: ${actionText}
-
-## 出力項目（各1〜2行、箇条書き中心）
-
-### 🏭 セクター要因
-同業他社の動き、業種全体で売られた/買われた?
-
-### 📰 個別要因
-決算・適時開示・ニュース・大口売買（確認できた範囲で）
-
-### 🌐 全体要因
-日経平均・為替・地政学など外部要因の影響度
-
-### 🎯 まとめ
-「なぜ今日こう動いたか」を1行で
-
-## 執筆ルール
-- 全体で 200〜400字
-- 検索で裏取りできないことは「確認できず」と明記
-- 推測・一般論は避け、${TODAY} 日中の動きに絞る
-- 最後まで書き切ること`;
-}
-
-// プロンプト生成（A-α: geminiContext 引数追加）
-function buildClaudeReviewPrompt(match, memo, macroSummary, geminiContext = null){
-  const judgeText = match.judgment ? `${JUDGE_LABELS[match.judgment]}（${match.judgment}）` : "（朝会判定なし）";
-  const actionText = ACTION_LABELS[match.action] || match.action;
-  const matchText = EV_LABELS[match.match_type];
-
-  const ctx = [];
-  ctx.push(`【銘柄】${match.name || ''} (${match.code4})`);
-  ctx.push(`【今朝のマクロ】${macroSummary}`);
-  ctx.push(`【朝の判定】${judgeText}`);
-  ctx.push(`【実際の行動】${actionText}`);
-  if (match.executed_price != null) {
-    ctx.push(`【約定価格】¥${match.executed_price.toLocaleString()}`);
-  }
-  if (match.executed_pnl != null) {
-    const sign = match.executed_pnl >= 0 ? "+" : "";
-    ctx.push(`【確定損益】${sign}¥${match.executed_pnl.toLocaleString()}`);
-  }
-  if (match.change_pct != null && match.action === "no_action") {
-    const sign = match.change_pct >= 0 ? "+" : "";
-    ctx.push(`【朝→終値変化率】${sign}${match.change_pct.toFixed(2)}%`);
-  }
-  ctx.push(`【マッチング判定】${matchText}`);
-  if (memo && memo.trim()) {
-    ctx.push(`【ユーザーメモ】${memo.trim()}`);
-  } else {
-    ctx.push(`【ユーザーメモ】（記入なし）`);
-  }
-
-  // A-α: Gemini で取得した当日の市場背景（あれば最後に付加）
-  const marketContextSection = geminiContext
-    ? `\n【今日の市場背景（Gemini + Google検索）】
-${geminiContext}
-`
-    : "";
-
-  return `あなたは運用歴25年の日本株シニアファンドマネージャーです。トレーダーの「朝の判定」と「実際の行動」のズレを冷静かつ建設的にレビューしてください。
-
-${buildStrategyContext()}
-${ctx.join("\n")}
-${marketContextSection}
-以下の3点を、各1〜2行で簡潔に答えてください。前置き・自己紹介・お疲れ様の挨拶は不要です。
-
-① この行動の評価（妥当だったか / リスクをどう取ったか${geminiContext ? "。セクター全体の動きか個別要因かを踏まえる" : ""}）
-② このパターンが繰り返されるとどんなリスクが累積するか
-③ 明日以降に取りたい具体的アクション（価格水準・条件を含めて）
-
-合計150〜250字程度。番号は ①②③ を使ってください。`;
-}
-
-// A-α (v0.9): Gemini 市場背景 → Claude 振り返り の 2段分業
-//   Gemini キー未設定なら Step1 をスキップして Claude のみで実行（無劣化フォールバック）
-//   IndexedDB の session.evening.matches[n] に gemini_brief と claude_review を保存
-async function requestEveningReview(code4, isRegen){
-  const claudeKey = LS.raw(K.api_claude);
-  if (!claudeKey) {
-    toast("⚠️ 設定でClaude APIキーを登録してください");
-    return;
-  }
-
-  // 現状のセッション・マッチを取得
-  const session = await getTodaySession();
-  if (!session) {
-    toast("⚠️ 当日の朝会セッションが見つかりません");
-    return;
-  }
-  const trades = loadV1Trades(TODAY);
-  const judgments = session.judgments || [];
-  const matches = matchTradesToJudgments(judgments, trades);
-  const target = matches.find(m => m.code4 === code4);
-  if (!target) {
-    toast("⚠️ 対象銘柄が見つかりません");
-    return;
-  }
-
-  // 現在のメモを集める（input中のtextareaから）
-  const memos = collectAllMemos();
-  const memo = memos[code4] || "";
-
-  const geminiKey = (LS.raw(K.api_gemini) || "").trim();
-  const useGemini = !!geminiKey;
-
-  const geminiWrap = document.getElementById(`evgemini-${code4}`);
-  const claudeWrap = document.getElementById(`evclaude-${code4}`);
-
-  // ── Step1: Gemini 市場背景 (optional) ──
-  let geminiBrief = null;
-  if (useGemini) {
-    if (geminiWrap) {
-      geminiWrap.innerHTML = `
-        <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
-        <div class="ev-gemini-loading">
-          <span class="loading"></span>${escapeHtml(target.name || code4)} の株価変動理由を Google検索で調査中...
-        </div>`;
-    }
-    try {
-      const macroSummary = summarizeMacroForPrompt(session.macro);
-      const giPrompt = buildGeminiStockBriefPrompt(target, macroSummary);
-      const giText = await callGemini(geminiKey, giPrompt, {useSearch: true, maxTokens: 1200});
-      geminiBrief = {text: giText.trim(), generated_at: new Date().toISOString()};
-
-      // Step1 結果を即座に表示
-      if (geminiWrap) {
-        geminiWrap.innerHTML = `
-          <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
-          <div class="ev-gemini-result">${escapeHtml(geminiBrief.text)}</div>
-          <div class="ev-gemini-meta">🤖 ${GEMINI_MODEL} + Google検索 · ${formatJpDateTime(geminiBrief.generated_at)}</div>`;
-      }
-    } catch(e) {
-      console.warn("[evening] gemini brief failed:", e);
-      geminiBrief = {error: e.message || String(e)};
-      if (geminiWrap) {
-        geminiWrap.innerHTML = `
-          <div class="ev-gemini-hdr">🌍 今日の市場背景</div>
-          <div class="ev-gemini-error">⚠️ 取得失敗: ${escapeHtml(geminiBrief.error)}</div>`;
-      }
-    }
-  }
-
-  // ── Step2: Claude 振り返り ──
-  if (claudeWrap) {
-    claudeWrap.innerHTML = `
-      <div class="ev-claude-loading">
-        <span class="loading"></span>Claude が${geminiBrief && geminiBrief.text ? "市場背景を踏まえて" : ""}振り返り中...
-      </div>`;
-  }
-
-  try {
-    const macroSummary = summarizeMacroForPrompt(session.macro);
-    const geminiContext = (geminiBrief && geminiBrief.text) ? geminiBrief.text : null;
-    const prompt = buildClaudeReviewPrompt(target, memo, macroSummary, geminiContext);
-    const text = await callClaude(claudeKey, prompt);
-
-    const review = {
-      text: text.trim(),
-      generated_at: new Date().toISOString(),
-      memo_at_request: memo,
-      regenerated: !!isRegen,
-    };
-
-    // session.evening を初期化（未保存ならその場で作る）
-    if (!session.evening) {
-      const summary = summarizeMatches(matches);
-      const tradesSnapshot = trades.map(t => ({
-        code: t.cd, name: t.nm, action: t.a,
-        shares: t.sh, price: t.p, pnl: t.pnl ?? null,
-        type: t.type || "spot",
-      }));
-      session.evening = {
-        completed_at: new Date().toISOString(),
-        trades_today: tradesSnapshot,
-        matches: matches.map(m => ({
-          code: m.code, code4: m.code4, name: m.name,
-          judgment: m.judgment, action: m.action,
-          executed_price: m.executed_price, executed_pnl: m.executed_pnl,
-          match_type: m.match_type,
-          memo: memos[m.code4] || "",
-          gemini_brief: null,   // A-α (v0.9)
-          claude_review: null,
-        })),
-        summary,
-      };
-    } else {
-      // 既存 session.evening のメモを最新の入力で同期
-      session.evening.matches = session.evening.matches.map(em => {
-        const c4 = em.code4 || em.code;
-        return {...em, memo: (memos[c4] !== undefined ? memos[c4] : (em.memo || ""))};
-      });
-      // matchesに無い銘柄が新たに発生した場合の追加（売買が後から増えた等）
-      const existingCodes = new Set(session.evening.matches.map(em => em.code4 || em.code));
-      for (const m of matches) {
-        if (!existingCodes.has(m.code4)) {
-          session.evening.matches.push({
-            code: m.code, code4: m.code4, name: m.name,
-            judgment: m.judgment, action: m.action,
-            executed_price: m.executed_price, executed_pnl: m.executed_pnl,
-            match_type: m.match_type,
-            memo: memos[m.code4] || "",
-            gemini_brief: null,   // A-α (v0.9)
-            claude_review: null,
-          });
+      const d=await r.json();
+      let raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```(?:json)?\s*|```\s*/gi,'').trim();
+      // cashはオブジェクト、それ以外は配列
+      if(ssType==='cash'){
+        const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
+        if(s<0||e<0){
+          resEl.textContent+='  ⚠️ データを読み取れませんでした\n  応答: '+raw.slice(0,150).replace(/[\n\r]/g,' ')+'\n';
+          continue;
         }
-      }
-    }
-
-    // 当該銘柄の gemini_brief + review を埋める
-    let updated = false;
-    for (const em of session.evening.matches) {
-      const c4 = em.code4 || em.code;
-      if (c4 === code4) {
-        em.gemini_brief = geminiBrief;  // A-α (v0.9): null / {text,...} / {error} すべてそのまま保存
-        em.claude_review = review;
-        updated = true;
-        break;
-      }
-    }
-    if (!updated) {
-      // 念のためフォールバック
-      session.evening.matches.push({
-        ...target, memo, gemini_brief: geminiBrief, claude_review: review,
-      });
-    }
-
-    await dbPut("daily_sessions", session);
-
-    // UI: Claude 結果に差し替え
-    if (claudeWrap) {
-      claudeWrap.innerHTML = `
-        <div class="ev-claude-result">${escapeHtml(review.text)}</div>
-        <div class="ev-claude-meta">
-          <span>🧠 ${CLAUDE_MODEL} / ${formatJpDateTime(review.generated_at)}</span>
-          <button class="regen-link" onclick="requestEveningReview('${code4}', true)">🔄 再生成</button>
-        </div>`;
-    }
-    toast(`🧠 ${target.name || code4} の振り返り完了`);
-
-  } catch(e) {
-    console.error("[evening] claude review failed:", e);
-    if (claudeWrap) {
-      claudeWrap.innerHTML = `
-        <div class="ev-claude-error">⚠️ ${escapeHtml(e.message || String(e))}</div>
-        <button class="ev-claude-btn" style="margin-top:6px;" onclick="requestEveningReview('${code4}', false)">
-          🔄 もう一度試す
-        </button>`;
-    }
-  }
-}
-
-// ──────────────────────────────────────────────────────────
-
-async function openEveningModal(){
-  document.getElementById("eveningModal").classList.add("on");
-  await refreshEveningModal();
-}
-
-function closeEveningModal(){
-  document.getElementById("eveningModal").classList.remove("on");
-}
-
-async function refreshEveningModal(){
-  const wrap = document.getElementById("eveningBody");
-  wrap.innerHTML = `<div class="loading" style="padding:24px;justify-content:center;">集計中...</div>`;
-
-  try {
-    const session = await getTodaySession();
-    const trades = loadV1Trades(TODAY);
-    const judgments = (session && session.judgments) || [];
-    const matches = matchTradesToJudgments(judgments, trades);
-    wrap.innerHTML = renderEveningBody(session, trades, matches);
-  } catch(e) {
-    console.error("[evening] refresh failed:", e);
-    wrap.innerHTML = `<div class="error">夕会データ取得エラー: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-// イベントバインド
-document.getElementById("eveningBtn").onclick = openEveningModal;
-document.getElementById("eveningModal").onclick = (e) => {
-  if (e.target.id === "eveningModal") closeEveningModal();
-};
-
-// イベントバインド
-document.getElementById("reviewBtn").onclick = openReviewModal;
-document.getElementById("reviewModal").onclick = (e) => {
-  if (e.target.id === "reviewModal") closeReviewModal();
-};
-
-// ════════════════════════════════════════════════════════════════════
-//  Phase 4 Stage 4.1: 対話チャット（v1 trading_journal.html からの移植）
-//  - モード: 🤝合議 / 🤖Gemini単独 / 🧠Claude単独
-//  - 履歴: メモリのみ（リロードで消える）、Stage 4.3 で IndexedDB 永続化予定
-//  - 文脈: 基本ポートフォリオのみ、Stage 4.2 でマクロ/判定/計画/夕会注入予定
-// ════════════════════════════════════════════════════════════════════
-
-// チャット状態（メモリのみ）
-let CHAT_MODE = "gc";      // "gc" | "g" | "c"
-let CHAT_GEM_HIST = [];    // [{role:"user"|"model", parts:[{text}]}]  Gemini形式
-let CHAT_CLD_HIST = [];    // [{role:"user"|"assistant", content}]      Claude形式
-const CHAT_GEM_MAX = 8;    // v1踏襲: Gemini履歴上限（往復）
-const CHAT_CLD_MAX = 10;   // v1踏襲: Claude履歴上限（往復）
-
-// v0.14: 永続化用の状態
-// CURRENT_CHAT_SESSION_ID = null → まだ DB に保存されていない（次の送信で dbAdd）
-// CURRENT_CHAT_SESSION_ID = number → 既に保存済み、以降 dbPut で更新
-let CURRENT_CHAT_SESSION_ID = null;
-// CHAT_MESSAGES: UI 表示用の統一フォーマット
-//   {kind:"user", text, ts}
-//   {kind:"ai", who:"g"|"c", text, ts, error?:bool}
-//   {kind:"dual", g_text, c_text, g_error?:bool, c_error?:bool, ts}
-let CHAT_MESSAGES = [];
-
-// v0.13: 文脈チップのデフォルト（全部ON）と localStorage 復元
-const CHAT_CTX_DEFAULTS = {
-  macro: true, holdings: true, trades: true,
-  judgments: true, plan: true, evening: true,
-};
-let CHAT_CTX_FLAGS = {...CHAT_CTX_DEFAULTS, ...(LS.get(K.chat_ctx_flags, {}) || {})};
-
-// v0.13: 文脈プレビューキャッシュ（モーダル開閉時にビルド、文字数表示用）
-let _chatCtxPreviewText = "";
-let _chatCtxPreviewBuilding = false;
-
-// ── チャットのモデル設定 ──
-// v0.16: Claude モデル切替対応（Haiku 4.5 / Sonnet 4.6 / Opus 4.7）
-//   デフォルトは Haiku 4.5、モーダルを開くたびにリセット（localStorage に保存しない）
-//   costMul は Haiku を 1.0 とした相対倍率（updateChatCostInfo で使用）
-const CLAUDE_MODEL_OPTIONS = [
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5",  costMul:  1.0 },
-  { id: "claude-sonnet-4-6",         label: "Sonnet 4.6", costMul:  3.5 },
-  { id: "claude-opus-4-7",           label: "Opus 4.7",   costMul: 17.0 },
-];
-let CHAT_CLAUDE_MODEL = CLAUDE_MODEL;  // デフォルト: "claude-haiku-4-5-20251001"
-const CHAT_GEMINI_MODEL = GEMINI_MODEL;  // Gemini は固定 "gemini-2.5-flash"
-
-// ── モーダル開閉 ──
-function openChatModal(){
-  document.getElementById("chatModal").classList.add("on");
-  // v0.16: モーダルを開くたびに Claude モデルを Haiku にリセット（永続化しない仕様）
-  resetChatClaudeModelUI();
-  // 初期メッセージがなければ empty state を表示
-  updateChatEmptyState();
-  // チップの状態をUIに反映
-  renderChatCtxChips();
-  // 文脈プレビューをバックグラウンド更新（async）
-  refreshChatCtxPreview();
-  // 入力欄フォーカス（少し遅延、モバイルキーボード対応）
-  setTimeout(() => {
-    const inp = document.getElementById("chatInput");
-    if (inp) inp.focus();
-  }, 120);
-}
-
-function closeChatModal(){
-  document.getElementById("chatModal").classList.remove("on");
-}
-
-// 背景タップで閉じる
-document.getElementById("chatBtn").onclick = openChatModal;
-document.getElementById("chatModal").onclick = (e) => {
-  if (e.target.id === "chatModal") closeChatModal();
-};
-
-// ── モード切替 ──
-function setChatMode(m){
-  CHAT_MODE = m;
-  ["chatModeGC","chatModeG","chatModeC"].forEach(id => {
-    document.getElementById(id).classList.remove("on");
-  });
-  const onId = m === "gc" ? "chatModeGC" : (m === "g" ? "chatModeG" : "chatModeC");
-  document.getElementById(onId).classList.add("on");
-  updateChatCostInfo();
-}
-
-// ── 文脈チップ操作 ──
-function toggleChatCtx(key){
-  if (!(key in CHAT_CTX_FLAGS)) return;
-  CHAT_CTX_FLAGS[key] = !CHAT_CTX_FLAGS[key];
-  LS.set(K.chat_ctx_flags, CHAT_CTX_FLAGS);
-  renderChatCtxChips();
-  refreshChatCtxPreview();
-}
-
-function renderChatCtxChips(){
-  document.querySelectorAll(".chat-ctx-chip").forEach(btn => {
-    const k = btn.dataset.ctx;
-    btn.classList.toggle("on", !!CHAT_CTX_FLAGS[k]);
-  });
-}
-
-// 文脈プレビューを再ビルド → info行を更新
-async function refreshChatCtxPreview(){
-  if (_chatCtxPreviewBuilding) return;
-  _chatCtxPreviewBuilding = true;
-  try {
-    _chatCtxPreviewText = await buildFullChatContext(CHAT_CTX_FLAGS);
-  } catch(e) {
-    console.warn("[chat] refreshChatCtxPreview failed:", e);
-    _chatCtxPreviewText = "";
-  } finally {
-    _chatCtxPreviewBuilding = false;
-  }
-  updateChatCtxInfo();
-  updateChatCostInfo();
-}
-
-function updateChatCtxInfo(){
-  const ctxEl = document.getElementById("chatCtxInfo");
-  if (!ctxEl) return;
-  const onCount = Object.values(CHAT_CTX_FLAGS).filter(Boolean).length;
-  const totalCount = Object.keys(CHAT_CTX_FLAGS).length;
-  const charCount = _chatCtxPreviewText.length;
-  ctxEl.textContent = `文脈: ${onCount}/${totalCount} ON, 約${charCount.toLocaleString()}字`;
-}
-
-function updateChatCostInfo(){
-  // v0.16: Claude モデル倍率（Haiku=1.0 / Sonnet=3.5 / Opus=17.0）を反映
-  const costEl = document.getElementById("chatCostInfo");
-  if (!costEl) return;
-  const ctxChars = _chatCtxPreviewText.length;
-  const inputCost = (ctxChars / 1000) * 0.5; // 文脈分の入力概算
-  const mul = getClaudeModelCostMul(CHAT_CLAUDE_MODEL);
-
-  let label;
-  if (CHAT_MODE === "gc") {
-    // 合議: Gemini (1-2) + Claude (1-2 × mul) + 文脈入力
-    const low  = Math.max(2, Math.round(1 + 1 * mul + inputCost));
-    const high = Math.max(4, Math.round(2 + 2 * mul + inputCost));
-    label = `💰 約¥${low}-${high}/往復`;
-  } else if (CHAT_MODE === "c") {
-    // Claude 単独: 1-2 × mul + 文脈入力
-    const low  = Math.max(1, Math.round(1 * mul + inputCost));
-    const high = Math.max(2, Math.round(2 * mul + inputCost));
-    label = `💰 約¥${low}-${high}/往復`;
-  } else {
-    // Gemini 単独: モデル倍率なし（Claude 側を使わないため）
-    const low  = Math.max(1, Math.round(1 + inputCost));
-    const high = Math.max(2, Math.round(2 + inputCost));
-    label = `💰 約¥${low}-${high}/往復`;
-  }
-  costEl.textContent = label;
-}
-
-// v0.16: モデル選択 UI のリセット（モーダルを開くたびに Haiku 4.5 に戻す）
-function resetChatClaudeModelUI(){
-  CHAT_CLAUDE_MODEL = CLAUDE_MODEL;  // "claude-haiku-4-5-20251001"
-  const sel = document.getElementById("chatModelSelect");
-  if (sel) {
-    sel.value = CHAT_CLAUDE_MODEL;
-    sel.classList.remove("opus");
-  }
-  updateChatCostInfo();
-}
-
-// v0.16: モデル切替ハンドラ（<select> の onchange から呼ばれる）
-function setChatClaudeModel(modelId){
-  // 未知のIDが来たら無視（防御的）
-  if (!CLAUDE_MODEL_OPTIONS.some(o => o.id === modelId)) {
-    console.warn("[chat] unknown model id:", modelId);
-    return;
-  }
-  CHAT_CLAUDE_MODEL = modelId;
-  const sel = document.getElementById("chatModelSelect");
-  if (sel) {
-    // Opus 選択時は視覚警告として橙色（CSS .chat-model-select.opus）
-    sel.classList.toggle("opus", modelId === "claude-opus-4-7");
-  }
-  updateChatCostInfo();
-}
-
-// v0.16: モデル倍率取得（updateChatCostInfo 用）
-function getClaudeModelCostMul(modelId){
-  const opt = CLAUDE_MODEL_OPTIONS.find(o => o.id === modelId);
-  return opt ? opt.costMul : 1.0;
-}
-
-// v0.14: 「クリア」= 現セッションを終了して新規セッションを準備
-//   履歴は IndexedDB に残るので失われない
-function clearChatHistory(){
-  if (CHAT_MESSAGES.length === 0 && CURRENT_CHAT_SESSION_ID === null) {
-    toast("会話はまだありません");
-    return;
-  }
-  if (!confirm("現在の会話を終了して新しい会話を始めますか？\n（履歴は📚から後で見られます）")) return;
-  startNewChatSession();
-  toast("✨ 新しい会話を開始しました");
-}
-
-// 新規セッション準備（メモリ初期化、UI を空に）
-function startNewChatSession(){
-  CURRENT_CHAT_SESSION_ID = null;
-  CHAT_GEM_HIST = [];
-  CHAT_CLD_HIST = [];
-  CHAT_MESSAGES = [];
-  const scroll = document.getElementById("chatScroll");
-  if (scroll) {
-    scroll.innerHTML = `
-      <div class="chat-empty" id="chatEmpty">
-        <div class="emoji">💬</div>
-        <div>新しい会話を始めましょう</div>
-        <div class="hint">
-          ※ 上のチップで文脈（マクロ/保有/判定/計画/夕会など）を選択<br>
-          ※ 履歴は📚から閲覧・再開可能
-        </div>
-      </div>`;
-  }
-  updateChatEmptyState();
-}
-
-function updateChatEmptyState(){
-  const empty = document.getElementById("chatEmpty");
-  const hasMsg = CHAT_GEM_HIST.length > 0 || CHAT_CLD_HIST.length > 0;
-  if (empty) empty.style.display = hasMsg ? "none" : "block";
-}
-
-// ── 入力欄の自動リサイズ ──
-function autoResizeChatInput(el){
-  el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, 96) + "px";
-}
-
-// ── スクロールを最下部へ ──
-function scrollChatToBottom(){
-  const scroll = document.getElementById("chatScroll");
-  if (!scroll) return;
-  setTimeout(() => { scroll.scrollTop = scroll.scrollHeight; }, 50);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  v0.13: 文脈ビルダー（フル版、async）
-//  選択チップに応じて 6 種の文脈をMarkdown風に整形
-// ════════════════════════════════════════════════════════════════════
-
-// 1) マクロ
-function buildCtxMacro(){
-  if (!MACRO) return "";
-  const summary = summarizeMacroForPrompt(MACRO);
-  const lines = [`## 🌡️ 今朝のマクロ`, summary];
-  return lines.join("\n");
-}
-
-// 2) 保有
-function buildCtxHoldings(){
-  if (!HOLDINGS || HOLDINGS.length === 0) return "## 💼 保有銘柄\n（保有なし）";
-  const lines = ["## 💼 保有銘柄"];
-  for (const h of HOLDINGS) {
-    const cp = (PRICES && PRICES[h.code]?.close) || h.buy_price;
-    const pct = h.buy_price ? (((cp - h.buy_price) / h.buy_price) * 100).toFixed(1) : "-";
-    const typeJ = h.type === "margin" ? "信用" : "現物";
-    lines.push(`- ${h.code} ${h.name}(${typeJ}): ${h.shares || 0}株 買値${h.buy_price || "未"}円 現値${cp}円(${pct >= 0 ? "+" : ""}${pct}%) 損切${h.stop_loss || "未"}/目標${h.target || "未"}`);
-  }
-  return lines.join("\n");
-}
-
-// 3) 当日売買
-function buildCtxTrades(){
-  let trades = [];
-  try {
-    trades = loadV1Trades(TODAY) || [];
-  } catch(e) {
-    console.warn("[chat] loadV1Trades failed:", e);
-    return "";
-  }
-  if (trades.length === 0) return "## 💱 本日の売買\n（売買なし）";
-  const lines = ["## 💱 本日の売買"];
-  for (const t of trades) {
-    lines.push(`- ${t.a === "buy" ? "買" : "売"} ${t.nm || t.cd}(${t.cd}) ${t.p}円 × ${t.sh}株`);
-  }
-  return lines.join("\n");
-}
-
-// 4) 朝の判定
-function buildCtxJudgments(){
-  if (!HOLDINGS || HOLDINGS.length === 0) return "";
-  const items = HOLDINGS.map(h => ({h, j: JUDGMENTS[h.code]})).filter(x => x.j);
-  if (items.length === 0) return "## ✅ 今朝の判定\n（未判定）";
-  const lines = ["## ✅ 今朝の判定"];
-  for (const {h, j} of items) {
-    const label = JUDGE_LABELS[j.judgment] || j.judgment;
-    const chg = (j.change_pct != null) ? ` 始値比${j.change_pct >= 0 ? "+" : ""}${j.change_pct.toFixed(2)}%` : "";
-    lines.push(`- ${h.code} ${h.name}: ${label}${chg}`);
-  }
-  return lines.join("\n");
-}
-
-// 5) 朝会計画（Gemini 速報 + Claude 計画）
-function buildCtxPlan(){
-  const cached = getPlanCacheForExport();
-  if (!cached) return "";
-  const lines = ["## 🧠 今日の朝会計画"];
-  if (cached.step1 && cached.step1.text) {
-    lines.push("", "### 🌍 市場速報（Gemini）");
-    lines.push(cached.step1.text.trim());
-  }
-  const step2 = cached.step2 || {text: cached.text};
-  if (step2 && step2.text) {
-    lines.push("", "### 🎯 戦略・計画（Claude）");
-    lines.push(step2.text.trim());
-  }
-  return lines.length > 1 ? lines.join("\n") : "";
-}
-
-// 6) 夕会マッチング（async, IndexedDB から）
-async function buildCtxEvening(){
-  let session;
-  try {
-    session = await getTodaySession();
-  } catch(e) {
-    console.warn("[chat] getTodaySession failed:", e);
-    return "";
-  }
-  if (!session) return "";
-
-  // 当日売買 + 判定マッチング
-  const trades = loadV1Trades(TODAY) || [];
-  const judgments = session.judgments || [];
-  const matches = matchTradesToJudgments(judgments, trades);
-
-  // メモ・Geminiブリーフ・Claudeレビュー
-  const memos = loadEveningMemos(session);
-  const briefs = loadGeminiBriefs(session);
-  const reviews = loadClaudeReviews(session);
-
-  if (!matches || matches.length === 0) return "";
-
-  const lines = ["## 🌆 夕会のマッチング結果"];
-  // タイプ別の集計
-  const buckets = {match: [], shift: [], drift: [], untracked: []};
-  for (const m of matches) {
-    const k = m.match_type;
-    if (buckets[k]) buckets[k].push(m);
-  }
-  if (buckets.match.length > 0) lines.push(`- 一致: ${buckets.match.length}件`);
-  if (buckets.shift.length > 0) lines.push(`- 先送り: ${buckets.shift.length}件`);
-  if (buckets.drift.length > 0) lines.push(`- 方針変更: ${buckets.drift.length}件`);
-  if (buckets.untracked.length > 0) lines.push(`- 判定外: ${buckets.untracked.length}件`);
-
-  // ズレ銘柄（shift / drift）の詳細を最大3件まで（トークン節約）
-  const driftItems = [...buckets.shift, ...buckets.drift].slice(0, 3);
-  for (const m of driftItems) {
-    const c4 = m.code4 || m.code;
-    const judgeText = m.judgment ? (JUDGE_LABELS[m.judgment] || m.judgment) : "（判定なし）";
-    const actionText = ACTION_LABELS[m.action] || m.action;
-    const pnl = (m.executed_pnl != null) ? ` 損益¥${m.executed_pnl.toLocaleString()}` : "";
-    lines.push("", `### ${m.name || ""}(${c4}) — ${judgeText} → ${actionText}${pnl}`);
-    if (memos[c4]) lines.push(`📝 メモ: ${memos[c4]}`);
-    const brief = briefs[c4];
-    if (brief && brief.text) {
-      // Gemini 市場背景は長くなりがちなので200字でカット
-      const txt = brief.text.length > 200 ? brief.text.slice(0, 200) + "…" : brief.text;
-      lines.push(`🌍 市場背景: ${txt}`);
-    }
-    const review = reviews[c4];
-    if (review && review.text) {
-      const txt = review.text.length > 250 ? review.text.slice(0, 250) + "…" : review.text;
-      lines.push(`🧠 Claude振り返り: ${txt}`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-// フル版: 選択チップに応じて全文脈を結合（async）
-async function buildFullChatContext(flags){
-  const sections = [];
-  if (flags.macro)     { const s = buildCtxMacro();              if (s) sections.push(s); }
-  if (flags.holdings)  { const s = buildCtxHoldings();           if (s) sections.push(s); }
-  if (flags.trades)    { const s = buildCtxTrades();             if (s) sections.push(s); }
-  if (flags.judgments) { const s = buildCtxJudgments();          if (s) sections.push(s); }
-  if (flags.plan)      { const s = buildCtxPlan();               if (s) sections.push(s); }
-  if (flags.evening)   { const s = await buildCtxEvening();      if (s) sections.push(s); }
-  return sections.join("\n\n");
-}
-
-// ── メッセージレンダリング ──
-function renderChatText(s){
-  // HTMLエスケープ + 改行を<br>に
-  return escapeHtml(s).replace(/\n/g, "<br>");
-}
-
-// v0.14: DOM追加 + CHAT_MESSAGES にも追記（pushToMemory=falseにすれば履歴再描画用）
-function addChatUserMsg(txt, pushToMemory=true){
-  updateChatEmptyState();
-  const scroll = document.getElementById("chatScroll");
-  const d = document.createElement("div");
-  d.className = "chat-msg u";
-  d.innerHTML = `<div class="chat-bubble">${renderChatText(txt)}</div><div class="chat-avatar">👤</div>`;
-  scroll.appendChild(d);
-  scrollChatToBottom();
-  if (pushToMemory) {
-    CHAT_MESSAGES.push({kind:"user", text:txt, ts:new Date().toISOString()});
-  }
-}
-
-function addChatAIMsg(who, txt, isError=false, pushToMemory=true){
-  updateChatEmptyState();
-  const scroll = document.getElementById("chatScroll");
-  const d = document.createElement("div");
-  d.className = "chat-msg";
-  const icon = who === "g" ? "🤖" : "🧠";
-  const bubbleCls = isError ? "chat-bubble chat-msg-error" : "chat-bubble";
-  d.innerHTML = `<div class="chat-avatar">${icon}</div><div class="${bubbleCls}">${renderChatText(txt)}</div>`;
-  scroll.appendChild(d);
-  scrollChatToBottom();
-  if (pushToMemory) {
-    CHAT_MESSAGES.push({kind:"ai", who, text:txt, ts:new Date().toISOString(), error:isError});
-  }
-  return d;
-}
-
-function addChatDualMsg(gTxt, cTxt, gErr=false, cErr=false, pushToMemory=true){
-  updateChatEmptyState();
-  const scroll = document.getElementById("chatScroll");
-  const d = document.createElement("div");
-  d.innerHTML = `
-    <div class="chat-dual">
-      <div class="chat-dual-pane">
-        <div class="chat-dual-hdr g">🤖 Gemini（市場情報）</div>
-        <div class="${gErr ? "chat-msg-error" : ""}">${renderChatText(gTxt)}</div>
-      </div>
-      <div class="chat-dual-pane">
-        <div class="chat-dual-hdr c">🧠 Claude（戦略判断）</div>
-        <div class="${cErr ? "chat-msg-error" : ""}">${renderChatText(cTxt)}</div>
-      </div>
-    </div>`;
-  scroll.appendChild(d);
-  scrollChatToBottom();
-  if (pushToMemory) {
-    CHAT_MESSAGES.push({kind:"dual", g_text:gTxt, c_text:cTxt, g_error:gErr, c_error:cErr, ts:new Date().toISOString()});
-  }
-}
-
-function addChatLoading(mode){
-  const scroll = document.getElementById("chatScroll");
-  const d = document.createElement("div");
-  d.className = "chat-msg";
-  const icon = mode === "gc" ? "🤝" : (mode === "g" ? "🤖" : "🧠");
-  d.innerHTML = `<div class="chat-avatar">${icon}</div><div class="chat-bubble"><div class="chat-loading"><div class="spin"></div><span>考え中...</span></div></div>`;
-  scroll.appendChild(d);
-  scrollChatToBottom();
-  return d;
-}
-
-// ── 送信ハンドラ（v1 doChat の v2 版） ──
-async function sendChatMessage(){
-  const inp = document.getElementById("chatInput");
-  const sendBtn = document.getElementById("chatSendBtn");
-  const txt = (inp.value || "").trim();
-  if (!txt) return;
-
-  // APIキーチェック
-  const claudeKey = LS.raw(K.api_claude) || "";
-  const geminiKey = LS.raw(K.api_gemini) || "";
-  if (CHAT_MODE === "c" && !claudeKey) {
-    toast("⚠️ Claude APIキー未設定（⚙️から登録）");
-    return;
-  }
-  if (CHAT_MODE === "g" && !geminiKey) {
-    toast("⚠️ Gemini APIキー未設定（⚙️から登録）");
-    return;
-  }
-  if (CHAT_MODE === "gc" && !claudeKey && !geminiKey) {
-    toast("⚠️ APIキーが両方未設定（⚙️から登録）");
-    return;
-  }
-
-  inp.value = "";
-  autoResizeChatInput(inp);
-  sendBtn.disabled = true;
-
-  // ユーザーメッセージを表示
-  addChatUserMsg(txt);
-
-  // 文脈構築（v0.13: 選択チップに応じて動的）
-  let pfs;
-  try {
-    pfs = await buildFullChatContext(CHAT_CTX_FLAGS);
-  } catch(e) {
-    console.warn("[chat] buildFullChatContext failed:", e);
-    pfs = "（文脈の取得に失敗しました）";
-  }
-  // ビルド結果でinfo行も更新
-  _chatCtxPreviewText = pfs;
-  updateChatCtxInfo();
-
-  const ctxBlock = pfs ? `\n\n# 現在の状況・コンテキスト\n${pfs}` : "";
-  const strategyBlock = `\n\n${buildStrategyContext()}`;
-  const gemSys = `あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。${strategyBlock}${ctxBlock}`;
-  const cldSys = `あなたは運用歴25年の日本株専門シニアFMです。
-ひろき様は短期回転重視のスイングトレーダー（下記スタンス参照）。率直・具体的にアドバイスしてください。数値根拠を示し、損切り・利確ラインを具体的に。${strategyBlock}${ctxBlock}`;
-
-  // ローディング表示
-  const loadingEl = addChatLoading(CHAT_MODE);
-
-  try {
-    if (CHAT_MODE === "g") {
-      // Gemini 単独
-      // 履歴は slice(-CHAT_GEM_MAX*2) で直近 N 往復のみ（token節約）
-      // 注: CHAT_GEM_HIST にはまだ今回の user メッセージを入れない（callGemini 側で追加される）
-      const histSlice = CHAT_GEM_HIST.slice(-CHAT_GEM_MAX * 2);
-      const resp = await callGemini(geminiKey, txt, {
-        model: CHAT_GEMINI_MODEL,
-        useSearch: true,
-        maxTokens: 2000,
-        system: gemSys,
-        history: histSlice,
-      });
-      loadingEl.remove();
-      addChatAIMsg("g", resp);
-      CHAT_GEM_HIST.push({role:"user", parts:[{text: txt}]});
-      CHAT_GEM_HIST.push({role:"model", parts:[{text: resp}]});
-
-    } else if (CHAT_MODE === "c") {
-      // Claude 単独
-      const histSlice = CHAT_CLD_HIST.slice(-CHAT_CLD_MAX * 2);
-      const resp = await callClaude(claudeKey, txt, {
-        model: CHAT_CLAUDE_MODEL,
-        maxTokens: 1500,
-        system: cldSys,
-        history: histSlice,
-      });
-      loadingEl.remove();
-      addChatAIMsg("c", resp);
-      CHAT_CLD_HIST.push({role:"user", content: txt});
-      CHAT_CLD_HIST.push({role:"assistant", content: resp});
-
-    } else {
-      // 🤝 合議: 並列実行、片方失敗でもう片方は表示（v1 の Promise.all + catch パターン踏襲）
-      const gHist = CHAT_GEM_HIST.slice(-CHAT_GEM_MAX * 2);
-      const cHist = CHAT_CLD_HIST.slice(-CHAT_CLD_MAX * 2);
-      const gPromise = geminiKey
-        ? callGemini(geminiKey, txt, {
-            model: CHAT_GEMINI_MODEL,
-            useSearch: true,
-            maxTokens: 2000,
-            system: gemSys,
-            history: gHist,
-          }).then(t => ({ok:true, text:t})).catch(e => ({ok:false, text:"⚠️ Gemini エラー: " + e.message}))
-        : Promise.resolve({ok:false, text:"⚠️ Gemini APIキー未設定"});
-      const cPromise = claudeKey
-        ? callClaude(claudeKey, txt, {
-            model: CHAT_CLAUDE_MODEL,
-            maxTokens: 1500,
-            system: cldSys,
-            history: cHist,
-          }).then(t => ({ok:true, text:t})).catch(e => ({ok:false, text:"⚠️ Claude エラー: " + e.message}))
-        : Promise.resolve({ok:false, text:"⚠️ Claude APIキー未設定"});
-
-      const [gr, cr] = await Promise.all([gPromise, cPromise]);
-      loadingEl.remove();
-      addChatDualMsg(gr.text, cr.text, !gr.ok, !cr.ok);
-
-      // 履歴は成功したもののみ保存（失敗は履歴に残さない）
-      CHAT_GEM_HIST.push({role:"user", parts:[{text: txt}]});
-      if (gr.ok) {
-        CHAT_GEM_HIST.push({role:"model", parts:[{text: gr.text}]});
+        const obj=JSON.parse(raw.slice(s,e+1));
+        parsedItems=[obj];
+        resEl.textContent+='  ✅ 読み取り成功\n';
       } else {
-        // Gemini失敗時は user も巻き戻し（不整合防止）
-        CHAT_GEM_HIST.pop();
+        // 配列のJSON抽出 + 不完全JSONの自動修復
+        const s=raw.indexOf('[');
+        if(s<0){
+          resEl.textContent+='  ⚠️ JSON開始位置なし\n  応答: '+raw.slice(0,150).replace(/[\n\r]/g,' ')+'\n';
+          continue;
+        }
+        let jsonStr=raw.slice(s);
+        // ']'がない or 不完全 → 末尾の不完全オブジェクトを削除して閉じる
+        if(!jsonStr.includes(']')){
+          jsonStr=jsonStr.replace(/,\s*\{[^}]*$/,'').replace(/,?\s*$/,'')+']';
+        }
+        let items;
+        try{
+          items=JSON.parse(jsonStr);
+        }catch(parseErr){
+          // 末尾の不完全オブジェクトを削除して再試行
+          try{
+            const lastClose=jsonStr.lastIndexOf('}');
+            if(lastClose>0){
+              items=JSON.parse(jsonStr.slice(0,lastClose+1).replace(/,\s*$/,'')+']');
+            }else{
+              throw parseErr;
+            }
+          }catch(e2){
+            resEl.textContent+='  ⚠️ JSONパース失敗: '+parseErr.message+'\n  応答: '+raw.slice(0,150).replace(/[\n\r]/g,' ')+'\n';
+            continue;
+          }
+        }
+        if(!Array.isArray(items)||items.length===0){
+          resEl.textContent+='  ⚠️ データなし（空の応答）\n';
+          continue;
+        }
+        for(const item of items){
+          // spot/margin の場合、buy_price未取得なら eval/shares から逆算
+          if((ssType==='spot'||ssType==='margin') && !item.buy_price && item.eval && item.shares){
+            // eval は現在価額なので buy_price ではない。chg_amt がわかれば取得時の価額から逆算可能
+            // ただし正確ではないので、buy_priceがnullの場合は current_priceから推測
+            // → buy_price の推測はせず null のままにする（手動補完が必要）
+          }
+          // current_price を eval/shares から計算
+          if((ssType==='spot'||ssType==='margin') && item.eval && item.shares){
+            item.current_price = Math.round(item.eval / item.shares);
+            // type を明示的に設定
+            item.type = ssType;
+          }
+          const exists=parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
+          if(!exists)parsedItems.push(item);
+        }
+        resEl.textContent+='  ✅ '+items.length+'件検出\n';
       }
-      CHAT_CLD_HIST.push({role:"user", content: txt});
-      if (cr.ok) {
-        CHAT_CLD_HIST.push({role:"assistant", content: cr.text});
+      ok++;
+    }catch(e){
+      resEl.textContent+='  ⚠️ '+e.message+'\n';
+    }
+    await new Promise(r=>setTimeout(r,500));
+  }
+  resEl.textContent+='\n合計 '+parsedItems.length+'件（'+ok+'/'+ssImageList.length+'枚成功）\n\n';
+  if(ssType==='cash'&&parsedItems.length>0){
+    const o=parsedItems[0];
+    resEl.textContent+='💴 買付余力: '+(o.buying_power?.toLocaleString()||'?')+'円\n';
+    resEl.textContent+='   現金:     '+(o.cash?.toLocaleString()||'?')+'円\n';
+    resEl.textContent+='   信用余力: '+(o.margin_power?.toLocaleString()||'?')+'円';
+  } else if(ssType==='spot'||ssType==='margin'){
+    const tag = ssType==='margin' ? '📊信用 ' : '💴現物 ';
+    resEl.textContent+=parsedItems.map(i=>{
+      const cp = i.current_price || (i.eval && i.shares ? Math.round(i.eval/i.shares) : null);
+      const chg = i.chg_amt!=null ? ` 前日比${i.chg_amt>=0?'+':''}${i.chg_amt.toLocaleString()}円(${i.chg_pct>=0?'+':''}${i.chg_pct}%)` : '';
+      return tag+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株'+
+        (i.buy_price?' 取得'+i.buy_price.toLocaleString()+'円':'')+
+        (cp?' 現値'+cp.toLocaleString()+'円':'')+chg;
+    }).join('\n');
+  }else if(ssType==='hist'){
+    resEl.textContent+=parsedItems.map(i=>(i.action==='buy'?'🟢買':'🔴売')+' '+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株×'+(i.price?.toLocaleString()||'?')+'円 ('+(i.date||'日付不明')+')').join('\n');
+  }else if(ssType==='pnl'){
+    resEl.textContent+=parsedItems.map(i=>(i.code||'?')+' '+i.name+'  実現損益'+(i.realized_pnl!=null?(i.realized_pnl>=0?'+':'')+i.realized_pnl?.toLocaleString()+'円':'不明')+' ('+(i.date||'日付不明')+')').join('\n');
+  }else{
+    resEl.textContent+=parsedItems.map(i=>(i.code||'?')+' '+i.name+'  '+(i.tag||'')).join('\n');
+  }
+  if(parsedItems.length>0)document.getElementById('ssApplyBtn').style.display='block';
+  btn.disabled=false; btn.textContent='🤖 Geminiで一括読み取る';
+}
+
+// 取り込みモーダル
+function showImportModal() {
+  if(!parsedItems.length)return;
+  const el=document.getElementById('modalItems');
+  const fmtItem=(item,i,l0,l1)=>'<div class="modal-item"><div class="modal-item-top"><div><div class="modal-item-name">'+l0+'</div><div class="modal-item-meta">'+l1+'</div></div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div></div>';
+  if(ssType==='spot'||ssType==='margin'){
+    const tag = ssType==='margin' ? '📊信用 ' : '💴現物 ';
+    el.innerHTML=parsedItems.map((it,i)=>{
+      const cp = it.current_price || (it.eval && it.shares ? Math.round(it.eval/it.shares) : null);
+      const chgStr = it.chg_amt!=null
+        ? '<span style="color:'+(it.chg_amt>=0?'var(--green)':'var(--red)')+'"> 前日比'+(it.chg_amt>=0?'+':'')+it.chg_amt.toLocaleString()+'円('+(it.chg_pct>=0?'+':'')+it.chg_pct+'%)</span>'
+        : '';
+      const bpStr = it.buy_price ? ' / 取得 '+it.buy_price.toLocaleString()+'円' : ` / 取得 <input type="number" inputmode="decimal" id="mbp${i}" placeholder="建値を入力" style="width:90px;font-size:12px;padding:3px 5px;background:rgba(239,68,68,0.15);border:1px solid var(--red);border-radius:4px;color:var(--text);outline:none">円<span style="font-size:10px;color:var(--t3);margin-left:4px">※画面外なので手動</span>`;
+      return '<div class="modal-item">'+
+        '<div class="modal-item-top"><div>'+
+        '<div class="modal-item-name">'+tag+(it.code||'?')+' '+it.name+'</div>'+
+        '<div class="modal-item-meta">'+
+          (it.shares||'?')+'株'+
+          bpStr+
+          (cp?' / 現値 '+cp.toLocaleString()+'円':'')+chgStr+
+          (it.eval?'<br>評価額: '+it.eval.toLocaleString()+'円':'')+
+        '</div>'+
+        '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
+        '</div>';
+    }).join('');
+  }else if(ssType==='hist'){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.action==='buy'?'🟢買':'🔴売')+' '+(it.code||'?')+' '+it.name,(it.shares||'?')+'株 × '+(it.price?.toLocaleString()||'?')+'円 / '+(it.date||'日付不明'))).join('');
+  }else if(ssType==='pnl'){
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,'実現損益 '+(it.realized_pnl!=null?(it.realized_pnl>=0?'+':'')+it.realized_pnl?.toLocaleString()+'円':'不明')+' / '+(it.date||'日付不明'))).join('');
+  }else if(ssType==='cash'&&parsedItems.length>0){
+    const o=parsedItems[0];
+    el.innerHTML='<div class="modal-item"><div style="font-size:13px;line-height:2;color:var(--text)">'+
+      '💴 買付余力: <b>'+(o.buying_power?.toLocaleString()||'?')+'円</b><br>'+
+      '   現金:     <b>'+(o.cash?.toLocaleString()||'?')+'円</b><br>'+
+      '   信用余力: <b>'+(o.margin_power?.toLocaleString()||'?')+'円</b><br><br>'+
+      '「取り込む」で残金を更新します</div></div>';
+  }else{
+    el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.code||'?')+' '+it.name,(it.current_price?it.current_price.toLocaleString()+'円 / ':'')+( it.tag||'メモなし'))).join('');
+  }
+  document.getElementById('importModal').classList.add('on');
+}
+function closeModal() { document.getElementById('importModal').classList.remove('on'); }
+
+function doImport() {
+  let count=0;
+  let missingBpCount=0; // 建値未入力でcp代用した件数
+  if(ssType==='spot'||ssType==='margin'){
+    const itemType = ssType; // 'spot' or 'margin'
+    for(let i=0; i<parsedItems.length; i++){
+      if(!document.getElementById('mchk'+i)?.checked) continue;
+      const it = parsedItems[i];
+      const bpInput = document.getElementById('mbp'+i);
+      if(bpInput && bpInput.value) it.buy_price = parseFloat(bpInput.value);
+      
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      const cp = it.current_price || (it.eval && it.shares ? Math.round(it.eval/it.shares) : 0);
+      // 保有銘柄に反映（同コード+同タイプで一致）
+      const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===itemType);
+      if(idx>=0){
+        // 既存: 現値（cp）と株数を更新。買値は手動設定が優先（buy_priceがあれば更新）
+        if(cp>0) H[idx].cp = cp;
+        if(it.shares>0) H[idx].sh = it.shares;
+        if(it.buy_price>0) H[idx].bp = it.buy_price;
       } else {
-        CHAT_CLD_HIST.pop();
+        // 新規: buy_price不明なら現値で代用（含み損益が0になるので要手動修正）
+        if(!(it.buy_price>0)) missingBpCount++;
+        H.push({
+          cd: cd||nm,
+          nm,
+          sh: it.shares||0,
+          bp: it.buy_price || cp || 0,
+          cp: cp || it.buy_price || 0,
+          sl: null,
+          tgt: null,
+          memo: it.buy_price>0 ? 'SS取込' : 'SS取込(建値未入力・要修正)',
+          dt: TODAY,
+          type: itemType
+        });
+      }
+      // 振り返り（夕方分析）用の終値データにも保存
+      if(cp > 0){
+        const chgAmt = Number(it.chg_amt) || 0;
+        const chgPct = Number(it.chg_pct) || 0;
+        const chgPerShare = it.shares > 0 ? Math.round(chgAmt / it.shares) : 0;
+        revSsPrices[cd||nm] = {
+          code: cd||nm,
+          name: nm,
+          shares: it.shares||0,
+          price: cp,
+          chg: chgPerShare,
+          chgPct: chgPct,
+          type: itemType
+        };
+      }
+      count++;
+    }
+    sv(KH,H);
+    // revSsPricesを保存（タブ切替後も保持）
+    saveRevSsPrices();
+    // 振り返りタブの表示を更新
+    updateRevSsStatus();
+  }else if(ssType==='hist'){
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      if(T.find(t=>t.cd===cd&&t.p===it.price&&t.dt===it.date&&t.a===it.action))continue;
+      let pnl=null;
+      if(it.action==='buy'){
+        const idx=H.findIndex(h=>h.cd===(cd||nm) && h.type===(it.type||'spot'));
+        if(idx>=0){const ex=H[idx],tot=ex.sh+(it.shares||0);H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+(it.price||0)*(it.shares||0))/tot*10)/10};}
+        else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.price||0,cp:it.price||0,sl:null,tgt:null,memo:'SS取込',dt:it.date||TODAY,type:it.type||'spot'});
+        sv(KH,H);
+      }else{
+        const h=H.find(h=>h.cd===(cd||nm));
+        if(h){pnl=(it.price-h.bp)*(it.shares||0);if(h.sh<=(it.shares||0))H=H.filter(hh=>hh.cd!==h.cd);else h.sh-=(it.shares||0);sv(KH,H);}
+      }
+      T.push({id:Date.now()+Math.random(),a:it.action,cd:cd||nm,nm,sh:it.shares||0,p:it.price||0,dt:it.date||TODAY,pnl}); count++;
+    }
+    sv(KT,T);
+  }else if(ssType==='pnl'){
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      if(T.find(t=>t.cd===cd&&t.dt===it.date&&t.a==='sell'))continue;
+      T.push({id:Date.now()+Math.random(),a:'sell',cd:cd||nm,nm,sh:it.shares||0,p:it.sell_price||0,dt:it.date||TODAY,pnl:it.realized_pnl||0}); count++;
+    }
+    sv(KT,T);
+  }else if(ssType==='cash'){
+    // 余力画面→残金に反映
+    if(parsedItems.length>0){
+      const o=parsedItems[0];
+      const val=o.cash||o.buying_power||0;
+      if(val>0){
+        cash=val; sv(KC,cash);
+        document.getElementById('cashIn').value=cash||'';
+        count=1;
       }
     }
-  } catch(e) {
-    // 単独モードでのエラー（稀）
-    console.error("[chat] sendChatMessage error:", e);
-    if (loadingEl.parentNode) loadingEl.remove();
-    addChatAIMsg(CHAT_MODE === "g" ? "g" : "c", "⚠️ " + e.message, true);
-  } finally {
-    sendBtn.disabled = false;
-    // 再度フォーカス
-    setTimeout(() => inp.focus(), 50);
-    // v0.14: セッションを永続化（最初の送信なら新規 dbAdd、以降は dbPut）
-    saveCurrentChatSession().catch(e =>
-      console.warn("[chat] saveCurrentChatSession failed:", e));
+  }else{
+    for(const it of checked){
+      const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
+      if(!nm)continue;
+      if(W.find(w=>w.cd===(cd||nm)))continue;
+      W.push({cd:cd||nm,nm,tag:it.tag||'',dt:TODAY}); count++;
+    }
+    sv(KW,W);
   }
+  closeModal(); calcS(); rTH(); rHold(); rWatch();
+  if(ssType==='cash'&&count>0) toast('💴 残金を'+cash.toLocaleString()+'円に更新しました');
+  else if(ssType==='spot'||ssType==='margin') {
+    if(missingBpCount>0) toast('⚠️ '+count+'件取込／'+missingBpCount+'件は建値未入力（保有タブで✏️編集してください）');
+    else toast('✅ '+count+'件を取り込み、終値も振り返りに連携しました');
+  }
+  else toast('✅ '+count+'件を取り込みました');
+  parsedItems=[]; ssImageList=[];
+  document.getElementById('ssPreviewList').style.display='none';
+  document.getElementById('ssPreviewGrid').innerHTML='';
+  document.getElementById('ssAnalyzeBtn').style.display='none';
+  document.getElementById('ssApplyBtn').style.display='none';
+  document.getElementById('ssResult').classList.remove('show');
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  v0.14 (Stage 4.3): チャット履歴の IndexedDB 永続化
-// ════════════════════════════════════════════════════════════════════
+// 初期化
+calcS(); rTH(); rWatch();
+// APIキー未設定ならモーダルを表示（.showクラス方式）
+if(!GK||!CK) document.getElementById('keyModal').classList.add('show');
 
-// 自動タイトル: 最初のユーザーメッセージから30字
-function generateChatTitle(){
-  const firstUser = CHAT_MESSAGES.find(m => m.kind === "user");
-  if (!firstUser) return "（無題）";
-  const t = firstUser.text.trim().replace(/\s+/g, " ");
-  return t.length > 30 ? t.slice(0, 30) + "…" : t;
+// 当日の保存済みレポートがあれば復元して表示
+const todayMrn = loadReport(K_MRN, TODAY);
+if (todayMrn) {
+  document.getElementById('mrnOut').innerHTML = todayMrn.html;
+  document.getElementById('mrnBtn').innerHTML = '🌅 再チェックする<br><span style="font-size:11px;opacity:.75">💾 本日 ' + todayMrn.savedAt + ' 保存済み</span>';
+}
+const todayRev = loadReport(K_REV, TODAY);
+if (todayRev) {
+  document.getElementById('revOut').innerHTML = todayRev.html;
+  document.getElementById('revBtn').innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">💾 本日 ' + todayRev.savedAt + ' 保存済み</span>';
+}
+// 履歴を初期表示
+rRevHistory();
+rAzHistory();
+
+  // --- 損切り計算アシスタントロジック (Phase 5 v1.1 - 回転重視) ---
+  // ※ currentRisk / currentRRMult は冒頭(L6-7)で宣言済み。ここで再宣言するとSyntaxErrorで全スクリプト停止。
+
+function isBuyMode() {
+  const ta = document.getElementById('ta');
+  return !ta || ta.value === 'buy';
 }
 
-// 現セッションを保存（CHAT_MESSAGES が空なら何もしない）
-async function saveCurrentChatSession(){
-  if (CHAT_MESSAGES.length === 0) return null;
-  const now = new Date().toISOString();
-  const record = {
-    started_at: CHAT_MESSAGES[0]?.ts || now,
-    updated_at: now,
-    title: generateChatTitle(),
-    mode: CHAT_MODE,
-    ctx_flags: {...CHAT_CTX_FLAGS},
-    messages: [...CHAT_MESSAGES],
-    gem_history: [...CHAT_GEM_HIST],
-    cld_history: [...CHAT_CLD_HIST],
-  };
-  try {
-    if (CURRENT_CHAT_SESSION_ID === null) {
-      // 新規 dbAdd
-      const newId = await dbAdd("chat_sessions", record);
-      CURRENT_CHAT_SESSION_ID = newId;
-      return newId;
+function setRisk(val, btn) {
+    currentRisk = val;
+    btn.parentElement.querySelectorAll('.btn-mini').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    runAssistant();
+}
+
+function setRR(val, btn) {
+    currentRRMult = val;
+    btn.parentElement.querySelectorAll('.btn-mini').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const lbl = document.getElementById('rrLabel');
+    if (lbl) lbl.textContent = `(RR 1:${val})`;
+    runAssistant();
+}
+
+function runAssistant() {
+    const panel = document.getElementById('calcPanel');
+    if (!panel) return;
+    if (!isBuyMode()) { panel.style.display = 'none'; updateRRCalc(); return; }
+    const bp = parseFloat(document.getElementById('tp')?.value);
+    const sh = parseInt(document.getElementById('tsh')?.value) || 0;
+    if (!bp || bp <= 0) { panel.style.display = 'none'; updateRRCalc(); return; }
+    panel.style.display = 'block';
+
+    const rPrice = Math.round(bp * (1 - currentRisk / 100));
+    const tPrice = Math.round(bp * (1 + (currentRisk * currentRRMult) / 100));
+    document.getElementById('suggestSl').textContent = '\u00a5' + rPrice.toLocaleString();
+    document.getElementById('suggestTgt').textContent = '\u00a5' + tPrice.toLocaleString();
+
+    // 資金計算
+    let evalTotal = 0;
+    for (const h of H) { evalTotal += (h.cp || h.bp) * h.sh; }
+    const totalFunds = cash + evalTotal;
+    const lossPerShare = bp - rPrice;
+    const riskAmount = totalFunds * 0.015; // 1.5%リスク基準
+
+    // ATRベース損切り提案（J-Quantsキャッシュから）
+    const code = document.getElementById('tc')?.value?.trim();
+    let atrHtml = '';
+    if (code && weeklyCache) {
+        const entry = findWeeklyEntry(weeklyCache, code);
+        if (entry && entry.atr) {
+            const atrSl = Math.round(bp - entry.atr * 1.5);
+            const atrSlPct = ((bp - atrSl) / bp * 100).toFixed(1);
+            atrHtml = `<div style="font-size:11px;margin-top:6px;padding:5px 8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:8px;color:#f59e0b">` +
+                `\u26a1 ATR\u30d9\u30fcSL: <b>\u00a5${atrSl.toLocaleString()}</b> <span style="opacity:.7">(\u00d71.5 = -${atrSlPct}% / ATR: \u00a5${entry.atr.toLocaleString()})</span></div>`;
+        }
+    }
+
+    // 信用金利コスト（信用かつ日付入力時）
+    let marginCostHtml = '';
+    const ttype = document.getElementById('ttype')?.value;
+    const tdt = document.getElementById('tdt')?.value;
+    if (ttype === 'margin' && tdt && sh > 0) {
+        const days = Math.max(0, Math.floor((new Date() - new Date(tdt)) / 86400000));
+        const marginCost = Math.round(bp * sh * 0.028 * days / 365);
+        if (days > 0) {
+            const dayColor = days >= 30 ? 'var(--red)' : days >= 14 ? 'var(--yellow)' : 'var(--t3)';
+            marginCostHtml = `<div style="font-size:11px;margin-top:6px;padding:5px 8px;background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.2);border-radius:8px;color:${dayColor}">` +
+                `\ud83d\udcb8 \u4fe1\u7528\u91d1\u5229(${days}\u65e5) \u30b3\u30b9\u30c8: \u76ee\u5b89 <b>\u00a5${marginCost.toLocaleString()}</b> <span style="opacity:.7">(2.8%/\u5e74)</span></div>`;
+        }
+    }
+
+    // 損益＆推奨株数＆ポジション比率
+    let pnlHtml = '';
+    let suggHtml = '';
+    let posWarnHtml = '';
+
+    if (sh > 0) {
+        const loss = Math.round(lossPerShare * sh);
+        const profit = Math.round((tPrice - bp) * sh);
+        pnlHtml = `\u640d\u5931 <b style="color:var(--red)">-\u00a5${loss.toLocaleString()}</b> / \u5229\u76ca <b style="color:var(--green)">+\u00a5${profit.toLocaleString()}</b>`;
+        if (loss > riskAmount && riskAmount > 0) {
+            pnlHtml += ` <span style="color:var(--red);font-size:10px">\u26a0\ufe0f \u8a31\u5bb9\u30ea\u30b9\u30af(${Math.round(riskAmount).toLocaleString()}\u5186)\u8d85\u904e</span>`;
+        }
+        // ポジション比率
+        const posVal = bp * sh;
+        if (totalFunds > 0) {
+            const posPct = (posVal / totalFunds * 100).toFixed(1);
+            const posColor = posVal / totalFunds > 0.30 ? 'var(--red)' : posVal / totalFunds > 0.20 ? 'var(--yellow)' : 'var(--t3)';
+            const posLabel = posVal / totalFunds > 0.30 ? ' \u26a0\ufe0f \u904e\u5927' : posVal / totalFunds > 0.20 ? ' \u26a0\ufe0f \u304d\u3064\u3044' : '';
+            posWarnHtml = `<div style="font-size:11px;margin-top:4px;color:${posColor}">\ud83d\udcca \u5168\u8cc7\u91d1\u6bd4: <b>${posPct}%</b>${posLabel} <span style="color:var(--t3)">(25%\u4e0a\u9650\u63a8\u5968)</span></div>`;
+        }
     } else {
-      // 既存 dbPut（id を保持）
-      record.id = CURRENT_CHAT_SESSION_ID;
-      await dbPut("chat_sessions", record);
-      return CURRENT_CHAT_SESSION_ID;
+        pnlHtml = `\u682a\u6570\u3092\u5165\u529b\u3059\u308b\u3068\u91d1\u984d\u3092\u8868\u793a`;
     }
-  } catch(e) {
-    console.error("[chat] saveCurrentChatSession error:", e);
-    throw e;
-  }
-}
 
-// 履歴一覧パネルを開く
-async function openChatHistoryPanel(){
-  const panel = document.getElementById("chatHistoryPanel");
-  panel.classList.add("on");
-  await renderChatHistoryList();
-}
-
-function closeChatHistoryPanel(){
-  document.getElementById("chatHistoryPanel").classList.remove("on");
-}
-
-// 履歴一覧を再描画（updated_at 降順）
-async function renderChatHistoryList(){
-  const list = document.getElementById("chatHistoryList");
-  list.innerHTML = `<div class="chat-history-empty">読込中...</div>`;
-  let sessions;
-  try {
-    sessions = await dbAll("chat_sessions");
-  } catch(e) {
-    console.error("[chat] dbAll(chat_sessions) failed:", e);
-    list.innerHTML = `<div class="chat-history-empty">読込エラー: ${escapeHtml(e.message || "")}</div>`;
-    return;
-  }
-  if (!sessions || sessions.length === 0) {
-    list.innerHTML = `<div class="chat-history-empty">📭 履歴がまだありません<br>会話を始めると自動で記録されます</div>`;
-    return;
-  }
-  // updated_at 降順
-  sessions.sort((a,b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
-
-  const modeLabel = (m) => m === "gc" ? "🤝 合議" : (m === "g" ? "🤖 Gem" : "🧠 Cld");
-  const html = sessions.map(s => {
-    const isCurrent = s.id === CURRENT_CHAT_SESSION_ID;
-    const dt = new Date(s.updated_at || s.started_at);
-    const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-    const msgCount = (s.messages || []).length;
-    const ctxOn = s.ctx_flags ? Object.values(s.ctx_flags).filter(Boolean).length : 0;
-    return `
-      <div class="chat-history-item ${isCurrent ? 'current' : ''}">
-        <div class="chat-history-item-top">
-          <span class="chat-history-item-date">${escapeHtml(dtStr)}</span>
-          <span class="chat-history-item-mode">${modeLabel(s.mode)}</span>
-        </div>
-        <div class="chat-history-item-title">${escapeHtml(s.title || "（無題）")}</div>
-        <div class="chat-history-item-meta">
-          <span>💬 ${msgCount}件</span>
-          ${ctxOn > 0 ? `<span>📌 文脈${ctxOn}個</span>` : ''}
-          ${isCurrent ? '<span class="chat-history-current-badge">今ここ</span>' : ''}
-        </div>
-        <div class="chat-history-item-actions">
-          <button class="chat-history-action-btn" onclick="resumeChatSession(${s.id})">↩ 再開</button>
-          <button class="chat-history-action-btn" onclick="copyChatSessionMarkdown(${s.id})">📋 MD</button>
-          <button class="chat-history-action-btn danger" onclick="deleteChatSession(${s.id})">🗑 削除</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-  list.innerHTML = html;
-}
-
-// セッションを再開（メモリに復元 + UI 再描画）
-async function resumeChatSession(id){
-  // 現セッション未保存なら念のため保存
-  if (CHAT_MESSAGES.length > 0 && CURRENT_CHAT_SESSION_ID !== id) {
-    try { await saveCurrentChatSession(); }
-    catch(e) { console.warn("[chat] save before resume failed:", e); }
-  }
-  let session;
-  try {
-    session = await dbGet("chat_sessions", id);
-  } catch(e) {
-    toast("⚠️ 読込失敗: " + e.message);
-    return;
-  }
-  if (!session) {
-    toast("⚠️ セッションが見つかりません");
-    return;
-  }
-  // メモリに復元
-  CURRENT_CHAT_SESSION_ID = id;
-  CHAT_MODE = session.mode || "gc";
-  CHAT_GEM_HIST = session.gem_history || [];
-  CHAT_CLD_HIST = session.cld_history || [];
-  CHAT_MESSAGES = session.messages || [];
-  // モード/チップUIを反映
-  setChatMode(CHAT_MODE);
-  // メッセージ再描画
-  renderChatMessagesFromMemory();
-  // パネルを閉じる
-  closeChatHistoryPanel();
-  toast(`↩ 再開: ${session.title || "（無題）"}`);
-}
-
-// CHAT_MESSAGES から DOM を再構築（pushToMemory=false でスタック追加なし）
-function renderChatMessagesFromMemory(){
-  const scroll = document.getElementById("chatScroll");
-  scroll.innerHTML = "";
-  if (CHAT_MESSAGES.length === 0) {
-    scroll.innerHTML = `
-      <div class="chat-empty" id="chatEmpty">
-        <div class="emoji">💬</div>
-        <div>会話を始めましょう</div>
-      </div>`;
-    return;
-  }
-  for (const m of CHAT_MESSAGES) {
-    if (m.kind === "user") {
-      addChatUserMsg(m.text, false);
-    } else if (m.kind === "ai") {
-      addChatAIMsg(m.who, m.text, !!m.error, false);
-    } else if (m.kind === "dual") {
-      addChatDualMsg(m.g_text, m.c_text, !!m.g_error, !!m.c_error, false);
+    if (lossPerShare > 0 && totalFunds > 0) {
+        const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
+        const recVal = bp * Math.max(100, recShares);
+        const recPct = (recVal / totalFunds * 100).toFixed(1);
+        suggHtml = `<div style="font-size:11px;color:var(--acc);margin-top:6px;padding-top:6px;border-top:1px dashed rgba(59,130,246,0.3)">` +
+            `\ud83d\udca1 1.5%\u30ea\u30b9\u30af\u57fa\u6e96\u306e\u63a8\u5968\u682a\u6570: <b>${Math.max(100, recShares).toLocaleString()}\u682a</b> ` +
+            `<span style="color:var(--t3)">(${recPct}% \u4ed3\u5165 / \u6700\u5927\u640d\u5931 ${Math.round(riskAmount).toLocaleString()}\u5186)</span></div>`;
     }
-  }
+
+    document.getElementById('suggestPnl').innerHTML = pnlHtml + suggHtml + atrHtml + marginCostHtml + posWarnHtml;
+    updateRRCalc();
 }
 
-// セッション削除
-async function deleteChatSession(id){
-  if (!confirm("このセッションを削除しますか？\n（元に戻せません）")) return;
-  try {
-    await dbDelete("chat_sessions", id);
-  } catch(e) {
-    toast("⚠️ 削除失敗: " + e.message);
-    return;
-  }
-  // 削除したのが現セッションなら新規開始
-  if (id === CURRENT_CHAT_SESSION_ID) {
-    startNewChatSession();
-  }
-  toast("🗑 セッションを削除しました");
-  await renderChatHistoryList();
+function applySuggestions() {
+    const bp = parseFloat(document.getElementById('tp').value);
+    if(!bp) return;
+    document.getElementById('tsl').value = Math.round(bp * (1 - currentRisk / 100));
+    document.getElementById('ttgt').value = Math.round(bp * (1 + (currentRisk * currentRRMult) / 100));
+    updateRRCalc();
+    if (typeof toast === 'function') toast('✅ 損切り・利確を自動入力しました');
 }
 
-// セッションを Markdown 化してコピー
-async function copyChatSessionMarkdown(id){
-  let session;
-  try {
-    session = await dbGet("chat_sessions", id);
-  } catch(e) {
-    toast("⚠️ 読込失敗: " + e.message);
-    return;
-  }
-  if (!session) {
-    toast("⚠️ セッションが見つかりません");
-    return;
-  }
-  const md = buildChatSessionMarkdown(session);
-  await copyMarkdown(md, "チャット履歴");
-}
+function updateRRCalc() {
+    const disp = document.getElementById('rrDisplay');
+    if (!disp) return;
+    if (!isBuyMode()) { disp.style.display = 'none'; return; }
+    const bp = parseFloat(document.getElementById('tp')?.value);
+    const sl = parseFloat(document.getElementById('tsl')?.value);
+    const tgt = parseFloat(document.getElementById('ttgt')?.value);
+    if (!bp) { disp.style.display = 'none'; return; }
+    disp.style.display = 'block';
 
-// 1セッションを Markdown に整形
-function buildChatSessionMarkdown(session){
-  const dt = new Date(session.updated_at || session.started_at || new Date().toISOString());
-  const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-  const modeLabel = session.mode === "gc" ? "🤝 合議" : (session.mode === "g" ? "🤖 Gemini" : "🧠 Claude");
-  const ctxList = session.ctx_flags
-    ? Object.entries(session.ctx_flags).filter(([,v]) => v).map(([k]) => k).join(", ")
-    : "";
+    const slUsed = (sl && sl > 0) ? sl : Math.round(bp * (1 - currentRisk / 100));
+    const slIsActual = !!(sl && sl > 0);
 
-  const lines = [];
-  lines.push(`# 💬 チャット履歴 — ${dtStr} (${modeLabel})`);
-  lines.push("");
-  lines.push(`- タイトル: ${session.title || "（無題）"}`);
-  lines.push(`- モード: ${modeLabel}`);
-  if (ctxList) lines.push(`- 文脈: ${ctxList}`);
-  lines.push(`- メッセージ数: ${(session.messages || []).length}`);
-  lines.push("");
-  lines.push("---");
-  lines.push("");
-
-  for (const m of (session.messages || [])) {
-    if (m.kind === "user") {
-      lines.push(`## 🙋 質問`);
-      lines.push("");
-      lines.push(m.text);
-      lines.push("");
-    } else if (m.kind === "ai") {
-      const head = m.who === "g" ? "🤖 Gemini" : "🧠 Claude";
-      lines.push(`### ${head}${m.error ? " ⚠️" : ""}`);
-      lines.push("");
-      lines.push(m.text);
-      lines.push("");
-    } else if (m.kind === "dual") {
-      lines.push(`### 🤖 Gemini${m.g_error ? " ⚠️" : ""}`);
-      lines.push("");
-      lines.push(m.g_text || "");
-      lines.push("");
-      lines.push(`### 🧠 Claude${m.c_error ? " ⚠️" : ""}`);
-      lines.push("");
-      lines.push(m.c_text || "");
-      lines.push("");
+    if (slUsed >= bp) {
+      disp.innerHTML = "<span style='color:var(--red)'>⚠️ 損切りが買値以上です</span>";
+      return;
     }
-  }
-  lines.push("---");
-  lines.push(`_trade-journal morning.html v0.16 で生成_`);
-  return lines.join("\n");
-}
 
-// ════════════════════════════════════════════════════════════════════
-//  v0.15 (Stage 4.4): 深掘りエントリポイント
-//  朝会/夕会/機能B のカードから「💬 深掘り」で呼び出される
-// ════════════════════════════════════════════════════════════════════
+    // 損切りまでの距離バー
+    const slDistPct = (bp - slUsed) / bp * 100;
+    const barColor = slDistPct <= 3 ? 'var(--green)' : slDistPct <= 6 ? 'var(--yellow)' : 'var(--red)';
+    const barWidth = Math.min(slDistPct * 4, 100).toFixed(0);
+    const barHtml = `<div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin:5px 0 1px;overflow:hidden"><div style="height:100%;width:${barWidth}%;background:${barColor};border-radius:2px;transition:width 0.3s"></div></div>` +
+        `<div style="font-size:10px;color:${barColor};text-align:right">SLまで -${slDistPct.toFixed(1)}%</div>`;
 
-// 深掘りで新規チャットセッションを開始
-//   - 進行中セッションがあれば保存→新規開始
-//   - チャットモーダルを開いて入力欄にプリセット質問を投入
-//   - 文脈フラグはユーザー設定のまま尊重（チップ操作で調整可）
-async function openChatWithDrilldown(promptText, opts={}){
-  const {
-    autoSend = false,    // true なら入力欄に入れずにそのまま送信（実験用）
-    forceMode,           // "gc"|"g"|"c" — 強制モード切替
-  } = opts;
-
-  // 進行中セッションの保存（失敗してもブロッキングしない）
-  if (CHAT_MESSAGES.length > 0) {
-    try { await saveCurrentChatSession(); }
-    catch(e) { console.warn("[chat] save before drilldown failed:", e); }
-  }
-  // 新規セッション準備
-  startNewChatSession();
-
-  // モード強制切替（指定があれば）
-  if (forceMode && ["gc","g","c"].includes(forceMode)) {
-    setChatMode(forceMode);
-  }
-
-  // モーダルを開く
-  openChatModal();
-
-  // 入力欄にプリセット質問を投入
-  setTimeout(() => {
-    const inp = document.getElementById("chatInput");
-    if (!inp) return;
-    if (autoSend) {
-      // 直接送信（自動）
-      inp.value = promptText;
-      autoResizeChatInput(inp);
-      sendChatMessage();
-    } else {
-      // 編集可能な状態でセット（推奨デフォルト）
-      inp.value = promptText;
-      autoResizeChatInput(inp);
-      inp.focus();
-      // カーソルを末尾に
-      inp.setSelectionRange(promptText.length, promptText.length);
+    if (!tgt || tgt <= 0) {
+      const need = Math.round(bp + (bp - slUsed) * currentRRMult);
+      const slNote = slIsActual ? '入力SL基準' : `-${currentRisk}%仓置`;
+      disp.innerHTML = `📐 RR 1:${currentRRMult} 目標価 <span style="color:var(--acc);font-weight:700">¥${need.toLocaleString()}</span> <span style="color:var(--t3);font-size:11px">（${slNote}）</span>${barHtml}`;
+      return;
     }
-  }, 250);
+
+    const rr = (tgt - bp) / (bp - slUsed);
+    const rrText = rr.toFixed(2);
+    let color, label;
+    if (rr >= currentRRMult)           { color = 'var(--green)';  label = `✅ RR 1:${currentRRMult} 達成`; }
+    else if (rr >= currentRRMult * 0.7) { color = 'var(--yellow)'; label = '⚠️ RR やや低 (再検討)'; }
+    else if (rr > 0)                   { color = 'var(--red)';    label = '🚫 RR不足'; }
+    else                               { color = 'var(--red)';    label = '🚫 目標価が買値以下'; }
+
+    const slNote = slIsActual ? '' : ` <span style="color:var(--t3);font-size:10px">(SL仓置-${currentRisk}%)</span>`;
+    disp.innerHTML = `📐 RR 1 : ${rrText} <span style="color:${color};font-weight:700">${label}</span>${slNote}${barHtml}`;
 }
 
-// ── 朝会計画: 市場速報の深掘り ──
-function drilldownChatPlanStep1(){
-  // 文脈チップは自動調整しない（ユーザー設定尊重）
-  // ただし「マクロ」と「計画」は ON にしておくと意味が通りやすい
-  const prompt = "今朝の市場速報について深掘りしたいです。特に今日の戦略にどう影響するか、リスクシナリオも含めて教えてください。";
-  openChatWithDrilldown(prompt);
-}
-
-// ── 朝会計画: Claude計画の深掘り ──
-function drilldownChatPlanStep2(){
-  const prompt = "今朝のClaude計画について、各銘柄の判断根拠をもう少し具体的に説明してください。特に損切り・利確ラインの数値根拠を知りたいです。";
-  openChatWithDrilldown(prompt);
-}
-
-// ── 朝会計画: 全体（市場速報＋計画） ──
-function drilldownChatPlanAll(){
-  const prompt = "今朝の市場速報と計画全体について、整合性が取れているか・見落としているリスクはないかをチェックしてください。改善提案があれば具体的にお願いします。";
-  openChatWithDrilldown(prompt);
-}
-
-// ── 夕会: ズレ銘柄の深掘り ──
-function drilldownChatEveningStock(code4){
-  // 銘柄名を取得（HOLDINGS から）
-  const holding = HOLDINGS.find(h => {
-    const c4 = String(h.code).length === 5 && /^\d{4}0$/.test(h.code) ? h.code.slice(0,4) : String(h.code);
-    return c4 === code4;
-  });
-  const stockName = holding ? holding.name : "";
-  const label = stockName ? `${stockName}(${code4})` : code4;
-  const prompt = `夕会で見た${label}の判断について深掘りしたいです。\n朝の判定と実際の行動にズレがあった原因、次回同じ局面で何を変えるべきかを分析してください。`;
-  openChatWithDrilldown(prompt);
-}
-
-// ── 機能B: 月次戦略の深掘り ──
-async function drilldownChatJournalAnalysis(id){
-  // 期間ラベルだけ取得して質問に含める（戦略本文は文脈チップに任せる）
-  let entry;
-  try {
-    entry = await dbGet("journal_analyses", id);
-  } catch(e) {
-    console.warn("[chat] dbGet failed:", e);
-  }
-  const label = entry ? (entry.period_label || `${entry.period_days}日`) : "直近期間";
-  const prompt = `直近${label}の売買分析・統合戦略について深掘りしたいです。特に以下を教えてください:\n- 一番効いた改善ポイントは何か\n- 自分のトレードスタイルに合うか\n- 明日から実行する場合の優先順位`;
-  openChatWithDrilldown(prompt);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  起動
-// ════════════════════════════════════════════════════════════════════
-
-(async function init(){
-  await loadMacroAlert();
-  await loadMacro();
-  await loadHoldings();
-  await loadWatchlist();  // v0.5: 指値ウォッチをロード（保有銘柄取得後・PRICESが揃ってから）
-
-  // 既に当日の全銘柄判定済みなら ③ も初期表示
-  if (HOLDINGS.length > 0 && HOLDINGS.every(h => JUDGMENTS[h.code])) {
-    renderPlanInitial();
-  }
-
-  // v0.4: バックグラウンドで過去判定を評価
-  setTimeout(() => {
-    evaluatePastJudgments().catch(e => console.warn("[review] background eval failed:", e));
-  }, 2000);
-
-  // v0.10: localStorage LRU → IndexedDB のワンショット移行（初回起動時のみ）
-  setTimeout(() => {
-    migrateJournalCacheToIndexedDB().catch(e =>
-      console.warn("[v0.10] migrate failed:", e));
-  }, 3000);
-})();
+const setupAssistant = () => {
+    ['tp', 'tsh'].forEach(id => document.getElementById(id)?.addEventListener('input', runAssistant));
+    ['tsl', 'ttgt'].forEach(id => document.getElementById(id)?.addEventListener('input', updateRRCalc));
+    // 取引区分・日付変更時も再計算（信用金利コスト表示のため）
+    document.getElementById('ttype')?.addEventListener('change', runAssistant);
+    document.getElementById('tdt')?.addEventListener('change', runAssistant);
+    // 売買モード切替時にも再評価
+    document.getElementById('ta')?.addEventListener('change', () => {
+      if (isBuyMode()) runAssistant();
+      else {
+        const cp = document.getElementById('calcPanel');
+        const rd = document.getElementById('rrDisplay');
+        if (cp) cp.style.display = 'none';
+        if (rd) rd.style.display = 'none';
+      }
+    });
+};
+if (document.readyState !== 'loading') setupAssistant();
+else document.addEventListener('DOMContentLoaded', setupAssistant);
