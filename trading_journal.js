@@ -2034,7 +2034,12 @@ function doImport() {
     // 振り返りタブの表示を更新
     updateRevSsStatus();
   }else if(ssType==='hist'){
-    for(const it of checked){
+    // ✅ Fix: 旧コードは `for(const it of checked)` だったが `checked` が
+    //   未定義で ReferenceError → doImport 即停止 → ボタン無反応の原因。
+    //   spot/margin と同じく mchk{i} のチェック状態でフィルタする方式に統一。
+    for(let i=0; i<parsedItems.length; i++){
+      if(!document.getElementById('mchk'+i)?.checked) continue;
+      const it = parsedItems[i];
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
       if(T.find(t=>t.cd===cd&&t.p===it.price&&t.dt===it.date&&t.a===it.action))continue;
@@ -2052,7 +2057,10 @@ function doImport() {
     }
     sv(KT,T);
   }else if(ssType==='pnl'){
-    for(const it of checked){
+    // ✅ 同上の修正
+    for(let i=0; i<parsedItems.length; i++){
+      if(!document.getElementById('mchk'+i)?.checked) continue;
+      const it = parsedItems[i];
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
       if(T.find(t=>t.cd===cd&&t.dt===it.date&&t.a==='sell'))continue;
@@ -2071,7 +2079,10 @@ function doImport() {
       }
     }
   }else{
-    for(const it of checked){
+    // ✅ 同上の修正（ウォッチリスト分岐）
+    for(let i=0; i<parsedItems.length; i++){
+      if(!document.getElementById('mchk'+i)?.checked) continue;
+      const it = parsedItems[i];
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
       if(W.find(w=>w.cd===(cd||nm)))continue;
@@ -2175,123 +2186,4 @@ function runAssistant() {
     // 信用金利コスト（信用かつ日付入力時）
     let marginCostHtml = '';
     const ttype = document.getElementById('ttype')?.value;
-    const tdt = document.getElementById('tdt')?.value;
-    if (ttype === 'margin' && tdt && sh > 0) {
-        const days = Math.max(0, Math.floor((new Date() - new Date(tdt)) / 86400000));
-        const marginCost = Math.round(bp * sh * 0.028 * days / 365);
-        if (days > 0) {
-            const dayColor = days >= 30 ? 'var(--red)' : days >= 14 ? 'var(--yellow)' : 'var(--t3)';
-            marginCostHtml = `<div style="font-size:11px;margin-top:6px;padding:5px 8px;background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.2);border-radius:8px;color:${dayColor}">` +
-                `\ud83d\udcb8 \u4fe1\u7528\u91d1\u5229(${days}\u65e5) \u30b3\u30b9\u30c8: \u76ee\u5b89 <b>\u00a5${marginCost.toLocaleString()}</b> <span style="opacity:.7">(2.8%/\u5e74)</span></div>`;
-        }
-    }
-
-    // 損益＆推奨株数＆ポジション比率
-    let pnlHtml = '';
-    let suggHtml = '';
-    let posWarnHtml = '';
-
-    if (sh > 0) {
-        const loss = Math.round(lossPerShare * sh);
-        const profit = Math.round((tPrice - bp) * sh);
-        pnlHtml = `\u640d\u5931 <b style="color:var(--red)">-\u00a5${loss.toLocaleString()}</b> / \u5229\u76ca <b style="color:var(--green)">+\u00a5${profit.toLocaleString()}</b>`;
-        if (loss > riskAmount && riskAmount > 0) {
-            pnlHtml += ` <span style="color:var(--red);font-size:10px">\u26a0\ufe0f \u8a31\u5bb9\u30ea\u30b9\u30af(${Math.round(riskAmount).toLocaleString()}\u5186)\u8d85\u904e</span>`;
-        }
-        // ポジション比率
-        const posVal = bp * sh;
-        if (totalFunds > 0) {
-            const posPct = (posVal / totalFunds * 100).toFixed(1);
-            const posColor = posVal / totalFunds > 0.30 ? 'var(--red)' : posVal / totalFunds > 0.20 ? 'var(--yellow)' : 'var(--t3)';
-            const posLabel = posVal / totalFunds > 0.30 ? ' \u26a0\ufe0f \u904e\u5927' : posVal / totalFunds > 0.20 ? ' \u26a0\ufe0f \u304d\u3064\u3044' : '';
-            posWarnHtml = `<div style="font-size:11px;margin-top:4px;color:${posColor}">\ud83d\udcca \u5168\u8cc7\u91d1\u6bd4: <b>${posPct}%</b>${posLabel} <span style="color:var(--t3)">(25%\u4e0a\u9650\u63a8\u5968)</span></div>`;
-        }
-    } else {
-        pnlHtml = `\u682a\u6570\u3092\u5165\u529b\u3059\u308b\u3068\u91d1\u984d\u3092\u8868\u793a`;
-    }
-
-    if (lossPerShare > 0 && totalFunds > 0) {
-        const recShares = Math.floor(riskAmount / lossPerShare / 100) * 100;
-        const recVal = bp * Math.max(100, recShares);
-        const recPct = (recVal / totalFunds * 100).toFixed(1);
-        suggHtml = `<div style="font-size:11px;color:var(--acc);margin-top:6px;padding-top:6px;border-top:1px dashed rgba(59,130,246,0.3)">` +
-            `\ud83d\udca1 1.5%\u30ea\u30b9\u30af\u57fa\u6e96\u306e\u63a8\u5968\u682a\u6570: <b>${Math.max(100, recShares).toLocaleString()}\u682a</b> ` +
-            `<span style="color:var(--t3)">(${recPct}% \u4ed3\u5165 / \u6700\u5927\u640d\u5931 ${Math.round(riskAmount).toLocaleString()}\u5186)</span></div>`;
-    }
-
-    document.getElementById('suggestPnl').innerHTML = pnlHtml + suggHtml + atrHtml + marginCostHtml + posWarnHtml;
-    updateRRCalc();
-}
-
-function applySuggestions() {
-    const bp = parseFloat(document.getElementById('tp').value);
-    if(!bp) return;
-    document.getElementById('tsl').value = Math.round(bp * (1 - currentRisk / 100));
-    document.getElementById('ttgt').value = Math.round(bp * (1 + (currentRisk * currentRRMult) / 100));
-    updateRRCalc();
-    if (typeof toast === 'function') toast('✅ 損切り・利確を自動入力しました');
-}
-
-function updateRRCalc() {
-    const disp = document.getElementById('rrDisplay');
-    if (!disp) return;
-    if (!isBuyMode()) { disp.style.display = 'none'; return; }
-    const bp = parseFloat(document.getElementById('tp')?.value);
-    const sl = parseFloat(document.getElementById('tsl')?.value);
-    const tgt = parseFloat(document.getElementById('ttgt')?.value);
-    if (!bp) { disp.style.display = 'none'; return; }
-    disp.style.display = 'block';
-
-    const slUsed = (sl && sl > 0) ? sl : Math.round(bp * (1 - currentRisk / 100));
-    const slIsActual = !!(sl && sl > 0);
-
-    if (slUsed >= bp) {
-      disp.innerHTML = "<span style='color:var(--red)'>⚠️ 損切りが買値以上です</span>";
-      return;
-    }
-
-    // 損切りまでの距離バー
-    const slDistPct = (bp - slUsed) / bp * 100;
-    const barColor = slDistPct <= 3 ? 'var(--green)' : slDistPct <= 6 ? 'var(--yellow)' : 'var(--red)';
-    const barWidth = Math.min(slDistPct * 4, 100).toFixed(0);
-    const barHtml = `<div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin:5px 0 1px;overflow:hidden"><div style="height:100%;width:${barWidth}%;background:${barColor};border-radius:2px;transition:width 0.3s"></div></div>` +
-        `<div style="font-size:10px;color:${barColor};text-align:right">SLまで -${slDistPct.toFixed(1)}%</div>`;
-
-    if (!tgt || tgt <= 0) {
-      const need = Math.round(bp + (bp - slUsed) * currentRRMult);
-      const slNote = slIsActual ? '入力SL基準' : `-${currentRisk}%仓置`;
-      disp.innerHTML = `📐 RR 1:${currentRRMult} 目標価 <span style="color:var(--acc);font-weight:700">¥${need.toLocaleString()}</span> <span style="color:var(--t3);font-size:11px">（${slNote}）</span>${barHtml}`;
-      return;
-    }
-
-    const rr = (tgt - bp) / (bp - slUsed);
-    const rrText = rr.toFixed(2);
-    let color, label;
-    if (rr >= currentRRMult)           { color = 'var(--green)';  label = `✅ RR 1:${currentRRMult} 達成`; }
-    else if (rr >= currentRRMult * 0.7) { color = 'var(--yellow)'; label = '⚠️ RR やや低 (再検討)'; }
-    else if (rr > 0)                   { color = 'var(--red)';    label = '🚫 RR不足'; }
-    else                               { color = 'var(--red)';    label = '🚫 目標価が買値以下'; }
-
-    const slNote = slIsActual ? '' : ` <span style="color:var(--t3);font-size:10px">(SL仓置-${currentRisk}%)</span>`;
-    disp.innerHTML = `📐 RR 1 : ${rrText} <span style="color:${color};font-weight:700">${label}</span>${slNote}${barHtml}`;
-}
-
-const setupAssistant = () => {
-    ['tp', 'tsh'].forEach(id => document.getElementById(id)?.addEventListener('input', runAssistant));
-    ['tsl', 'ttgt'].forEach(id => document.getElementById(id)?.addEventListener('input', updateRRCalc));
-    // 取引区分・日付変更時も再計算（信用金利コスト表示のため）
-    document.getElementById('ttype')?.addEventListener('change', runAssistant);
-    document.getElementById('tdt')?.addEventListener('change', runAssistant);
-    // 売買モード切替時にも再評価
-    document.getElementById('ta')?.addEventListener('change', () => {
-      if (isBuyMode()) runAssistant();
-      else {
-        const cp = document.getElementById('calcPanel');
-        const rd = document.getElementById('rrDisplay');
-        if (cp) cp.style.display = 'none';
-        if (rd) rd.style.display = 'none';
-      }
-    });
-};
-if (document.readyState !== 'loading') setupAssistant();
-else document.addEventListener('DOMContentLoaded', setupAssistant);
+    const td
