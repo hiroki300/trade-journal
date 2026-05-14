@@ -2,7 +2,7 @@
   "name": "Trade Journal",
   "short_name": "TradeJournal",
   "description": "株式トレード記録・AI分析アプリ",
-  "start_url": "/trade-journal/trading_journal.html",
+  "start_url": "/trade-journal/index.html",
   "scope": "/trade-journal/",
   "display": "standalone",
   "background_color": "#0b0f18",

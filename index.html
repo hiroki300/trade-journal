@@ -181,6 +181,22 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sb"><div class="sl">実現損益</div><div class="sv" id="sr">¥0</div><div class="ss" id="stc">0件</div></div>
   </div>
   <div id="dh"></div><div id="dt" style="margin-top:8px"></div>
+  <!-- ========= Phase 3 朝会レポート (Mon 05:00 JST 自動更新) ========= -->
+  <div id="mr-section" style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+    <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span id="mr-gen" style="opacity:.6"></span></div>
+
+    <div class="sec-lbl">🌍 マクロ判定</div>
+    <div id="dmacro" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--t2)">読み込み中…</div>
+
+    <div class="sec-lbl">🔥 ピックアップ銘柄</div>
+    <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
+
+    <div class="sec-lbl">📅 決算カレンダー (推定 ±3日)</div>
+    <div id="dearnings" style="margin-bottom:14px">読み込み中…</div>
+
+    <div class="sec-lbl">📊 動意テーマ (週次)</div>
+    <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
+  </div>
 </div>
 
 <div class="page" id="page-trade">
@@ -380,6 +396,136 @@ function rDash() {
   const te = document.getElementById('dt');
   const rec = [...T].reverse().slice(0, 3);
   te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
+  // Phase 3: 朝会レポートを毎回読み直し (タブ切替時にも最新表示)
+  loadMorningReports();
+}
+
+// ========= Phase 3 朝会レポート (stock-checker バックエンド連携) =========
+const PUB_BASE = 'https://raw.githubusercontent.com/hiroki300/trade-journal-data/main';
+
+async function _fetchJSON(name) {
+  try {
+    const r = await fetch(PUB_BASE + '/' + name, {cache: 'no-store'});
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function loadMorningReports() {
+  const [macro, pickup, earn, themes] = await Promise.all([
+    _fetchJSON('macro_state.json'),
+    _fetchJSON('pickup_stocks.json'),
+    _fetchJSON('earnings_calendar.json'),
+    _fetchJSON('industry_report.json'),
+  ]);
+  renderMacro(macro);
+  renderPickup(pickup);
+  renderEarnings(earn);
+  renderThemes(themes);
+  const gen = (pickup && pickup.generated_at) || '';
+  document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
+}
+
+function _escape(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderMacro(d) {
+  const el = document.getElementById('dmacro');
+  if (!d) { el.textContent = '取得できませんでした'; return; }
+  const regime = d.regime || '-';
+  const colorMap = {normal:'#10b981', caution:'#f59e0b', storm:'#ef4444', halt:'#ef4444'};
+  const regimeColor = colorMap[regime] || '#94a3b8';
+  el.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+    '<span style="font-size:14px;font-weight:700;color:' + regimeColor + '">' + _escape(regime).toUpperCase() + '</span>' +
+    '<span style="font-size:10px;color:var(--t3)">日経HV ' + _escape(d.hv_20d == null ? '-' : d.hv_20d) + '% / MA25乖離 ' + _escape(d.ma25_dev == null ? '-' : d.ma25_dev) + '%</span>' +
+    '</div>' +
+    '<div style="font-size:11px;color:var(--t2);line-height:1.5">' + _escape(d.summary || '') + '</div>';
+}
+
+function renderPickup(d) {
+  const el = document.getElementById('dpickup');
+  if (!d || !d.stocks || d.stocks.length === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">ピックアップ対象なし (次回月曜 05:00 JST に更新)</div>';
+    return;
+  }
+  const html = d.stocks.map(s => {
+    const sourceTag = s.extraction_source === 'fins_summary'
+      ? '<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px">📊数値のみ</span>'
+      : '';
+    const warningBadge = s.warning_flag
+      ? '<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px">⚠️ 警戒</span>'
+      : '';
+    const skip = s.skip_recommendation ? ' (skip推奨)' : '';
+    return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">' +
+      '<div><span style="font-size:16px">' + s.level_label + '</span> <span style="font-size:14px;font-weight:700">' + _escape(s.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + s.code + '</span>' + sourceTag + warningBadge + '</div>' +
+      '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--acc)">tier ' + _escape(s.tier) + '</div><div style="font-size:10px;color:var(--t3)">EQ ' + s.entry_quality + skip + '</div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px">' +
+      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">価格</div><div style="font-size:11px;font-family:monospace;font-weight:700">' + Math.round(s.price).toLocaleString() + '</div></div>' +
+      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">損切</div><div style="font-size:11px;font-family:monospace;color:var(--red)">' + Math.round(s.stop_loss).toLocaleString() + '</div></div>' +
+      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">目標</div><div style="font-size:11px;font-family:monospace;color:var(--green)">' + Math.round(s.target).toLocaleString() + '</div></div>' +
+      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">出来高比</div><div style="font-size:11px;font-family:monospace;font-weight:700">×' + s.vol_ratio + '</div></div>' +
+      '</div>' +
+      (s.synthesis_notes ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);border-radius:6px;padding:8px;margin-top:4px">' + _escape(s.synthesis_notes) + '</div>' : '') +
+      (s.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(s.warning_reason) + '</div>' : '') +
+      '</div>';
+  }).join('');
+  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:6px">priority ' + d.execution_summary.priority_count + ' / attention ' + d.execution_summary.attention_count + ' / watch ' + d.execution_summary.watch_count + '</div>' + html;
+}
+
+function renderEarnings(d) {
+  const el = document.getElementById('dearnings');
+  if (!d) { el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">取得できませんでした</div>'; return; }
+  const upcoming = d.upcoming_7d || [];
+  const recent = d.recent_3d || [];
+  if (upcoming.length === 0 && recent.length === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">直近の決算なし</div>';
+    return;
+  }
+  const confColorMap = {high:'var(--green)', medium:'var(--yellow)', low:'var(--t3)'};
+  let html = '';
+  if (upcoming.length) {
+    html += '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">▶ 今後 7 日以内 (' + upcoming.length + '件)</div>';
+    html += upcoming.map(e => {
+      const confColor = confColorMap[e.estimation_confidence] || 'var(--t3)';
+      return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
+        '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + e.code + ' / rank ' + e.rank + '</span></div>' +
+        '<div style="text-align:right"><div style="font-size:11px;font-family:monospace">' + e.estimated_disclosure_date + ' <span style="color:' + confColor + '">●</span></div><div style="font-size:9px;color:var(--t3)">あと ' + e.days_until_estimated + ' 日 (' + e.estimation_confidence + ')</div></div>' +
+        '</div>';
+    }).join('');
+  }
+  if (recent.length) {
+    html += '<div style="font-size:10px;color:var(--t3);margin:8px 0 4px">◀ 過去 3 日に決算済 (' + recent.length + '件)</div>';
+    html += recent.map(e =>
+      '<div style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
+      '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + e.code + ' / rank ' + e.rank + '</span></div>' +
+      '<div style="text-align:right"><div style="font-size:11px;font-family:monospace;color:var(--t3)">' + e.disclosure_date + '</div><div style="font-size:9px;color:var(--t3)">' + e.days_ago + ' 日前</div></div>' +
+      '</div>'
+    ).join('');
+  }
+  el.innerHTML = html;
+}
+
+function renderThemes(d) {
+  const el = document.getElementById('dthemes');
+  if (!d || !d.top_themes || d.top_themes.length === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">テーマレポート準備中</div>';
+    return;
+  }
+  el.innerHTML = d.top_themes.map(t => {
+    const stocks = (t.top_stocks || []).slice(0, 3).map(s => s.code + ' ' + (s.name || '').slice(0, 12)).join(' / ');
+    return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
+      '<div><span style="font-size:13px;font-weight:700;color:var(--acc)">#' + t.rank + ' ' + _escape(t.name) + '</span></div>' +
+      '<div style="font-size:10px;color:var(--t3);font-family:monospace">score ' + t.score + ' / ' + t.stock_count + '銘柄</div>' +
+      '</div>' +
+      '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">' + _escape(stocks) + '</div>' +
+      (t.news_summary ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">📰 ' + _escape(t.news_summary) + '</div>' : '') +
+      '</div>';
+  }).join('');
 }
 
 function hHTML(h, compact) {
