@@ -14,37 +14,63 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap');
 :root{
-  --bg:#0b0f18;--s1:#111827;--s2:#1a2236;--border:#1e2d45;
-  --acc:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;
+  /* Phase 3.3 (2026-05-14): ポップで明るい配色に変更、視認性最優先 */
+  --bg:#fef9f3;            /* 薄いクリーム背景 (暖色だが目に優しい) */
+  --s1:#ffffff;            /* メインカード (純白) */
+  --s2:#f1f5f9;            /* サブカード (slate-100) */
+  --border:#e2e8f0;        /* slate-200 (柔らかいライン) */
+  --acc:#6366f1;           /* indigo-500 (本文アクセント) */
+  --acc-soft:#eef2ff;      /* indigo-50 (背景アクセント) */
+  --green:#10b981;         /* 上昇 / OK */
+  --green-soft:#d1fae5;
+  --red:#f43f5e;           /* 下落 / 警告 (rose-500) */
+  --red-soft:#ffe4e6;
+  --yellow:#f59e0b;        /* 注意 */
+  --yellow-soft:#fef3c7;
+  --orange:#fb923c;        /* 強調 (orange-400) */
+  --purple:#a855f7;        /* AI 分析 */
+  --purple-soft:#f3e8ff;
+  --pink:#ec4899;          /* シニアFMの本音 (最重要アドバイス) */
+  --pink-soft:#fce7f3;
   --gem:#4285f4;--cld:#d97706;
-  --text:#e2e8f0;--t2:#94a3b8;--t3:#4b6088;
+  --text:#1f2937;          /* slate-800 (本文、十分なコントラスト) */
+  --t2:#4b5563;            /* slate-600 (サブ本文) */
+  --t3:#94a3b8;            /* slate-400 (補助情報) */
+  --shadow:0 2px 8px rgba(15,23,42,.06);
+  --shadow-lg:0 4px 16px rgba(15,23,42,.10);
   --font:'Noto Sans JP',sans-serif;--mono:'JetBrains Mono',monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 button,select,input,.tab,.ss-type,.ss-zone,.mode-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation;cursor:pointer;}
 html,body{height:100%;}
 body{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;flex-direction:column;}
-header{padding:12px 16px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--s1);}
-.logo{font-size:15px;font-weight:700;color:#fff;}.logo span{color:var(--acc);}
-#ds{font-size:11px;color:var(--t3);font-family:var(--mono);}
-nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0;}
-.tab{flex:1;padding:9px 4px 8px;text-align:center;font-size:10px;font-weight:700;color:var(--t3);border-bottom:2px solid transparent;cursor:pointer;transition:color .15s,border-color .15s;}
-.tab .ti{font-size:15px;display:block;margin-bottom:1px;}
-.tab.on{color:var(--acc);border-bottom-color:var(--acc);}
+/* Phase 3.3: ポップ配色補強 */
+.sec-lbl{font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;letter-spacing:.03em;}
+.btn,button{transition:transform .12s,box-shadow .12s;}
+.btn:active,button:active{transform:scale(.98);}
+select,input,textarea{color:var(--text);}
+
+header{padding:14px 16px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:linear-gradient(135deg,#fff7ed,#ffffff);box-shadow:var(--shadow);}
+.logo{font-size:16px;font-weight:700;color:var(--text);}.logo span{color:var(--acc);background:linear-gradient(135deg,#6366f1,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+#ds{font-size:11px;color:var(--t2);font-family:var(--mono);}
+nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex-shrink:0;box-shadow:var(--shadow);}
+.tab{flex:1;padding:11px 4px 9px;text-align:center;font-size:10px;font-weight:700;color:var(--t3);border-bottom:3px solid transparent;cursor:pointer;transition:color .2s,border-color .2s,background .2s;}
+.tab .ti{font-size:17px;display:block;margin-bottom:2px;}
+.tab.on{color:var(--acc);border-bottom-color:var(--acc);background:var(--acc-soft);}
 .pages{flex:1;overflow:hidden;position:relative;min-height:0;}
 .page{position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 72px;display:none;}
 .page::-webkit-scrollbar{width:2px;}.page::-webkit-scrollbar-thumb{background:var(--border);}
-.cash-row{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px;}
+.cash-row{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:12px;box-shadow:var(--shadow);}
 .cash-row label{font-size:11px;color:var(--t3);white-space:nowrap;}
 .cash-row input{flex:1;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:18px;font-weight:700;text-align:right;outline:none;min-width:0;}
 .cash-row span{font-size:12px;color:var(--t3);}
 .sum-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px;}
-.sb{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px;}
+.sb{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:var(--shadow);}
 .sl{font-size:9px;color:var(--t3);margin-bottom:3px;letter-spacing:.04em;}
 .sv{font-family:var(--mono);font-size:15px;font-weight:700;}
 .ss{font-size:9px;color:var(--t3);margin-top:2px;}
 .up{color:var(--green);}.dn{color:var(--red);}
-.hrow{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:7px;}
+.hrow{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:9px;box-shadow:var(--shadow);}
 .hrt{display:flex;justify-content:space-between;align-items:center;}
 .hnm{font-size:14px;font-weight:700;}.hcd{font-size:10px;color:var(--t3);font-family:var(--mono);margin-top:1px;}
 .hpnl{font-family:var(--mono);font-size:16px;font-weight:700;}.hpct{font-size:10px;text-align:right;margin-top:1px;}
@@ -198,6 +224,8 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
 
     <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
+    <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:10px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
+    <div id="comparePanel" style="display:none;margin-bottom:14px"></div>
     <div id="dcandidates" style="margin-bottom:14px">読み込み中…</div>
   </div>
 </div>
@@ -693,13 +721,13 @@ async function analyzeCandidate(code4) {
   if (!panel) return;
 
   // 既に展開済 + 結果ありなら閉じる
-  if (panel.style.display === 'block' && panel.textContent && !panel.textContent.includes('合議中')) {
+  if (panel.style.display === 'block' && !panel.innerHTML.includes('合議中') && panel.innerHTML.length > 50) {
     panel.style.display = 'none'; return;
   }
   // キャッシュヒット
   if (window._candAICache[code4]) {
     panel.style.display = 'block';
-    panel.textContent = window._candAICache[code4];
+    _renderAIResult(panel, code4);
     return;
   }
 
@@ -725,7 +753,9 @@ async function analyzeCandidate(code4) {
   ).join('\n');
 
   const prompt =
-    'あなたは運用歴25年の日本株シニアファンドマネージャー。Google検索で今日の最新ニュース・材料・需給を必ず調べてから、短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) で買うかどうかを断言してください。曖昧な表現は禁止、数字で具体的に。\n\n' +
+    'あなたは運用歴25年の日本株シニアファンドマネージャー。\n\n' +
+    '⚠️ 重要: 必ず Google 検索を実行して「' + s.name + ' 速報」「' + s.name + ' ニュース 今日」「' + s.code + ' 出来高 最新」「' + s.name + ' 決算」など複数クエリで **当日 (' + new Date().toISOString().slice(0,10) + ') の最新情報** を取得してから回答してください。前日終値ベースのデータは参考に留め、当日の場中の値動き・出来高・速報・関連業界動向を最優先で評価。\n\n' +
+    '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) で買うかどうかを断言。曖昧表現は禁止、数字で具体的に。\n\n' +
     '【候補銘柄】\n' +
     s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', score ' + (s.total_score || '-') + ')\n' +
     '現値: ' + Math.round(s.current_price).toLocaleString() + '円\n' +
@@ -736,7 +766,9 @@ async function analyzeCandidate(code4) {
     '次回決算: ' + (s.next_earnings || '-') + '\n\n' +
     '【指値ライン】\n' + levelsTxt + '\n\n' +
     (pickupEntry ? '【Sonnet 事前分析 (Deep Insight)】\n' + (pickupEntry.synthesis_notes || '(なし)') + '\n' + (pickupEntry.warning_reason ? '警告: ' + pickupEntry.warning_reason + '\n' : '') + '\n' : '') +
-    '【依頼】超一流FMとして以下を答えてください:\n\n' +
+    '【依頼】超一流FMとして以下の順で答えてください。**最初の「シニアFMの本音」が最重要**:\n\n' +
+    '## 【シニアFMの本音】\n' +
+    '自分のファンドでこの銘柄を買うか? **30字以内で率直に断言**。例: 「今すぐ買い、指値2934円で 100株」「材料弱い、見送り」「指値到達まで待つ」など、行動が一意に決まる形で。\n\n' +
     '## 【売買判断】\n' +
     '「今すぐ買い」「指値で待つ」「見送り」のどれか1つを断言、理由を3行で。\n\n' +
     '## 【推奨エントリー価格】\n' +
@@ -746,24 +778,163 @@ async function analyzeCandidate(code4) {
     '推奨エントリーから -8% を基準に具体的な価格 (円) を1つ。テクニカル節目も考慮。\n\n' +
     '## 【利確目標】\n' +
     '推奨エントリーから RR 1:2 (= +16%) を基準に第1目標。可能なら最終目標も。\n\n' +
-    '## 【最新材料・リスク】\n' +
-    'Google検索で調べた直近のニュース・決算前後の動き・最大リスク要因を 1 つずつ。\n\n' +
-    '## 【シニアFMの本音】\n' +
-    '自分のファンドでこの銘柄を買うか? 率直に一言で。';
+    '## 【今日の最新材料・リスク】\n' +
+    'Google検索で取得した **本日の動き** (場中の値動き・速報・出来高変化)、直近の決算/材料、最大リスク要因を 1 つずつ。';
 
   try {
     const [gRes, cRes] = await Promise.all([
       callGemini(prompt, null, null).catch(e => '⚠️ Gemini: ' + e.message),
       callClaude(prompt, null, null).catch(e => '⚠️ Claude: ' + e.message),
     ]);
-    const out =
-      '🤖 Gemini (最新ニュース・需給):\n' + gRes +
-      '\n\n━━━━━━━━━━━━━━━\n\n' +
-      '🧠 Claude (戦略・指値判断):\n' + cRes;
-    window._candAICache[code4] = out;
-    panel.textContent = out;
+    const fmGem = _extractHonne(gRes);
+    const fmCld = _extractHonne(cRes);
+    const detailHTML =
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🤖 Gemini (本日の市場情報):</div>' +
+      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(gRes) + '</div>' +
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略・指値判断):</div>' +
+      '<div style="background:#fff;border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(cRes) + '</div>';
+    window._candAICache[code4] = {fmGem, fmCld, detailHTML};
+    _renderAIResult(panel, code4);
   } catch (e) {
     panel.textContent = '⚠️ ' + e.message;
+  }
+}
+
+// ============================================================
+//  Phase 3.3: 本音抽出・整形・一括比較ヘルパー
+// ============================================================
+
+// LLM 出力 (Markdown 風) から ## 【シニアFMの本音】 セクションを抜き出す
+function _extractHonne(text) {
+  if (!text) return '';
+  // 「シニアFMの本音」「本音」「結論」あたりを柔軟に拾う
+  const patterns = [
+    /##\s*【シニアFMの本音】\s*\n+([\s\S]*?)(?=\n##|\n━|$)/,
+    /##\s*【本音】\s*\n+([\s\S]*?)(?=\n##|\n━|$)/,
+    /##\s*【結論】\s*\n+([\s\S]*?)(?=\n##|\n━|$)/,
+    /シニアFMの本音[::\s]*\n*([\s\S]*?)(?=\n##|\n━|\n\n|$)/,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m && m[1]) return m[1].trim().split('\n')[0].slice(0, 80);
+  }
+  // フォールバック: 最初の 80 字
+  return text.trim().slice(0, 80);
+}
+
+function _renderAIResult(panel, code4) {
+  const cache = window._candAICache[code4];
+  if (!cache) return;
+  const {fmGem, fmCld, detailHTML} = cache;
+  panel.innerHTML =
+    // ━━━ 本音を最上段に大きく表示 ━━━
+    '<div style="background:linear-gradient(135deg,var(--pink-soft),var(--purple-soft));border:2px solid var(--pink);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
+    '<div style="font-size:11px;color:var(--pink);font-weight:700;margin-bottom:8px;letter-spacing:.05em">💬 シニアFMの本音 (結論ファースト)</div>' +
+    '<div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:6px">' +
+    '<span style="font-size:10px;color:var(--gem);font-weight:700">🤖 Gemini</span> ' + _escape(fmGem) +
+    '</div>' +
+    '<div style="font-size:13px;color:var(--text);line-height:1.6">' +
+    '<span style="font-size:10px;color:var(--cld);font-weight:700">🧠 Claude</span> ' + _escape(fmCld) +
+    '</div>' +
+    '</div>' +
+    // ━━━ 詳細セクション (折りたたみ) ━━━
+    '<details style="background:var(--s2);border-radius:10px;padding:8px 12px;border:1px solid var(--border)">' +
+    '<summary style="cursor:pointer;font-size:11px;color:var(--t2);font-weight:600;padding:4px 0">▼ 詳細分析 (売買判断 / 推奨エントリー / 損切り / 利確 / 材料・リスク)</summary>' +
+    '<div style="margin-top:10px">' + detailHTML + '</div>' +
+    '</details>';
+}
+
+// ============================================================
+//  一括比較: 複数候補から優先順位 Top 3 を選定
+// ============================================================
+async function compareCandidates() {
+  const btn = document.getElementById('compareBtn');
+  const panel = document.getElementById('comparePanel');
+  if (!panel || !btn) return;
+
+  if (panel.style.display === 'block' && panel.innerHTML.length > 100) {
+    panel.style.display = 'none'; return;
+  }
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="padding:14px;color:var(--t2);font-size:12px">🤝 GeminiとClaudeが全候補を比較中...</div>';
+
+  const [watchlist, pickup] = await Promise.all([
+    _fetchJSON('limit_watchlist.json'),
+    _fetchJSON('pickup_stocks.json'),
+  ]);
+  if (!watchlist || watchlist.length === 0) {
+    panel.innerHTML = '<div style="padding:14px;color:var(--red);font-size:12px">⚠️ 候補データが取得できませんでした</div>';
+    return;
+  }
+
+  const pickupMap = {};
+  if (pickup && pickup.stocks) for (const p of pickup.stocks) pickupMap[p.code] = p;
+
+  // 通知済 + 接近 のみを比較対象 (待機は除外、深いディスカウントで動かない)
+  const targets = watchlist.filter(s => {
+    if (!s.levels || s.levels.length === 0) return false;
+    const closest = Math.min(...s.levels.map(l => l.discount_pct ?? 99));
+    const hasNotified = s.levels.some(l => l.notified);
+    return hasNotified || closest <= 5.0;
+  }).slice(0, 12);   // 12 銘柄 cap (プロンプト膨張防止)
+
+  if (targets.length === 0) {
+    panel.innerHTML = '<div style="padding:14px;color:var(--t3);font-size:12px">🤔 通知済 or 接近の候補が無いため比較対象なし</div>';
+    return;
+  }
+
+  const listTxt = targets.map((s, i) => {
+    const pick = pickupMap[s.code + '0'];
+    const lv = (s.levels || []).map(l => Math.round(l.price) + '円(-' + l.discount_pct + '%)' + (l.notified ? '●' : '')).join(', ');
+    return (i + 1) + '. ' + s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', 現値 ' + Math.round(s.current_price) + '円, vol×' + (s.vol_ratio || '-') + (s.squeeze_candidate ? ', 🚀踏み上げ' : '') + ')\n' +
+      '   指値: ' + lv + '\n' +
+      '   次回決算: ' + (s.next_earnings || '-') +
+      (pick && pick.synthesis_notes ? '\n   Sonnet分析: ' + pick.synthesis_notes.slice(0, 120) : '');
+  }).join('\n\n');
+
+  const prompt =
+    'あなたは運用歴25年の日本株シニアファンドマネージャー。\n\n' +
+    '⚠️ 重要: 必ず Google 検索で当日 (' + new Date().toISOString().slice(0, 10) + ') の市場全体の動き・各銘柄の本日速報を取得してから回答。前日データではなく当日の動きで判断。\n\n' +
+    '【比較対象 ' + targets.length + ' 銘柄】\n' + listTxt + '\n\n' +
+    '【依頼】短期回転戦略 (損切り-8%/RR2/数日〜数週間保有) の視点で、上記から **今日エントリーを優先すべき Top 3** を選び、以下フォーマットで答えてください:\n\n' +
+    '## 🥇 第1位: <コード> <銘柄名>\n' +
+    '- 推奨指値: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
+    '- 1 位の理由 (他候補との比較で何が決定的か、2-3 行)\n' +
+    '- 本日の決定打となる材料・速報\n\n' +
+    '## 🥈 第2位: <コード> <銘柄名>\n' +
+    '- 推奨指値・損切り・目標\n' +
+    '- 2 位の理由\n\n' +
+    '## 🥉 第3位: <コード> <銘柄名>\n' +
+    '- 同上\n\n' +
+    '## 📊 全体比較サマリ\n' +
+    '残りの候補について、見送り推奨/様子見/微妙 の振り分けを 1 行ずつ。\n\n' +
+    '## 💬 本音\n' +
+    '今日この中から1銘柄だけ買うなら? 30字以内で断言。';
+
+  try {
+    const [gRes, cRes] = await Promise.all([
+      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: ' + e.message),
+      callClaude(prompt, null, null).catch(e => '⚠️ Claude: ' + e.message),
+    ]);
+    const honneG = _extractHonne(gRes);
+    const honneC = _extractHonne(cRes);
+    panel.innerHTML =
+      '<div style="background:linear-gradient(135deg,var(--pink-soft),var(--purple-soft));border:2px solid var(--pink);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
+      '<div style="font-size:11px;color:var(--pink);font-weight:700;margin-bottom:8px;letter-spacing:.05em">💬 本音 — 今日 1 銘柄選ぶなら</div>' +
+      '<div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:6px"><span style="font-size:10px;color:var(--gem);font-weight:700">🤖 Gemini</span> ' + _escape(honneG) + '</div>' +
+      '<div style="font-size:13px;color:var(--text);line-height:1.6"><span style="font-size:10px;color:var(--cld);font-weight:700">🧠 Claude</span> ' + _escape(honneC) + '</div>' +
+      '</div>' +
+      '<details open style="background:var(--s2);border-radius:10px;padding:8px 12px;border:1px solid var(--border)">' +
+      '<summary style="cursor:pointer;font-size:11px;color:var(--t2);font-weight:600;padding:4px 0">▼ Top3 詳細 + 全体比較</summary>' +
+      '<div style="margin-top:10px">' +
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🤖 Gemini (本日の市場動向 + 比較):</div>' +
+      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(gRes) + '</div>' +
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略的優先順位):</div>' +
+      '<div style="background:#fff;border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(cRes) + '</div>' +
+      '</div>' +
+      '</details>';
+  } catch (e) {
+    panel.innerHTML = '<div style="padding:14px;color:var(--red);font-size:12px">⚠️ ' + e.message + '</div>';
   }
 }
 
