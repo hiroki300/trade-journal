@@ -196,6 +196,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
     <div class="sec-lbl">📊 動意テーマ (週次)</div>
     <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
+
+    <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
+    <div id="dcandidates" style="margin-bottom:14px">読み込み中…</div>
   </div>
 </div>
 
@@ -412,16 +415,18 @@ async function _fetchJSON(name) {
 }
 
 async function loadMorningReports() {
-  const [macro, pickup, earn, themes] = await Promise.all([
+  const [macro, pickup, earn, themes, watch] = await Promise.all([
     _fetchJSON('macro_state.json'),
     _fetchJSON('pickup_stocks.json'),
     _fetchJSON('earnings_calendar.json'),
     _fetchJSON('industry_report.json'),
+    _fetchJSON('limit_watchlist.json'),
   ]);
   renderMacro(macro);
   renderPickup(pickup);
   renderEarnings(earn);
   renderThemes(themes);
+  renderCandidates(watch, pickup);
   const gen = (pickup && pickup.generated_at) || '';
   document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
 }
@@ -526,6 +531,240 @@ function renderThemes(d) {
       (t.news_summary ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">📰 ' + _escape(t.news_summary) + '</div>' : '') +
       '</div>';
   }).join('');
+}
+
+// ============================================================
+//  Phase 3.2: 「💡 買い候補」セクション (LINE 通知 + 指値接近)
+// ============================================================
+//
+//   limit_watchlist.json と pickup_stocks.json を統合し、買い候補を
+//   3 カテゴリに分類して表示。各カードに Gemini Search + Claude
+//   合議分析ボタンを置き、その場で売買判断を支援する。
+//
+//   ピックアップ統合: pickup_stocks.json の priority 銘柄は最上段に
+//   フラグ付きで併記 (limit_watchlist と pickup は別経路だが意味は近い)。
+
+// 候補銘柄の分析結果キャッシュ (タブ切替時に再呼び出ししない)
+window._candAICache = window._candAICache || {};
+
+function _classifyCandidate(stock) {
+  // stock.levels の最寄り (discount_pct 最小) を見て分類
+  if (!stock.levels || stock.levels.length === 0) return 'watch';
+  const notifiedLevels = stock.levels.filter(l => l.notified);
+  if (notifiedLevels.length > 0) return 'notified';
+  const closest = Math.min(...stock.levels.map(l => l.discount_pct ?? 99));
+  if (closest <= 5.0) return 'approaching';
+  return 'watch';
+}
+
+function _pickupLevelLabel(pickupMap, code5) {
+  // pickup_stocks.json は code5 (5桁) で持っている。limit_watchlist は 4 桁。
+  const p = pickupMap[code5];
+  if (!p) return null;
+  return {
+    label: p.level_label,
+    level: p.level,
+    notes: p.synthesis_notes || '',
+    warning_reason: p.warning_reason || '',
+    warning_flag: p.warning_flag,
+    tier: p.tier,
+    extraction_source: p.extraction_source,
+  };
+}
+
+function renderCandidates(watchlist, pickup) {
+  const el = document.getElementById('dcandidates');
+  if (!watchlist || watchlist.length === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">買い候補なし (limit_watchlist 未公開 or 空)</div>';
+    return;
+  }
+
+  // pickup_stocks をマップ化 (code5 → entry)。pickup は最新の Sonnet 分析
+  const pickupMap = {};
+  if (pickup && pickup.stocks) {
+    for (const p of pickup.stocks) pickupMap[p.code] = p;
+  }
+
+  // 分類
+  const notified = [];
+  const approaching = [];
+  const watching = [];
+  for (const s of watchlist) {
+    const c = _classifyCandidate(s);
+    if (c === 'notified') notified.push(s);
+    else if (c === 'approaching') approaching.push(s);
+    else watching.push(s);
+  }
+
+  // discount_pct 昇順 (現値に近い順) で各カテゴリ内ソート
+  const _sortByClosest = arr => arr.sort((a, b) => {
+    const da = Math.min(...((a.levels || []).map(l => l.discount_pct ?? 99)));
+    const db = Math.min(...((b.levels || []).map(l => l.discount_pct ?? 99)));
+    return da - db;
+  });
+  _sortByClosest(notified); _sortByClosest(approaching); _sortByClosest(watching);
+
+  let html = '';
+  if (notified.length) {
+    html += '<div style="font-size:11px;color:var(--red);font-weight:700;margin-bottom:6px">🚨 LINE 通知済 (' + notified.length + ' 件)</div>';
+    html += notified.map(s => _renderCandidateCard(s, pickupMap, 'notified')).join('');
+  }
+  if (approaching.length) {
+    html += '<div style="font-size:11px;color:var(--yellow);font-weight:700;margin:10px 0 6px">🎯 指値接近 (' + approaching.length + ' 件)</div>';
+    html += approaching.map(s => _renderCandidateCard(s, pickupMap, 'approaching')).join('');
+  }
+  if (watching.length) {
+    html += '<div style="font-size:11px;color:var(--t3);font-weight:700;margin:10px 0 6px">💎 待機 (' + watching.length + ' 件、深いディスカウント)</div>';
+    html += watching.map(s => _renderCandidateCard(s, pickupMap, 'watch')).join('');
+  }
+  el.innerHTML = html;
+}
+
+function _renderCandidateCard(s, pickupMap, cat) {
+  // limit_watchlist の code は 4 桁。pickup_stocks は 5 桁 (末尾 0)。
+  const code4 = s.code;
+  const code5 = code4 + '0';
+  const pickup = _pickupLevelLabel(pickupMap, code5);
+  const cardId = 'aic-' + code4;
+
+  const catColor = {notified:'var(--red)', approaching:'var(--yellow)', watch:'var(--t3)'}[cat];
+
+  // ヘッダー (銘柄名・コード・rank・各種フラグ)
+  const flags = [];
+  if (s.squeeze_candidate) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🚀 踏み上げ候補</span>');
+  if (s.vol_ratio && s.vol_ratio >= 2.0) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">🔥🔥 出来高×' + s.vol_ratio + '</span>');
+  else if (s.vol_ratio && s.vol_ratio >= 1.5) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🔥 出来高×' + s.vol_ratio + '</span>');
+  if (pickup) flags.push('<span style="background:rgba(59,130,246,.15);color:var(--acc);font-size:9px;padding:2px 6px;border-radius:4px">' + pickup.label + ' tier ' + pickup.tier + '</span>');
+  if (pickup && pickup.extraction_source === 'fins_summary') flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">📊 数値のみ</span>');
+
+  // 次回決算日 (近いと警告)
+  let earnTag = '';
+  if (s.next_earnings) {
+    const d = new Date(s.next_earnings);
+    const today = new Date();
+    const daysLeft = Math.round((d - today) / (1000 * 60 * 60 * 24));
+    if (daysLeft >= 0 && daysLeft <= 7) {
+      earnTag = '<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">📅 決算 ' + daysLeft + ' 日後</span>';
+    } else if (daysLeft >= 0 && daysLeft <= 30) {
+      earnTag = '<span style="font-size:9px;color:var(--t3)">📅 ' + s.next_earnings + '</span>';
+    }
+  }
+
+  // 指値テーブル (levels)
+  const levelsRow = (s.levels || []).map(l => {
+    const notifTag = l.notified ? '<span style="color:var(--red);font-size:9px">●通知済</span>' : '';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--s2);border-radius:6px;padding:5px 8px;margin-bottom:3px;font-size:11px">' +
+      '<span>' + _escape(l.tag || '') + '</span>' +
+      '<span style="font-family:monospace;font-weight:700">' + Math.round(l.price).toLocaleString() + '円</span>' +
+      '<span style="font-family:monospace;color:var(--t3)">-' + l.discount_pct + '%</span>' +
+      notifTag +
+      '</div>';
+  }).join('');
+
+  // 需給バッジ (mr_trend, short_balance 等)
+  const supplyTags = [];
+  if (s.mr_trend_pct != null) {
+    if (s.mr_trend_pct <= -15) supplyTags.push('<span style="font-size:9px;color:var(--green)">✨信用改善 ' + s.mr_trend_pct + '%</span>');
+    else if (s.mr_trend_pct >= 25) supplyTags.push('<span style="font-size:9px;color:var(--red)">⚠️信用悪化 +' + s.mr_trend_pct + '%</span>');
+  }
+  if (s.short_balance_pct != null && s.short_balance_pct >= 1.0) {
+    supplyTags.push('<span style="font-size:9px;color:var(--yellow)">📊空売残 ' + s.short_balance_pct + '%</span>');
+  }
+
+  return '<div style="background:var(--s1);border:1px solid var(--border);border-left:3px solid ' + catColor + ';border-radius:10px;padding:12px;margin-bottom:8px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">' +
+    '<div><span style="font-size:14px;font-weight:700">' + _escape(s.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px;font-family:monospace">' + code4 + ' / rank ' + (s.rank || '-') + ' / score ' + (s.total_score || '-') + '</span></div>' +
+    '<div style="font-size:14px;font-weight:700;font-family:monospace">' + Math.round(s.current_price).toLocaleString() + '円</div>' +
+    '</div>' +
+    (flags.length ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">' + flags.join('') + earnTag + '</div>' : (earnTag ? '<div style="margin-bottom:6px">' + earnTag + '</div>' : '')) +
+    (supplyTags.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">' + supplyTags.join('') + '</div>' : '') +
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:3px">指値候補 (現値からの割引%):</div>' +
+    levelsRow +
+    (pickup && pickup.notes ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);border-radius:6px;padding:8px;margin-top:6px">🧠 ' + _escape(pickup.notes) + '</div>' : '') +
+    (pickup && pickup.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(pickup.warning_reason) + '</div>' : '') +
+    '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="margin-top:8px;width:100%;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">🤝 Gemini + Claude で売買判断を合議</button>' +
+    '<div id="' + cardId + '" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>' +
+    '</div>';
+}
+
+async function analyzeCandidate(code4) {
+  // limit_watchlist + pickup_stocks の最新を再 fetch (キャッシュ済なら使う)
+  const panel = document.getElementById('aic-' + code4);
+  if (!panel) return;
+
+  // 既に展開済 + 結果ありなら閉じる
+  if (panel.style.display === 'block' && panel.textContent && !panel.textContent.includes('合議中')) {
+    panel.style.display = 'none'; return;
+  }
+  // キャッシュヒット
+  if (window._candAICache[code4]) {
+    panel.style.display = 'block';
+    panel.textContent = window._candAICache[code4];
+    return;
+  }
+
+  panel.style.display = 'block';
+  panel.textContent = '🤝 GeminiとClaudeが合議中...';
+
+  const [watchlist, pickup] = await Promise.all([
+    _fetchJSON('limit_watchlist.json'),
+    _fetchJSON('pickup_stocks.json'),
+  ]);
+  const s = (watchlist || []).find(w => w.code === code4);
+  if (!s) {
+    panel.textContent = '⚠️ 銘柄データが取得できませんでした (limit_watchlist 更新待ち?)';
+    return;
+  }
+  const pickupEntry = pickup && pickup.stocks
+    ? pickup.stocks.find(p => p.code === code4 + '0')
+    : null;
+
+  // プロンプト構築 (短期回転戦略 -8%/RR2 を明示)
+  const levelsTxt = (s.levels || []).map(l =>
+    '  - ' + (l.tag || '') + ' ' + Math.round(l.price) + '円 (現値-' + l.discount_pct + '%)' + (l.notified ? ' [通知済]' : '')
+  ).join('\n');
+
+  const prompt =
+    'あなたは運用歴25年の日本株シニアファンドマネージャー。Google検索で今日の最新ニュース・材料・需給を必ず調べてから、短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) で買うかどうかを断言してください。曖昧な表現は禁止、数字で具体的に。\n\n' +
+    '【候補銘柄】\n' +
+    s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', score ' + (s.total_score || '-') + ')\n' +
+    '現値: ' + Math.round(s.current_price).toLocaleString() + '円\n' +
+    'ATR: ' + (s.atr || '-') + ' / MA25: ' + (s.ma25 ? Math.round(s.ma25).toLocaleString() + '円' : '-') + ' / 20日安値: ' + (s.recent_low_20d ? Math.round(s.recent_low_20d).toLocaleString() + '円' : '-') + ' / -2σ: ' + (s.minus_2sigma ? Math.round(s.minus_2sigma).toLocaleString() + '円' : '-') + '\n' +
+    '出来高比 (20日比): ×' + (s.vol_ratio || '-') + '\n' +
+    '信用倍率前週比: ' + (s.mr_trend_pct == null ? '不明' : s.mr_trend_pct + '%') + '\n' +
+    '空売残高%: ' + (s.short_balance_pct == null ? '不明' : s.short_balance_pct + '%') + ' / 踏み上げ候補: ' + (s.squeeze_candidate ? 'YES' : 'NO') + '\n' +
+    '次回決算: ' + (s.next_earnings || '-') + '\n\n' +
+    '【指値ライン】\n' + levelsTxt + '\n\n' +
+    (pickupEntry ? '【Sonnet 事前分析 (Deep Insight)】\n' + (pickupEntry.synthesis_notes || '(なし)') + '\n' + (pickupEntry.warning_reason ? '警告: ' + pickupEntry.warning_reason + '\n' : '') + '\n' : '') +
+    '【依頼】超一流FMとして以下を答えてください:\n\n' +
+    '## 【売買判断】\n' +
+    '「今すぐ買い」「指値で待つ」「見送り」のどれか1つを断言、理由を3行で。\n\n' +
+    '## 【推奨エントリー価格】\n' +
+    '上記指値リストから最も妥当な価格を1つ選び、その根拠 (テクニカル・需給・材料) を説明。\n' +
+    '別の価格が望ましいなら独自に提示してその根拠も。\n\n' +
+    '## 【損切りライン】\n' +
+    '推奨エントリーから -8% を基準に具体的な価格 (円) を1つ。テクニカル節目も考慮。\n\n' +
+    '## 【利確目標】\n' +
+    '推奨エントリーから RR 1:2 (= +16%) を基準に第1目標。可能なら最終目標も。\n\n' +
+    '## 【最新材料・リスク】\n' +
+    'Google検索で調べた直近のニュース・決算前後の動き・最大リスク要因を 1 つずつ。\n\n' +
+    '## 【シニアFMの本音】\n' +
+    '自分のファンドでこの銘柄を買うか? 率直に一言で。';
+
+  try {
+    const [gRes, cRes] = await Promise.all([
+      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: ' + e.message),
+      callClaude(prompt, null, null).catch(e => '⚠️ Claude: ' + e.message),
+    ]);
+    const out =
+      '🤖 Gemini (最新ニュース・需給):\n' + gRes +
+      '\n\n━━━━━━━━━━━━━━━\n\n' +
+      '🧠 Claude (戦略・指値判断):\n' + cRes;
+    window._candAICache[code4] = out;
+    panel.textContent = out;
+  } catch (e) {
+    panel.textContent = '⚠️ ' + e.message;
+  }
 }
 
 function hHTML(h, compact) {
