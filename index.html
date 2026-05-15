@@ -224,7 +224,11 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
 
     <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
-    <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:10px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
+    <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:8px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
+    <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
+      <input type="checkbox" id="cashFilter" onchange="renderCandidatesFromCache()" style="width:16px;height:16px;cursor:pointer">
+      <span>💰 残金 (<span id="cashFilterAmount">0</span>円) で <strong>100株</strong> 買える銘柄のみ表示</span>
+    </label>
     <div id="comparePanel" style="display:none;margin-bottom:14px"></div>
     <div id="dcandidates" style="margin-bottom:14px">読み込み中…</div>
   </div>
@@ -601,10 +605,38 @@ function _pickupLevelLabel(pickupMap, code5) {
 }
 
 function renderCandidates(watchlist, pickup) {
+  // Phase 4.2: フィルタトグル再描画用にデータをキャッシュ
+  window._candidatesCache = {watchlist, pickup};
+  // 残金表示を更新
+  const cashAmt = document.getElementById('cashFilterAmount');
+  if (cashAmt) cashAmt.textContent = (cash || 0).toLocaleString();
+  renderCandidatesFromCache();
+}
+
+function renderCandidatesFromCache() {
+  const cache = window._candidatesCache;
+  if (!cache) return;
+  let watchlist = cache.watchlist;
+  const pickup = cache.pickup;
   const el = document.getElementById('dcandidates');
   if (!watchlist || watchlist.length === 0) {
     el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">買い候補なし (limit_watchlist 未公開 or 空)</div>';
     return;
+  }
+
+  // Phase 4.2: 残金フィルタ (チェックされていれば 100株分の必要資金 ≤ cash で絞る)
+  const cashOnly = document.getElementById('cashFilter');
+  if (cashOnly && cashOnly.checked && cash > 0) {
+    const before = watchlist.length;
+    watchlist = watchlist.filter(s => {
+      // 最も近い指値 (最低価格) で 100株買えるか判定
+      const minPrice = Math.min(s.current_price, ...((s.levels || []).map(l => l.price)));
+      return minPrice * 100 <= cash;
+    });
+    if (watchlist.length === 0) {
+      el.innerHTML = '<div style="background:var(--yellow-soft);border:1px solid var(--yellow);border-radius:10px;padding:12px;font-size:12px;color:var(--text)">💰 残金 ' + cash.toLocaleString() + ' 円では <strong>100株単位で買える候補が無し</strong> (' + before + ' 件中)。残金を増やすか、買い候補の選定基準を緩めてください。</div>';
+      return;
+    }
   }
 
   // pickup_stocks をマップ化 (code5 → entry)。pickup は最新の Sonnet 分析
@@ -710,9 +742,49 @@ function _renderCandidateCard(s, pickupMap, cat) {
     levelsRow +
     (pickup && pickup.notes ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);border-radius:6px;padding:8px;margin-top:6px">🧠 ' + _escape(pickup.notes) + '</div>' : '') +
     (pickup && pickup.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(pickup.warning_reason) + '</div>' : '') +
-    '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="margin-top:8px;width:100%;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">🤝 Gemini + Claude で売買判断を合議</button>' +
-    '<div id="' + cardId + '" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">' +
+    '<button onclick="toggleChart(\'' + code4 + '\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート (TradingView)</button>' +
+    '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer;box-shadow:var(--shadow)">🤝 Gemini+Claude 合議</button>' +
+    '</div>' +
+    '<div id="chart-' + code4 + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>' +
+    '<div id="' + cardId + '" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>' +
     '</div>';
+}
+
+// ============================================================
+//  Phase 4.2: TradingView チャート表示 (iframe widget)
+// ============================================================
+function toggleChart(code4) {
+  const el = document.getElementById('chart-' + code4);
+  if (!el) return;
+  if (el.style.display === 'block') {
+    el.style.display = 'none';
+    el.innerHTML = '';   // unload iframe to save resources
+    return;
+  }
+  // TradingView の symbol 形式: TSE:XXXX (4 桁数字コード)
+  // 5 桁英字混じり (例: 213A0) は末尾の "0" を除去して "213A" として渡す
+  let symbol = code4.replace(/0$/, '');   // last "0" を仮で除去
+  // ただし純粋数字 4 桁は 4 桁のまま使う (例: "3436" → "3436", "213A0" → "213A")
+  if (/^\d{4}$/.test(code4)) symbol = code4;
+  const url = 'https://s.tradingview.com/widgetembed/?frameElementId=tv-' + code4 +
+    '&symbol=TSE%3A' + symbol +
+    '&interval=D' +
+    '&theme=light' +
+    '&style=1' +
+    '&locale=ja' +
+    '&toolbarbg=f1f5f9' +
+    '&studies=%5B%22MASimple%40tv-basicstudies%22%5D' +
+    '&hideideas=1' +
+    '&timezone=Asia%2FTokyo' +
+    '&saveimage=1';
+  el.innerHTML =
+    '<div style="background:var(--s2);padding:6px 10px;font-size:11px;color:var(--t2);display:flex;justify-content:space-between;align-items:center">' +
+    '<span>📈 TradingView ' + symbol + ' (日足、25 日移動平均線)</span>' +
+    '<button onclick="toggleChart(\'' + code4 + '\')" style="background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer">×</button>' +
+    '</div>' +
+    '<iframe src="' + url + '" style="width:100%;height:380px;border:0;display:block" loading="lazy"></iframe>';
+  el.style.display = 'block';
 }
 
 async function analyzeCandidate(code4) {
@@ -966,7 +1038,7 @@ function hHTML(h, compact) {
       '<button class="delbtn" onclick="delH(\'' + h.cd + '\')" style="flex:none">🗑 削除</button>'+
       '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 損切り・利確・売買判断を分析</button>'+
       '</div>'+
-      '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap"></div>';
+      '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>';
   }
   return html + '</div>';
 }
