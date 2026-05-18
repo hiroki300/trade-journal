@@ -214,6 +214,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sec-lbl">🌍 マクロ判定</div>
     <div id="dmacro" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--t2)">読み込み中…</div>
 
+    <div class="sec-lbl">💴 真の税後 PnL (Phase 6 T0-4 計測)</div>
+    <div id="dpnl" style="margin-bottom:14px">読み込み中…</div>
+
     <div class="sec-lbl">📊 あなたの執行癖 (Phase 6 T0-3 計測)</div>
     <div id="ddrift" style="margin-bottom:14px">読み込み中…</div>
 
@@ -471,7 +474,8 @@ async function loadMorningReports() {
   renderEarnings(earn);
   renderThemes(themes);
   renderCandidates(watch, pickup);
-  renderDriftSummary();  // T0-3 Stage A: 執行癖セクション
+  renderDriftSummary();           // T0-3 Stage A: 執行癖セクション
+  renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
   const gen = (pickup && pickup.generated_at) || '';
   document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
 }
@@ -640,6 +644,217 @@ function getDriftPromptInjection() {
   return '\n\n【あなたの執行癖 (過去 ' + d.sample_size + ' 回の実績)】\n' +
     d.summary_text + '\n' +
     '※ この癖を踏まえ、推奨価格や保有期間を調整してください。';
+}
+
+// ============================================================
+//  Phase 6 T0-4: 真の税後 PnL 計測 (handbook §1 T0-4)
+// ============================================================
+//
+//   "+12〜16% で利確" 目標は税前・手数料前の数字。SBI 手数料 +
+//   20.315% 源泉徴収を反映した「真の税後 PnL」を計算する。
+//
+//   本実装は backend realized_pnl_calculator.py (PR #12) の JS ミラー。
+//   Tier 0 では PWA から localStorage の T (KT) を直接読んで集計、
+//   Tier 1 (T0-3 Stage B 完了後) では backend cron が同ロジックで
+//   tax_after_summary.json を publish する予定。
+
+const WITHHOLDING_TAX_RATE = 0.20315;  // 所得税 15.315% + 住民税 5%
+const SBI_FEE_TABLE = [
+  // 約定代金 ≤ first → fee = second (昇順)
+  [50000,   55],
+  [100000,  99],
+  [200000, 115],
+  [500000, 275],
+  [1000000, 535],
+];
+const SBI_FEE_DEFAULT = 640;  // 100 万円超
+
+function computeSbiFee(amount) {
+  if (!amount || amount <= 0) return 0;
+  for (const [bracket, fee] of SBI_FEE_TABLE) {
+    if (amount <= bracket) return fee;
+  }
+  return SBI_FEE_DEFAULT;
+}
+
+function computeTax(gross_pnl, rate) {
+  if (rate == null) rate = WITHHOLDING_TAX_RATE;
+  if (gross_pnl <= 0) return 0;
+  return Math.round(gross_pnl * rate * 10000) / 10000;
+}
+
+function computeNetPnl(buy_price, sell_price, shares, tax_rate) {
+  const buy_amount = buy_price * shares;
+  const sell_amount = sell_price * shares;
+  const gross_pnl = sell_amount - buy_amount;
+  const fee_total = computeSbiFee(buy_amount) + computeSbiFee(sell_amount);
+  const tax = computeTax(gross_pnl, tax_rate);
+  return { gross_pnl, buy_amount, sell_amount, fee_total, tax, net_pnl: gross_pnl - fee_total - tax };
+}
+
+function matchRoundTrips(trades) {
+  // FIFO で買い/売りをペアリング (部分売却対応)
+  const open_buys = {};  // code → [{shares_remaining, price, date}]
+  const rounds = [];
+  for (const t of trades) {
+    const cd = t.cd, a = t.a, sh = parseInt(t.sh || 0), p = parseFloat(t.p || 0), dt = t.dt || '';
+    if (a === 'buy') {
+      if (!open_buys[cd]) open_buys[cd] = [];
+      open_buys[cd].push({ shares_remaining: sh, price: p, date: dt });
+    } else if (a === 'sell') {
+      let remaining = sh;
+      const lots = open_buys[cd] || [];
+      while (remaining > 0 && lots.length > 0) {
+        const lot = lots[0];
+        const matched = Math.min(remaining, lot.shares_remaining);
+        if (matched > 0) {
+          rounds.push({
+            code: cd,
+            buy_price: lot.price,
+            sell_price: p,
+            shares: matched,
+            buy_date: lot.date,
+            sell_date: dt,
+          });
+          lot.shares_remaining -= matched;
+          remaining -= matched;
+        }
+        if (lot.shares_remaining <= 0) lots.shift();
+      }
+      if (lots.length === 0) delete open_buys[cd];
+    }
+  }
+  return rounds;
+}
+
+function _aggregateRounds(rounds, tax_rate) {
+  if (!rounds.length) {
+    return {
+      trades: 0, gross_pnl_jpy: 0, fee_total_jpy: 0, tax_jpy: 0, net_pnl_jpy: 0,
+      win_rate: null, avg_win_jpy: null, avg_loss_jpy: null, rr_realized: null,
+    };
+  }
+  let gross_sum = 0, fee_sum = 0, tax_sum = 0, net_sum = 0;
+  const wins = [], losses = [];
+  for (const r of rounds) {
+    const c = computeNetPnl(r.buy_price, r.sell_price, r.shares, tax_rate);
+    gross_sum += c.gross_pnl;
+    fee_sum   += c.fee_total;
+    tax_sum   += c.tax;
+    net_sum   += c.net_pnl;
+    if (c.gross_pnl > 0) wins.push(c.gross_pnl);
+    else if (c.gross_pnl < 0) losses.push(c.gross_pnl);
+  }
+  const n = rounds.length;
+  const avg_win = wins.length ? wins.reduce((a,b)=>a+b, 0)/wins.length : null;
+  const avg_loss = losses.length ? losses.reduce((a,b)=>a+b, 0)/losses.length : null;
+  const win_rate = n ? wins.length/n : null;
+  const rr_realized = (avg_win != null && avg_loss != null && avg_loss !== 0)
+    ? Math.round(avg_win/Math.abs(avg_loss) * 100)/100 : null;
+  return {
+    trades: n,
+    gross_pnl_jpy: Math.round(gross_sum),
+    fee_total_jpy: Math.round(fee_sum),
+    tax_jpy: Math.round(tax_sum),
+    net_pnl_jpy: Math.round(net_sum * 10)/10,
+    win_rate: win_rate != null ? Math.round(win_rate*10000)/10000 : null,
+    avg_win_jpy: avg_win != null ? Math.round(avg_win) : null,
+    avg_loss_jpy: avg_loss != null ? Math.round(avg_loss) : null,
+    rr_realized,
+  };
+}
+
+function _filterRoundsByWindow(rounds, start_date, end_date) {
+  // sell_date が start_date <= dt <= end_date のラウンドのみ
+  return rounds.filter(r => {
+    const d = r.sell_date;
+    return d && d >= start_date && d <= end_date;
+  });
+}
+
+function _addPct(agg, capital_jpy) {
+  if (capital_jpy && capital_jpy > 0) {
+    agg.net_pnl_pct = Math.round(agg.net_pnl_jpy / capital_jpy * 100 * 100)/100;
+  } else {
+    agg.net_pnl_pct = null;
+  }
+  return agg;
+}
+
+function buildTaxAfterSummary(trades, capital_jpy, as_of_str, tax_rate) {
+  // backend realized_pnl_calculator.build_summary の JS ミラー
+  if (!as_of_str) as_of_str = new Date().toISOString().slice(0,10);
+  const as_of = new Date(as_of_str);
+  const all_rounds = matchRoundTrips(trades);
+
+  // current_month: YYYY-MM-01 〜 as_of
+  const month_start = as_of_str.slice(0,7) + '-01';
+  const t30_start = new Date(as_of.getTime() - 30*86400000).toISOString().slice(0,10);
+  const t90_start = new Date(as_of.getTime() - 90*86400000).toISOString().slice(0,10);
+
+  const cm = _addPct(_aggregateRounds(_filterRoundsByWindow(all_rounds, month_start, as_of_str), tax_rate), capital_jpy);
+  const t30 = _addPct(_aggregateRounds(_filterRoundsByWindow(all_rounds, t30_start, as_of_str), tax_rate), capital_jpy);
+  const t90 = _addPct(_aggregateRounds(_filterRoundsByWindow(all_rounds, t90_start, as_of_str), tax_rate), capital_jpy);
+
+  return {
+    schema_version: '1.0',
+    as_of: as_of_str,
+    capital_jpy,
+    current_month: cm,
+    trailing_30d: t30,
+    trailing_90d: t90,
+  };
+}
+
+function _estimateCapitalJpy() {
+  // 評価額 (保有 × 現値) + 残金 = 概算運用資産
+  let holdings_val = 0;
+  for (const h of H) {
+    holdings_val += (h.cp || h.bp || 0) * (h.sh || 0);
+  }
+  return Math.round(holdings_val + (cash || 0));
+}
+
+function renderTaxAfterSummary() {
+  const el = document.getElementById('dpnl');
+  if (!el) return;
+  const capital = _estimateCapitalJpy();
+  const summary = buildTaxAfterSummary(T, capital);
+  const cm = summary.current_month;
+  if (cm.trades === 0 && summary.trailing_30d.trades === 0 && summary.trailing_90d.trades === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">💴 確定損益なし (売り取引完了後に表示、SBI 手数料 + 源泉徴収 20.315% 反映)</div>';
+    return;
+  }
+  function fmt(jpy) {
+    const sign = jpy >= 0 ? '+' : '−';
+    return sign + '¥' + Math.abs(jpy).toLocaleString();
+  }
+  function pct(p) {
+    if (p == null) return '—';
+    return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+  }
+  function colorOf(n) { return n >= 0 ? 'var(--green)' : 'var(--red)'; }
+  function block(label, agg) {
+    if (agg.trades === 0) {
+      return '<div style="font-size:10px;color:var(--t3);padding:6px 0">' + label + ': データなし</div>';
+    }
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="font-size:11px;color:var(--t2)">' + label + ' <span style="color:var(--t3)">(' + agg.trades + ' 取引)</span></div>' +
+      '<div style="text-align:right">' +
+      '<div style="font-size:13px;font-weight:700;color:' + colorOf(agg.net_pnl_jpy) + '">' + fmt(agg.net_pnl_jpy) + ' <span style="font-size:10px;color:var(--t3)">(' + pct(agg.net_pnl_pct) + ')</span></div>' +
+      '<div style="font-size:9px;color:var(--t3)">gross ' + fmt(agg.gross_pnl_jpy) + ' / fee ' + fmt(-agg.fee_total_jpy) + ' / tax ' + fmt(-agg.tax_jpy) + '</div>' +
+      '</div></div>';
+  }
+  el.innerHTML =
+    '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
+    block('今月', cm) +
+    block('過去 30 日', summary.trailing_30d) +
+    block('過去 90 日', summary.trailing_90d) +
+    '<div style="font-size:9px;color:var(--t3);margin-top:6px">capital ¥' + capital.toLocaleString() + ' / 勝率 ' +
+    (cm.win_rate != null ? (cm.win_rate*100).toFixed(0)+'%' : '—') +
+    ' / RR ' + (cm.rr_realized != null ? cm.rr_realized : '—') +
+    ' (今月)</div>' +
+    '</div>';
 }
 
 function _escape(s) {
@@ -1465,7 +1680,8 @@ function doTrade() {
       ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
       : '';
     toast('✅ ' + nm + ' 売り記録' + ps + driftHint);
-    renderDriftSummary();  // dashboard の執行癖セクションを更新
+    renderDriftSummary();        // dashboard の執行癖セクションを更新
+    renderTaxAfterSummary();     // T0-4: 税後 PnL も更新
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
   rTH();
