@@ -214,6 +214,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sec-lbl">🌍 マクロ判定</div>
     <div id="dmacro" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--t2)">読み込み中…</div>
 
+    <div class="sec-lbl">📊 あなたの執行癖 (Phase 6 T0-3 計測)</div>
+    <div id="ddrift" style="margin-bottom:14px">読み込み中…</div>
+
     <div class="sec-lbl">🔥 ピックアップ銘柄</div>
     <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
 
@@ -458,14 +461,185 @@ async function loadMorningReports() {
     _fetchJSON('limit_watchlist.json'),
     _fetchJSON('deep_insight_synth.json'),
   ]);
+  // Phase 6 T0-3 Stage A: 買い注文時の AI 推奨値 lookup 用に window へキャッシュ
+  window._synthData = synth;
+  window._pickupData = pickup;
+  window._watchlistData = watch;
   renderMacro(macro);
   renderPickup(pickup);
   renderDISummary(synth);
   renderEarnings(earn);
   renderThemes(themes);
   renderCandidates(watch, pickup);
+  renderDriftSummary();  // T0-3 Stage A: 執行癖セクション
   const gen = (pickup && pickup.generated_at) || '';
   document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
+}
+
+// ============================================================
+//  Phase 6 T0-3 Stage A: 執行ドリフト計測 (handbook §1 T0-3 Stage A)
+// ============================================================
+//
+//   AI 推奨と実約定の乖離 (drift) を localStorage に蓄積し、ユーザーの
+//   執行癖を可視化 + AI 合議に注入する。
+//
+//   - 買い注文時: AI 推奨 (synth.json/pickup.json) を lookup し
+//     execution_meta を H エントリに保存
+//   - 売り注文時: drift_exit_pct_vs_target を計算し T エントリに保存
+//   - 📤 ボタン: 執行癖サマリ + KH + KT をクリップボードにコピー
+//   - AI 合議: 「貴方の癖」セクションを prompt 末尾に自動注入
+
+function lookupAIRecommendationByCode(cd) {
+  // cd は 4 桁、synth/pickup は code5 (= cd + '0')
+  const code5 = (cd.length === 4 ? cd + '0' : cd);
+  const synth = window._synthData;
+  if (synth && Array.isArray(synth.stocks)) {
+    const found = synth.stocks.find(s => s.code === code5 || s.code4 === cd);
+    if (found && found.debate) {
+      return {
+        ai_recommended_entry: found.debate.trader_recommended_entry,
+        ai_recommended_stop: found.debate.trader_stop_loss,
+        ai_recommended_target: found.debate.trader_target,
+        verdict_at_entry: found.debate.trader_verdict,
+        tier_at_entry: found.tier,
+        extraction_source: found.extraction_source || 'tdnet_pdf',
+        source: 'deep_insight_synth',
+      };
+    }
+  }
+  // フォールバック: pickup_stocks (tier S/A のみだが synth に無い場合)
+  const pickup = window._pickupData;
+  if (pickup && Array.isArray(pickup.stocks)) {
+    const found = pickup.stocks.find(p => p.code === code5);
+    if (found) {
+      return {
+        ai_recommended_entry: found.price,
+        ai_recommended_stop: found.stop_loss,
+        ai_recommended_target: found.target,
+        verdict_at_entry: null,
+        tier_at_entry: found.tier,
+        extraction_source: found.extraction_source || 'tdnet_pdf',
+        source: 'pickup_stocks',
+      };
+    }
+  }
+  return null;
+}
+
+function buildExecutionMetaOnBuy(cd, actual_entry) {
+  const ai = lookupAIRecommendationByCode(cd);
+  if (!ai || !ai.ai_recommended_entry) return null;
+  const drift = ((actual_entry - ai.ai_recommended_entry) / ai.ai_recommended_entry) * 100;
+  return {
+    ai_recommended_entry: ai.ai_recommended_entry,
+    ai_recommended_stop: ai.ai_recommended_stop,
+    ai_recommended_target: ai.ai_recommended_target,
+    actual_entry: actual_entry,
+    actual_entry_at: new Date().toISOString(),
+    drift_entry_pct: Math.round(drift * 100) / 100,
+    verdict_at_entry: ai.verdict_at_entry,
+    tier_at_entry: ai.tier_at_entry,
+    extraction_source: ai.extraction_source,
+    source: ai.source,
+  };
+}
+
+function buildExecutionMetaOnSell(holding, actual_exit) {
+  // holding.execution_meta は買い時に保存済
+  const em = holding && holding.execution_meta;
+  if (!em) return null;
+  let drift_exit_vs_target = null;
+  if (em.ai_recommended_target) {
+    drift_exit_vs_target = ((actual_exit - em.ai_recommended_target) / em.ai_recommended_target) * 100;
+    drift_exit_vs_target = Math.round(drift_exit_vs_target * 100) / 100;
+  }
+  return {
+    ...em,
+    actual_exit: actual_exit,
+    actual_exit_at: new Date().toISOString(),
+    drift_exit_pct_vs_target: drift_exit_vs_target,
+  };
+}
+
+function buildDriftSummary() {
+  // 完了済売買 (T で sell + execution_meta あり) から平均ドリフトを計算
+  const sells = T.filter(t => t.a === 'sell' && t.execution_meta);
+  if (sells.length === 0) return null;
+  const drifts_entry = sells
+    .map(s => s.execution_meta.drift_entry_pct)
+    .filter(d => typeof d === 'number');
+  const drifts_exit = sells
+    .map(s => s.execution_meta.drift_exit_pct_vs_target)
+    .filter(d => typeof d === 'number');
+  const avg = arr => arr.length ? arr.reduce((a,b) => a+b, 0) / arr.length : null;
+  const avg_entry = avg(drifts_entry);
+  const avg_exit  = avg(drifts_exit);
+  return {
+    sample_size: sells.length,
+    avg_drift_entry_pct: avg_entry != null ? Math.round(avg_entry * 100) / 100 : null,
+    avg_drift_exit_pct_vs_target: avg_exit != null ? Math.round(avg_exit * 100) / 100 : null,
+    summary_text: _formatDriftText(sells.length, avg_entry, avg_exit),
+  };
+}
+
+function _formatDriftText(n, avg_entry, avg_exit) {
+  const parts = [`過去 ${n} 回平均`];
+  if (avg_entry != null) {
+    const sign = avg_entry >= 0 ? '+' : '';
+    const dir = avg_entry > 0 ? '高値掴み' : (avg_entry < 0 ? '指値勝ち' : '同値');
+    parts.push(`エントリー ${sign}${avg_entry.toFixed(2)}% (${dir} 傾向)`);
+  }
+  if (avg_exit != null) {
+    const sign = avg_exit >= 0 ? '+' : '';
+    const dir = avg_exit < 0 ? '早出' : (avg_exit > 0 ? '延ばし' : '同値');
+    parts.push(`利確 目標から ${sign}${avg_exit.toFixed(2)}% (${dir} 傾向)`);
+  }
+  return parts.join(' / ');
+}
+
+function renderDriftSummary() {
+  const el = document.getElementById('ddrift');
+  if (!el) return;
+  const d = buildDriftSummary();
+  if (!d) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 売買履歴蓄積中 (Phase 6 T0-3 計測フェーズ、初回完了取引後に表示)</div>';
+    return;
+  }
+  el.innerHTML =
+    '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px">' +
+    '<div style="font-size:11px;color:var(--t2);line-height:1.6">📊 ' + _escape(d.summary_text) + '</div>' +
+    '</div>' +
+    '<button onclick="exportTradeHistoryToClipboard()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:10px;color:#fff;font-size:12px;font-weight:700;padding:9px;cursor:pointer">📤 履歴を AI に渡す (クリップボードへコピー)</button>';
+}
+
+async function exportTradeHistoryToClipboard() {
+  const drift = buildDriftSummary();
+  const recent_trades = T.slice(-30);
+  const payload = {
+    generated_at: new Date().toISOString(),
+    drift_summary: drift,
+    holdings: H,
+    trades: recent_trades,
+  };
+  const text =
+    '【あなたの保有 + 売買履歴】 (' + new Date().toISOString().slice(0,10) + ')\n' +
+    (drift ? '執行癖: ' + drift.summary_text + '\n\n' : '売買履歴 0 件\n\n') +
+    JSON.stringify(payload, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('📤 クリップボードにコピー完了 (' + recent_trades.length + ' 取引)');
+  } catch (e) {
+    toast('⚠️ コピー失敗: ' + e.message);
+  }
+}
+
+function getDriftPromptInjection() {
+  // AI 合議 prompt の末尾に注入する「貴方の癖」セクション
+  const d = buildDriftSummary();
+  if (!d) return '';
+  return '\n\n【あなたの執行癖 (過去 ' + d.sample_size + ' 回の実績)】\n' +
+    d.summary_text + '\n' +
+    '※ この癖を踏まえ、推奨価格や保有期間を調整してください。';
 }
 
 function _escape(s) {
@@ -955,7 +1129,8 @@ async function analyzeCandidate(code4) {
     '## 【利確目標】\n' +
     '推奨エントリーから RR 1:2 (= +16%) を基準に第1目標。可能なら最終目標も。\n\n' +
     '## 【今日の最新材料・リスク】\n' +
-    'Google検索で取得した **本日の動き** (場中の値動き・速報・出来高変化)、直近の決算/材料、最大リスク要因を 1 つずつ。';
+    'Google検索で取得した **本日の動き** (場中の値動き・速報・出来高変化)、直近の決算/材料、最大リスク要因を 1 つずつ。' +
+    getDriftPromptInjection();  // T0-3 Stage A: 執行癖を末尾に注入
 
   try {
     const [gRes, cRes] = await Promise.all([
@@ -1085,7 +1260,8 @@ async function compareCandidates() {
     '## 📊 全体比較サマリ\n' +
     '残りの候補について、見送り推奨/様子見/微妙 の振り分けを 1 行ずつ。\n\n' +
     '## 💬 本音\n' +
-    '今日この中から1銘柄だけ買うなら? 30字以内で断言。';
+    '今日この中から1銘柄だけ買うなら? 30字以内で断言。' +
+    getDriftPromptInjection();  // T0-3 Stage A: 執行癖を末尾に注入
 
   try {
     const [gRes, cRes] = await Promise.all([
@@ -1200,7 +1376,8 @@ async function analyzeHolding(cd) {
     'Google検索で調べた直近のニュース・決算・需給の状況。\n'+
     'この銘柄の最大のリスク要因も1つ挙げること。\n\n'+
     '## 【シニアFMの本音】\n'+
-    '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。';
+    '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。' +
+    getDriftPromptInjection();  // T0-3 Stage A: 執行癖を末尾に注入
 
   try {
     const [gRes, cRes] = await Promise.all([
@@ -1263,21 +1440,32 @@ function doTrade() {
     const memo = document.getElementById('tmemo').value.trim();
     const tdt = document.getElementById('tdt').value || TODAY;
     const ttype = document.getElementById('ttype').value || 'spot';
+    // T0-3 Stage A: 買い注文時に AI 推奨を lookup し execution_meta を保存
+    const exec_meta = buildExecutionMetaOnBuy(cd, p);
     const idx = H.findIndex(h => h.cd===cd);
     if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10}; }
-    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p});
+    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, execution_meta:exec_meta});
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY}); sv(KT,T);
-    toast('✅ ' + nm + ' 買い記録');
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY, execution_meta:exec_meta}); sv(KT,T);
+    const driftHint = exec_meta && exec_meta.drift_entry_pct != null
+      ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
+      : '';
+    toast('✅ ' + nm + ' 買い記録' + driftHint);
   } else {
     const h = H.find(h => h.cd===cd); let pnl=null;
+    // T0-3 Stage A: 売り注文時に drift_exit_pct を計算し execution_meta を更新
+    const exec_meta = h ? buildExecutionMetaOnSell(h, p) : null;
     if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
     cash+=p*sh; sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl, execution_meta:exec_meta}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
-    toast('✅ ' + nm + ' 売り記録' + ps);
+    const driftHint = exec_meta && exec_meta.drift_exit_pct_vs_target != null
+      ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
+      : '';
+    toast('✅ ' + nm + ' 売り記録' + ps + driftHint);
+    renderDriftSummary();  // dashboard の執行癖セクションを更新
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
   rTH();
