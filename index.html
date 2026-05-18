@@ -217,6 +217,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sec-lbl">🔥 ピックアップ銘柄</div>
     <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
 
+    <div class="sec-lbl">📋 Deep Insight 全候補 (tier 別)</div>
+    <div id="ddisummary" style="margin-bottom:14px">読み込み中…</div>
+
     <div class="sec-lbl">📅 決算カレンダー (推定 ±3日)</div>
     <div id="dearnings" style="margin-bottom:14px">読み込み中…</div>
 
@@ -447,15 +450,17 @@ async function _fetchJSON(name) {
 }
 
 async function loadMorningReports() {
-  const [macro, pickup, earn, themes, watch] = await Promise.all([
+  const [macro, pickup, earn, themes, watch, synth] = await Promise.all([
     _fetchJSON('macro_state.json'),
     _fetchJSON('pickup_stocks.json'),
     _fetchJSON('earnings_calendar.json'),
     _fetchJSON('industry_report.json'),
     _fetchJSON('limit_watchlist.json'),
+    _fetchJSON('deep_insight_synth.json'),
   ]);
   renderMacro(macro);
   renderPickup(pickup);
+  renderDISummary(synth);
   renderEarnings(earn);
   renderThemes(themes);
   renderCandidates(watch, pickup);
@@ -511,6 +516,105 @@ function renderPickup(d) {
       '</div>';
   }).join('');
   el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:6px">priority ' + d.execution_summary.priority_count + ' / attention ' + d.execution_summary.attention_count + ' / watch ' + d.execution_summary.watch_count + '</div>' + html;
+}
+
+// ============================================================
+//  Deep Insight 全候補サマリ (案 A: tier=A/S 候補 / tier=B/C 警戒・参考)
+// ============================================================
+//
+// pickup_stocks.json は既に tier=S/A だけにフィルタされて公開されるため、
+// tier=B/C 評価された銘柄が PWA で全く見えない (= 透明性に欠ける) 問題があった。
+// 本セクションは deep_insight_synth.json から **全 20 銘柄** を取得し、
+// tier 別 + verdict 別に表示することで「なぜ今日は候補が無いか」を可視化する。
+//
+// 配色:
+//   tier=S/A (本日の候補): 緑強調、常時展開
+//   tier=B/C (警戒・参考): 黄、折り畳み (details/summary)
+//   verdict=◎/○ : 緑   △ : 黄   ×/failed : 赤
+function renderDISummary(d) {
+  const el = document.getElementById('ddisummary');
+  if (!d || !Array.isArray(d.stocks) || d.stocks.length === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">Deep Insight データなし (次回月曜 05:00 JST に更新)</div>';
+    return;
+  }
+  const stocks = d.stocks;
+  // tier 分類 (S/A: 候補 / B/C: 警戒)
+  const candidates = stocks.filter(s => s.tier === 'S' || s.tier === 'A');
+  const watching   = stocks.filter(s => s.tier === 'B' || s.tier === 'C');
+  // verdict 集計 (◎/○/△/× + failed/None)
+  const vc = {};
+  for (const s of stocks) {
+    const v = (s.debate && s.debate.trader_verdict) || '—';
+    vc[v] = (vc[v] || 0) + 1;
+  }
+  const vcText = ['◎','○','△','×','failed','—']
+    .filter(v => vc[v])
+    .map(v => v + ':' + vc[v])
+    .join(' / ');
+
+  let html = '<div style="font-size:10px;color:var(--t3);margin-bottom:8px">'
+    + '完走 ' + stocks.length + ' 件 / verdict: ' + _escape(vcText)
+    + '</div>';
+
+  // 本日の候補 (tier S/A) — 常時展開
+  html += '<div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:6px">🎯 本日の候補 (tier S/A): ' + candidates.length + ' 件</div>';
+  if (candidates.length === 0) {
+    html += '<div style="background:rgba(239,68,68,.05);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--t2);line-height:1.5">'
+      + 'tier S/A 該当なし。全候補が tier B/C 評価のため、<strong>本日は買いシグナルなし</strong>。<br>'
+      + '<span style="color:var(--t3);font-size:10px">下の「警戒・参考」を展開すると、却下理由が確認できる。</span>'
+      + '</div>';
+  } else {
+    html += candidates.map(s => _renderDICard(s, true)).join('');
+  }
+
+  // 警戒・参考 (tier B/C) — 折り畳み
+  if (watching.length > 0) {
+    html += '<details style="margin-top:8px">'
+      + '<summary style="font-size:11px;color:var(--yellow);font-weight:700;cursor:pointer;padding:8px 12px;background:var(--s1);border:1px solid var(--border);border-radius:10px;list-style:none">'
+      + '⚠️ 警戒・参考 (tier B/C): ' + watching.length + ' 件 — タップで却下理由を展開'
+      + '</summary>'
+      + '<div style="margin-top:6px">'
+      + watching.map(s => _renderDICard(s, false)).join('')
+      + '</div>'
+      + '</details>';
+  }
+
+  el.innerHTML = html;
+}
+
+function _renderDICard(s, highlight) {
+  const deb = s.debate || {};
+  const verdict = deb.trader_verdict || '—';
+  const verdictColorMap = {
+    '◎': 'var(--green)',
+    '○': 'var(--green)',
+    '△': 'var(--yellow)',
+    '×': 'var(--red)',
+    'failed': 'var(--red)',
+    '—': 'var(--t3)',
+  };
+  const vColor = verdictColorMap[verdict] || 'var(--t3)';
+  const tierColor = (s.tier === 'S' || s.tier === 'A') ? 'var(--green)' : 'var(--yellow)';
+  const bg = highlight ? 'rgba(16,185,129,.05)' : 'var(--s1)';
+  const reason = (deb.trader_reasoning || '').slice(0, 100);
+  const reasonOverflow = (deb.trader_reasoning || '').length > 100;
+  const sourceTag = s.extraction_source === 'fins_summary'
+    ? '<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 5px;border-radius:4px;margin-left:6px">📊数値のみ</span>'
+    : '';
+  return '<div style="background:' + bg + ';border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+    + '<div style="min-width:0;flex:1">'
+    + '<span style="font-size:13px;font-weight:700">' + _escape(s.name || '?') + '</span>'
+    + '<span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(s.code) + '</span>'
+    + sourceTag
+    + '</div>'
+    + '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">'
+    + '<span style="font-size:10px;background:rgba(59,130,246,.15);color:' + tierColor + ';padding:2px 6px;border-radius:4px;font-weight:700">tier ' + _escape(s.tier) + '</span>'
+    + '<span style="font-size:16px;color:' + vColor + ';font-weight:700;min-width:18px;text-align:center">' + _escape(verdict) + '</span>'
+    + '</div>'
+    + '</div>'
+    + (reason ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">' + _escape(reason) + (reasonOverflow ? '…' : '') + '</div>' : '')
+    + '</div>';
 }
 
 function renderEarnings(d) {
