@@ -1293,10 +1293,9 @@ function toggleChart(code4) {
     return;
   }
   // TradingView の symbol 形式: TSE:XXXX (4 桁数字コード)
-  // 5 桁英字混じり (例: 213A0) は末尾の "0" を除去して "213A" として渡す
-  let symbol = code4.replace(/0$/, '');   // last "0" を仮で除去
-  // ただし純粋数字 4 桁は 4 桁のまま使う (例: "3436" → "3436", "213A0" → "213A")
-  if (/^\d{4}$/.test(code4)) symbol = code4;
+  // J-Quants の 5 桁コード (例: "30480", "213A0") → 末尾の "0" を除去して TradingView 用 4 桁に
+  // 純粋 4 桁 (例: "3436") はそのまま。将来「英数字 4 桁で末尾 0」(例: 13A0) が登場しても誤動作しないよう桁数で分岐
+  let symbol = (code4.length === 5 && code4.endsWith('0')) ? code4.slice(0, 4) : code4;
   const url = 'https://s.tradingview.com/widgetembed/?frameElementId=tv-' + code4 +
     '&symbol=TSE%3A' + symbol +
     '&interval=D' +
