@@ -33,9 +33,9 @@
   --pink:#ec4899;          /* シニアFMの本音 (最重要アドバイス) */
   --pink-soft:#fce7f3;
   --gem:#4285f4;--cld:#d97706;
-  --text:#1f2937;          /* slate-800 (本文、十分なコントラスト) */
-  --t2:#4b5563;            /* slate-600 (サブ本文) */
-  --t3:#94a3b8;            /* slate-400 (補助情報) */
+  --text:#0f172a;          /* slate-900 (本文、最高コントラスト) */
+  --t2:#334155;            /* slate-700 (サブ本文、元: slate-600) */
+  --t3:#475569;            /* slate-600 (補助情報、元: slate-400 で薄すぎたため濃く) */
   --shadow:0 2px 8px rgba(15,23,42,.06);
   --shadow-lg:0 4px 16px rgba(15,23,42,.10);
   --font:'Noto Sans JP',sans-serif;--mono:'JetBrains Mono',monospace;
@@ -83,6 +83,8 @@ nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex
 .abar{font-size:11px;font-weight:700;padding:4px 8px;border-radius:5px;margin-bottom:6px;text-align:center;}
 .as{background:rgba(239,68,68,.15);color:var(--red);}.ag{background:rgba(16,185,129,.15);color:var(--green);}.aw{background:rgba(245,158,11,.15);color:var(--yellow);}
 .cpin{background:transparent;border:none;color:var(--acc);font-family:var(--mono);font-size:11px;font-weight:700;width:56px;text-align:right;outline:none;border-bottom:1px dashed var(--border);}
+.bpin{background:transparent;border:none;color:var(--orange);font-family:var(--mono);font-size:11px;font-weight:700;width:64px;text-align:right;outline:none;border-bottom:1px dashed var(--orange);}
+.bpin:focus{border-bottom-color:var(--acc);color:var(--acc);}
 .delbtn{font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:4px 0;margin-top:4px;}
 .fl{font-size:11px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px;letter-spacing:.04em;}
 .fi{width:100%;background:var(--s1);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:15px;padding:9px 11px;outline:none;transition:border-color .15s;margin-bottom:10px;}
@@ -104,7 +106,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .rev-btn:disabled{opacity:.5;}
 .rcard{background:var(--s1);border:1px solid var(--border);border-radius:11px;overflow:hidden;margin-bottom:10px;}
 .rhdr{display:flex;align-items:center;gap:8px;padding:10px 13px;border-bottom:1px solid var(--border);}
-.rbody{padding:13px;font-size:13px;line-height:1.85;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;}
+.rbody{padding:13px;font-size:13px;line-height:1.85;color:var(--text);white-space:pre-wrap;word-break:break-word;}
 .ai-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:.04em;}
 .pill-g{background:rgba(66,133,244,.15);color:var(--gem);}
 .pill-c{background:rgba(217,119,6,.15);color:var(--cld);}
@@ -436,7 +438,7 @@ function set(id, v, cls) { const e = document.getElementById(id); e.textContent 
 function rDash() {
   calcS();
   const he = document.getElementById('dh');
-  he.innerHTML = H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map(h => hHTML(h, true)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>';
+  he.innerHTML = H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map((h,i) => hHTML(h, true, i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>';
   const te = document.getElementById('dt');
   const rec = [...T].reverse().slice(0, 3);
   te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
@@ -1505,7 +1507,7 @@ async function compareCandidates() {
   }
 }
 
-function hHTML(h, compact) {
+function hHTML(h, compact, idx) {
   const cp = h.cp || h.bp, pnl = (cp - h.bp) * h.sh, pct = (cp - h.bp) / h.bp * 100;
   const cls = pnl >= 0 ? 'up' : 'dn';
   const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
@@ -1513,14 +1515,17 @@ function hHTML(h, compact) {
   if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
   else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
   else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
+  // idx 未指定 (古い呼び出し互換) なら cd で逆引き
+  const i = (typeof idx === 'number') ? idx : H.findIndex(x => x.cd === h.cd && (x.type||'spot') === (h.type||'spot'));
   let html = '<div class="hrow">' + al +
     '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
     '<div><div class="hpnl ' + cls + '">' + (pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString() + '</div>' +
     '<div class="hpct ' + cls + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</div></div></div>' +
     '<div class="hmeta">' +
     '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
-    '<span class="hbg">' + h.sh + '株</span><span class="hbg">買 ' + h.bp.toLocaleString() + '円</span>' +
-    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(\'' + h.cd + '\',this.value)">円</span>' +
+    '<span class="hbg">' + h.sh + '株</span>' +
+    '<span class="hbg" title="買値をタップして手動修正">買 <input class="bpin" type="number" step="0.1" min="0" value="' + h.bp + '" onchange="uBP(' + i + ',this.value)" onclick="this.select()">円</span>' +
+    '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(' + i + ',this.value)">円</span>' +
     (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
     '</div>';
   if (!compact) {
@@ -1528,9 +1533,9 @@ function hHTML(h, compact) {
       '<div class="hl s"><div class="hll">損切り</div><div class="hlv">' + (h.sl ? h.sl.toLocaleString()+'円' : '－') + '</div></div>' +
       '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
       '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
-      (h.memo ? '<div style="font-size:11px;color:var(--t3);margin-top:5px">📝' + h.memo + '</div>' : '') +
+      (h.memo ? '<div style="font-size:11px;color:var(--t2);margin-top:5px">📝' + h.memo + '</div>' : '') +
       '<div style="display:flex;gap:6px;margin-top:8px">'+
-      '<button class="delbtn" onclick="delH(\'' + h.cd + '\')" style="flex:none">🗑 削除</button>'+
+      '<button class="delbtn" onclick="delH(' + i + ')" style="flex:none">🗑 削除</button>'+
       '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 損切り・利確・売買判断を分析</button>'+
       '</div>'+
       '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>';
@@ -1609,9 +1614,40 @@ async function analyzeHolding(cd) {
   }
 }
 
-function uCP(cd, v) { const h = H.find(h => h.cd===cd); if(h){ h.cp=parseFloat(v)||h.bp; sv(KH,H); calcS(); } }
-function delH(cd) { if(!confirm('削除しますか？')) return; H=H.filter(h=>h.cd!==cd); sv(KH,H); rHold(); toast('削除しました'); }
-function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map(h=>hHTML(h,false)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
+function uCP(idx, v) {
+  const h = H[idx];
+  if (!h) return;
+  h.cp = parseFloat(v) || h.bp;
+  sv(KH, H); calcS();
+}
+function uBP(idx, v) {
+  const h = H[idx];
+  if (!h) return;
+  const newBP = parseFloat(v);
+  if (!newBP || newBP <= 0) {
+    toast('⚠️ 買値は 0 より大きい数値を入力してください');
+    rHold(); rDash();
+    return;
+  }
+  const oldBP = h.bp;
+  if (Math.abs(newBP - oldBP) < 0.001) return;  // 変化なし
+  if (!confirm('買値を ' + oldBP.toLocaleString() + ' 円 → ' + newBP.toLocaleString() + ' 円 に変更しますか？\n(損益計算が変わります)')) {
+    rHold(); rDash(); return;
+  }
+  h.bp = newBP;
+  h.bp_edited_at = new Date().toISOString();
+  sv(KH, H); calcS(); rHold(); rDash();
+  toast('💰 ' + (h.nm||h.cd) + ' の買値を ' + newBP.toLocaleString() + ' 円に変更');
+}
+function delH(idx) {
+  const h = H[idx];
+  if (!h) return;
+  if (!confirm((h.nm||h.cd) + ' (' + (h.type==='margin'?'信用':'現物') + ') を削除しますか？')) return;
+  H.splice(idx, 1);
+  sv(KH, H); rHold(); calcS(); rDash();
+  toast('削除しました');
+}
+function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map((h,i)=>hHTML(h,false,i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
 
 // ウォッチリスト
 function addWatch() {
@@ -1912,7 +1948,7 @@ async function analyzeScreenshots() {
   const btn=document.getElementById('ssAnalyzeBtn');
   btn.disabled=true;
   const prompts={
-    hold:'この画像はSBI証券アプリの画面です。保有証券詳細・信用建玉詳細・保有証券一覧・信用建玉一覧のいずれかです。\n表示されているすべての銘柄を読み取り、以下のJSON配列のみ返してください。\n- 「取得単価」「建値」「平均建単価」→buy_price\n- 「保有株数」「建株数」→shares\n- 「現在値」→current_price\n- 「売買区分:買建」または「信用建玉」→type:"margin"、それ以外→type:"spot"\n[{"code":"証券コード","name":"銘柄名","shares":株数,"buy_price":取得単価,"current_price":現在値,"type":"spot"または"margin","buy_date":null}]\nJSONのみ返す。読み取れない項目はnull。',
+    hold:'あなたは SBI 証券スマホアプリのスクリーンショットを精密に読み取る OCR 専門アシスタントです。\n画像には「保有証券一覧」「保有証券詳細」「信用建玉一覧」「信用建玉詳細」のいずれか、または複合画面が表示されています。\n\n【最重要】複数銘柄が縦に並んでいる場合は、漏れなく**すべての行**を抽出してください。スクロールで隠れていない範囲をすべて。\n\n【数値の読み取りルール】\n- 数値はカンマ区切りで表示される (例: 1,234,567)。**カンマを取り除いた純粋な整数または小数**で返す\n- 通貨記号「¥」「円」、単位「株」「口」、空白は除外\n- 「+」プラスは符号維持、「▲」「△」「-」「△印」はマイナスとして扱う\n- 小数点は維持 (例: 「2,850.5」→ 2850.5)\n- 4桁の証券コード (3000〜9999 が多い、ETF は 1xxx) を必ず特定\n\n【ラベル → JSON フィールド対応表】 ※SBI の表記揺れに対応\n- buy_price ← 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」「単価(建)」\n- shares    ← 「保有株数」「保有数量」「建株数」「建玉数量」「株数」「数量」\n- current_price ← 「現在値」「現値」「時価」「最終値」\n- type      ← 以下のキーワードで判別:\n             ・「現物買」「現物」「特定預り」「一般預り」「NISA」 → "spot"\n             ・「信用買建」「信用新規買」「制度買」「一般買」「買建」「信用買」「制度信用」「一般信用」 → "margin"\n             ・画面タイトルが「信用建玉」系なら全行 "margin"、「保有証券」系なら "spot"\n- buy_date  ← 「建日」「取得日」「約定日」「買付日」(YYYY-MM-DD に正規化、和暦は西暦変換、無ければ null)\n\n【同一銘柄が複数表示されている場合】\n- 現物と信用が両方ある銘柄は **必ず別オブジェクト** として返す (type が異なる)\n- 同じ type で複数行 (建日違い等) ある場合も **行ごとに別オブジェクト** で返す\n- 集計合計行 (「合計」「ポートフォリオ計」など) は無視する\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"code":"4桁コード","name":"銘柄名","shares":整数,"buy_price":数値,"current_price":数値,"type":"spot"または"margin","buy_date":"YYYY-MM-DD"またはnull}]\n\n【読み取れない項目の扱い】\n- 値が不明なフィールドは null。配列を空にはせず、確実に読めたフィールドのみで返す\n- type が判別できない場合は "spot" にフォールバック\n- 銘柄名が判読困難でも、コード+株数+単価が読めれば name は推測せず空文字 "" で良い',
     hist:'この画像はSBI証券アプリの約定・取引履歴画面です。日付を必ず読み取ってください。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"または"margin"}]\nJSONのみ返す。',
     pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
     watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
@@ -1949,7 +1985,15 @@ async function analyzeScreenshots() {
         if(s<0||e<0)throw new Error('銘柄情報を読み取れませんでした');
         const items=JSON.parse(raw.slice(s,e+1));
         for(const item of items){
-          const exists=parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
+          // 保有 (hold) は code+type で dedup (現物と信用は別扱い)
+          // それ以外 (hist/pnl/watch) は従来通り code or name で dedup
+          let exists;
+          if(ssType==='hold'){
+            const k = (it) => (it.code||it.name||'') + ':' + (it.type||'spot');
+            exists = parsedItems.find(p => k(p) === k(item));
+          } else {
+            exists = parsedItems.find(p=>(p.code&&p.code===item.code)||(p.name&&p.name===item.name));
+          }
           if(!exists)parsedItems.push(item);
         }
         resEl.textContent+='  ✅ '+items.length+'件検出\n';
@@ -2030,10 +2074,19 @@ function doImport() {
   if(ssType==='hold'){
     for(const it of checked){
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
-      if(!nm)continue;
-      const idx=H.findIndex(h=>h.cd===(cd||nm));
-      if(idx>=0){if(it.current_price)H[idx].cp=it.current_price;}
-      else H.push({cd:cd||nm,nm,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:it.type||'spot'});
+      if(!cd && !nm)continue;
+      const t=it.type||'spot';
+      // 現物と信用は別ポジションとして区別
+      const idx=H.findIndex(h=>h.cd===(cd||nm) && (h.type||'spot')===t);
+      if(idx>=0){
+        // 再取込: OCR の値を信頼して上書き (買値が初回 OCR で誤っていた場合の修正手段)
+        if(it.current_price)H[idx].cp=it.current_price;
+        if(it.buy_price && it.buy_price>0)H[idx].bp=it.buy_price;
+        if(it.shares && it.shares>0)H[idx].sh=it.shares;
+        if(!H[idx].nm && nm)H[idx].nm=nm;
+      } else {
+        H.push({cd:cd||nm,nm:nm||cd,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:t});
+      }
       count++;
     }
     sv(KH,H);
