@@ -917,7 +917,9 @@ function renderPickup(d) {
       (s.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(s.warning_reason) + '</div>' : '') +
       '</div>';
   }).join('');
-  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:6px">priority ' + d.execution_summary.priority_count + ' / attention ' + d.execution_summary.attention_count + ' / watch ' + d.execution_summary.watch_count + '</div>' + html;
+  // バックエンド JSON スキーマ変動耐性: execution_summary が欠落しても TypeError で落ちないように
+  const es = d.execution_summary || {};
+  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:6px">priority ' + (es.priority_count ?? '-') + ' / attention ' + (es.attention_count ?? '-') + ' / watch ' + (es.watch_count ?? '-') + '</div>' + html;
 }
 
 // ============================================================
