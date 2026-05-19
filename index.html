@@ -1381,8 +1381,10 @@ function _renderCandidateCard(s, pickupMap, cat) {
 // ============================================================
 //  Phase 4.2: TradingView チャート表示 (iframe widget)
 // ============================================================
-function toggleChart(code4) {
-  const el = document.getElementById('chart-' + code4);
+function toggleChart(code4, prefix) {
+  // prefix 引数 (省略時は 'chart-') で保有 (chart-hold-) と候補 (chart-) の DOM 衝突を回避
+  prefix = prefix || 'chart-';
+  const el = document.getElementById(prefix + code4);
   if (!el) return;
   if (el.style.display === 'block') {
     el.style.display = 'none';
@@ -1393,7 +1395,7 @@ function toggleChart(code4) {
   // J-Quants の 5 桁コード (例: "30480", "213A0") → 末尾の "0" を除去して TradingView 用 4 桁に
   // 純粋 4 桁 (例: "3436") はそのまま。将来「英数字 4 桁で末尾 0」(例: 13A0) が登場しても誤動作しないよう桁数で分岐
   let symbol = (code4.length === 5 && code4.endsWith('0')) ? code4.slice(0, 4) : code4;
-  const url = 'https://s.tradingview.com/widgetembed/?frameElementId=tv-' + code4 +
+  const url = 'https://s.tradingview.com/widgetembed/?frameElementId=tv-' + prefix + code4 +
     '&symbol=TSE%3A' + symbol +
     '&interval=D' +
     '&theme=light' +
@@ -1407,7 +1409,7 @@ function toggleChart(code4) {
   el.innerHTML =
     '<div style="background:var(--s2);padding:6px 10px;font-size:11px;color:var(--t2);display:flex;justify-content:space-between;align-items:center">' +
     '<span>📈 TradingView ' + symbol + ' (日足、25 日移動平均線)</span>' +
-    '<button onclick="toggleChart(\'' + code4 + '\')" style="background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer">×</button>' +
+    '<button onclick="toggleChart(\'' + code4 + '\',\'' + prefix + '\')" style="background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer">×</button>' +
     '</div>' +
     '<iframe src="' + url + '" style="width:100%;height:380px;border:0;display:block" loading="lazy"></iframe>';
   el.style.display = 'block';
@@ -1669,10 +1671,13 @@ function hHTML(h, compact, idx) {
       '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
       '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
       (h.memo ? '<div style="font-size:11px;color:var(--t2);margin-top:5px">📝' + h.memo + '</div>' : '') +
-      '<div style="display:flex;gap:6px;margin-top:8px">'+
-      '<button class="delbtn" onclick="delH(' + i + ')" style="flex:none">🗑 削除</button>'+
-      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="flex:1;background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 損切り・利確・売買判断を分析</button>'+
+      // Phase B-1: 保有カードにも TradingView チャートボタンを追加 (候補と DOM 衝突しないよう prefix=chart-hold-)
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">'+
+      '<button onclick="toggleChart(\'' + h.cd + '\',\'chart-hold-\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">📈 チャート</button>'+
+      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 売買判断</button>'+
       '</div>'+
+      '<button class="delbtn" onclick="delH(' + i + ')" style="margin-top:6px">🗑 削除</button>'+
+      '<div id="chart-hold-' + h.cd + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>'+
       '<div id="ai-'+h.cd+'" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>';
   }
   return html + '</div>';
