@@ -392,7 +392,13 @@ const ld = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } 
 const sv = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 let H = ld(KH, []), T = ld(KT, []), cash = ld(KC, 0), W = ld(KW, []);
 
-const D = new Date(), TODAY = D.toISOString().slice(0, 10);
+const D = new Date();
+const ymdJST = (d = new Date()) => {
+  // ローカル時刻基準で YYYY-MM-DD を生成 (UTC 基準だと JST 0:00-9:00 が前日になるバグ回避)
+  const jst = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return jst.toISOString().slice(0, 10);
+};
+const TODAY = ymdJST();
 const dow = ['日','月','火','水','木','金','土'][D.getDay()];
 document.getElementById('ds').textContent =
   D.getFullYear() + '/' + String(D.getMonth()+1).padStart(2,'0') + '/' + String(D.getDate()).padStart(2,'0') + '(' + dow + ')';
@@ -628,7 +634,7 @@ async function exportTradeHistoryToClipboard() {
     trades: recent_trades,
   };
   const text =
-    '【あなたの保有 + 売買履歴】 (' + new Date().toISOString().slice(0,10) + ')\n' +
+    '【あなたの保有 + 売買履歴】 (' + ymdJST() + ')\n' +
     (drift ? '執行癖: ' + drift.summary_text + '\n\n' : '売買履歴 0 件\n\n') +
     JSON.stringify(payload, null, 2);
   try {
@@ -785,7 +791,7 @@ function _addPct(agg, capital_jpy) {
 
 function buildTaxAfterSummary(trades, capital_jpy, as_of_str, tax_rate) {
   // backend realized_pnl_calculator.build_summary の JS ミラー
-  if (!as_of_str) as_of_str = new Date().toISOString().slice(0,10);
+  if (!as_of_str) as_of_str = ymdJST();
   const as_of = new Date(as_of_str);
   const all_rounds = matchRoundTrips(trades);
 
@@ -1321,7 +1327,7 @@ async function analyzeCandidate(code4) {
 
   const prompt =
     'あなたは運用歴25年の日本株シニアファンドマネージャー。\n\n' +
-    '⚠️ 重要: 必ず Google 検索を実行して「' + s.name + ' 速報」「' + s.name + ' ニュース 今日」「' + s.code + ' 出来高 最新」「' + s.name + ' 決算」など複数クエリで **当日 (' + new Date().toISOString().slice(0,10) + ') の最新情報** を取得してから回答してください。前日終値ベースのデータは参考に留め、当日の場中の値動き・出来高・速報・関連業界動向を最優先で評価。\n\n' +
+    '⚠️ 重要: 必ず Google 検索を実行して「' + s.name + ' 速報」「' + s.name + ' ニュース 今日」「' + s.code + ' 出来高 最新」「' + s.name + ' 決算」など複数クエリで **当日 (' + ymdJST() + ') の最新情報** を取得してから回答してください。前日終値ベースのデータは参考に留め、当日の場中の値動き・出来高・速報・関連業界動向を最優先で評価。\n\n' +
     '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) で買うかどうかを断言。曖昧表現は禁止、数字で具体的に。\n\n' +
     '【候補銘柄】\n' +
     s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', score ' + (s.total_score || '-') + ')\n' +
@@ -1462,7 +1468,7 @@ async function compareCandidates() {
 
   const prompt =
     'あなたは運用歴25年の日本株シニアファンドマネージャー。\n\n' +
-    '⚠️ 重要: 必ず Google 検索で当日 (' + new Date().toISOString().slice(0, 10) + ') の市場全体の動き・各銘柄の本日速報を取得してから回答。前日データではなく当日の動きで判断。\n\n' +
+    '⚠️ 重要: 必ず Google 検索で当日 (' + ymdJST() + ') の市場全体の動き・各銘柄の本日速報を取得してから回答。前日データではなく当日の動きで判断。\n\n' +
     '【比較対象 ' + targets.length + ' 銘柄】\n' + listTxt + '\n\n' +
     '【依頼】短期回転戦略 (損切り-8%/RR2/数日〜数週間保有) の視点で、上記から **今日エントリーを優先すべき Top 3** を選び、以下フォーマットで答えてください:\n\n' +
     '## 🥇 第1位: <コード> <銘柄名>\n' +
