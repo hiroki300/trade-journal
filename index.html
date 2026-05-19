@@ -447,8 +447,39 @@ function go(id) {
   });
   if (id==='dash')  rDash();
   if (id==='hold')  rHold();
-  if (id==='trade') rTH();
+  if (id==='trade') { rTH(); checkMacroWarning(); }  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
   if (id==='watch') rWatch();
+}
+
+// Phase A-2: マクロガード storm/halt 時の警告 (日次 1 回)
+function checkMacroWarning() {
+  const m = window._macroData;
+  if (!m || !m.regime) return;
+  const dangerous = ['storm', 'halt'].includes(m.regime);
+  if (!dangerous) return;
+  const lastWarned = ld('tj_macro_warned_at', '');
+  if (lastWarned === TODAY) return;  // 1日1回まで
+  const msg = m.regime === 'halt'
+    ? '⛔ HALT モード: 取引停止水準のマクロ環境です。本日の新規買いは原則中止を推奨します。'
+    : '⛈️ STORM モード: 急変動環境です。ポジションサイズを通常の 50% 以下、損切り幅も狭めに。';
+  alert(msg + '\n\n' + (m.summary || ''));
+  sv('tj_macro_warned_at', TODAY);
+}
+
+// Phase A-2: AI ペルソナ動的切替 (マクロ regime に応じて口調を変える)
+function buildPersonaPrefix() {
+  const m = window._macroData;
+  const regime = m && m.regime;
+  if (regime === 'halt') {
+    return 'あなたは徹底したリスク管理至上主義のシニアFMです。マクロ環境は HALT（取引停止水準）。少しでも疑念があれば「すべて手仕舞え」「新規買いは中止」と命じてください。\n\n';
+  }
+  if (regime === 'storm') {
+    return 'あなたはディフェンシブ運用に切り替えたシニアFMです。マクロ環境は STORM（急変動）。ポジションサイズは通常の 50% 以下、損切り幅も狭めに。慎重な判断を最優先。\n\n';
+  }
+  if (regime === 'caution') {
+    return 'あなたは警戒モードのシニアFMです。マクロ環境は CAUTION。攻めすぎず、明確な根拠のあるエントリーのみ推奨。\n\n';
+  }
+  return 'あなたは運用歴25年の日本株シニアファンドマネージャーです。\n\n';
 }
 
 function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
@@ -525,6 +556,7 @@ async function loadMorningReports(forceRefresh = false) {
     window._synthData = synth;
     window._pickupData = pickup;
     window._watchlistData = watch;
+    window._macroData = macro;  // Phase A-2: マクロ警告 + AI ペルソナ切替で参照
     renderMacro(macro);
     renderPickup(pickup);
     renderDISummary(synth);
@@ -1398,7 +1430,7 @@ async function analyzeCandidate(code4) {
   ).join('\n');
 
   const prompt =
-    'あなたは運用歴25年の日本株シニアファンドマネージャー。\n\n' +
+    buildPersonaPrefix() +
     '⚠️ 重要: 必ず Google 検索を実行して「' + s.name + ' 速報」「' + s.name + ' ニュース 今日」「' + s.code + ' 出来高 最新」「' + s.name + ' 決算」など複数クエリで **当日 (' + ymdJST() + ') の最新情報** を取得してから回答してください。前日終値ベースのデータは参考に留め、当日の場中の値動き・出来高・速報・関連業界動向を最優先で評価。\n\n' +
     '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) で買うかどうかを断言。曖昧表現は禁止、数字で具体的に。\n\n' +
     '【候補銘柄】\n' +
@@ -1543,7 +1575,7 @@ async function compareCandidates() {
   }).join('\n\n');
 
   const prompt =
-    'あなたは運用歴25年の日本株シニアファンドマネージャー。\n\n' +
+    buildPersonaPrefix() +
     '⚠️ 重要: 必ず Google 検索で当日 (' + ymdJST() + ') の市場全体の動き・各銘柄の本日速報を取得してから回答。前日データではなく当日の動きで判断。\n\n' +
     '【比較対象 ' + targets.length + ' 銘柄】\n' + listTxt + '\n\n' +
     '【依頼】短期回転戦略 (損切り-8%/RR2/数日〜数週間保有) の視点で、上記から **今日エントリーを優先すべき Top 3** を選び、以下フォーマットで答えてください:\n\n' +
@@ -1654,7 +1686,7 @@ async function analyzeHolding(cd) {
   const cost = h.bp * h.sh;
 
   const prompt =
-    'あなたは運用資産5000億円規模・運用歴25年の日本株専門シニアファンドマネージャーです。\n'+
+    buildPersonaPrefix() +
     'Google検索で今日の最新情報（株価・ニュース・需給・材料）を必ず調べてから回答してください。\n'+
     '曖昧な表現は禁止。プロとして断言し、具体的な数字で答えてください。\n\n'+
     '【保有銘柄】\n'+
@@ -1916,18 +1948,18 @@ function pfS() {
   return hs + ts + ws + '\n残金: ' + Math.round(cash).toLocaleString() + '円';
 }
 
-// 振り返り
+// 振り返り (Phase A-2: ペルソナを buildPersonaPrefix() に統一)
 const GEM_STEPS = [
   {icon:'🌍', title:'世界情勢・マクロ経済', color:'var(--gem)',
-   p: pf => 'あなたは日本株専門のシニアFMです。Google検索で今日の最新情報を調べてから答えてください。\nポートフォリオ: ' + pf + '\n米国株・為替・原油・地政学リスクを調べ、明日の日本市場への影響を具体的に述べてください。'},
+   p: pf => buildPersonaPrefix() + 'Google検索で今日の最新情報を調べてから答えてください。\nポートフォリオ: ' + pf + '\n米国株・為替・原油・地政学リスクを調べ、明日の日本市場への影響を具体的に述べてください。'},
   {icon:'📰', title:'日本株ニュース・個別材料', color:'var(--gem)',
-   p: pf => 'あなたは日本株専門アナリストです。Google検索で今日の最新情報を調べてください。\n保有銘柄: ' + pf + '\n保有銘柄の個別ニュース・適時開示、日経平均・グロース動向、明日の注目指標を調べてください。'},
+   p: pf => buildPersonaPrefix() + 'Google検索で今日の最新情報を調べてください。\n保有銘柄: ' + pf + '\n保有銘柄の個別ニュース・適時開示、日経平均・グロース動向、明日の注目指標を調べてください。'},
   {icon:'📱', title:'SNS・YouTube・X話題', color:'var(--gem)',
-   p: pf => 'あなたは市場センチメント分析の専門家です。Google検索で調べてください。\n保有銘柄: ' + pf + '\nXで話題の日本株、投資系YouTubeの注目テーマ、個人投資家の動向を調べて市場センチメントを判断してください。'},
+   p: pf => buildPersonaPrefix() + 'Google検索で X / YouTube / 個人投資家の動向を調べて市場センチメントを判断してください。\n保有銘柄: ' + pf + '\nXで話題の日本株、投資系YouTubeの注目テーマを優先的に。'},
 ];
 const CLD_STEP = {
   icon:'🎯', title:'振り返り・明日の戦略', color:'var(--cld)',
-  p: pf => 'あなたは運用歴25年のシニアFMです。\n【ポートフォリオ】\n' + pf + '\n以下を率直・具体的に:\n1.今日の振り返り\n2.保有銘柄ごとの判断（継続/利確/損切り）\n3.残金の活用法（新規買い候補・価格）\n4.明日の行動計画\n5.シニアFMとしての一言'
+  p: pf => buildPersonaPrefix() + '【ポートフォリオ】\n' + pf + '\n以下を率直・具体的に:\n1.今日の振り返り\n2.保有銘柄ごとの判断（継続/利確/損切り）\n3.残金の活用法（新規買い候補・価格）\n4.明日の行動計画\n5.シニアFMとしての一言'
 };
 
 async function doRev() {
@@ -1973,8 +2005,8 @@ async function doChat() {
   document.getElementById('csend').disabled = true;
   addMsg('u', txt);
   const pf = pfS();
-  const gemSys = 'あなたは日本株専門アナリストです。Google検索で最新情報を確認しながら回答してください。\nポートフォリオ: ' + pf;
-  const cldSys = 'あなたは運用歴25年の日本株専門シニアFMです。\nポートフォリオ: ' + pf + '\n率直・具体的にアドバイスしてください。';
+  const gemSys = buildPersonaPrefix() + 'Google検索で最新情報を確認しながら回答してください。\nポートフォリオ: ' + pf;
+  const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n率直・具体的にアドバイスしてください。';
   const ldEl = document.createElement('div'); ldEl.className='cmsg';
   ldEl.innerHTML = '<div class="cav">' + (chatMode==='gc'?'🤝':chatMode==='g'?'🤖':'🧠') + '</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
   document.getElementById('cMsgs').appendChild(ldEl); sC();
