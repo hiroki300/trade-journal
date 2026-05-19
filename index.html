@@ -1691,15 +1691,17 @@ function doTrade() {
   const sh = parseFloat(document.getElementById('tsh').value);
   const p = parseFloat(document.getElementById('tp').value);
   if (!cd||!nm||!sh||!p) { toast('⚠️ コード・銘柄名・株数・価格は必須'); return; }
+  // 売買共通: 現物/信用区分はフォームから (信用建玉の売りでも参照)
+  const ttype = document.getElementById('ttype').value || 'spot';
   if (a === 'buy') {
     const sl = parseFloat(document.getElementById('tsl').value) || null;
     const tgt = parseFloat(document.getElementById('ttgt').value) || null;
     const memo = document.getElementById('tmemo').value.trim();
     const tdt = document.getElementById('tdt').value || TODAY;
-    const ttype = document.getElementById('ttype').value || 'spot';
     // T0-3 Stage A: 買い注文時に AI 推奨を lookup し execution_meta を保存
     const exec_meta = buildExecutionMetaOnBuy(cd, p);
-    const idx = H.findIndex(h => h.cd===cd);
+    // 現物と信用は別ポジションとして区別 (doImport と整合)
+    const idx = H.findIndex(h => h.cd===cd && (h.type||'spot')===ttype);
     if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10}; }
     else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, execution_meta:exec_meta});
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
@@ -1710,7 +1712,9 @@ function doTrade() {
       : '';
     toast('✅ ' + nm + ' 買い記録' + driftHint);
   } else {
-    const h = H.find(h => h.cd===cd); let pnl=null;
+    // 売り時もフォームの ttype で現物/信用を区別
+    const h = H.find(h => h.cd===cd && (h.type||'spot')===ttype);
+    let pnl=null;
     // T0-3 Stage A: 売り注文時に drift_exit_pct を計算し execution_meta を更新
     const exec_meta = h ? buildExecutionMetaOnSell(h, p) : null;
     if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
