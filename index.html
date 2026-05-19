@@ -362,6 +362,22 @@ select.fi{appearance:none;-webkit-appearance:none;}
   </div>
 </div>
 
+<!-- Phase A-1: 損切り一括設定モーダル -->
+<div class="modal-overlay" id="bulkSLModal" onclick="if(event.target===this)closeBulkSLModal()">
+  <div class="modal">
+    <div class="modal-title">🛡️ 損切りライン 一括設定</div>
+    <div style="font-size:11px;color:var(--t2);margin-bottom:10px;line-height:1.6">
+      各銘柄に対して損切り価格を選んでください。<br>
+      <span style="color:var(--red)">-8%</span> = 戦略デフォルト / <span style="color:var(--yellow)">-5%</span> = タイト / カスタムで自由入力
+    </div>
+    <div id="bulkSLItems"></div>
+    <div class="modal-btns">
+      <button class="btn-sm btn-cancel" onclick="closeBulkSLModal()">キャンセル</button>
+      <button class="btn-sm btn-import" onclick="applyBulkSL()">✅ 設定する</button>
+    </div>
+  </div>
+</div>
+
 <div class="key-modal-overlay" id="keyModal" style="display:none">
   <div class="key-modal">
     <div class="key-modal-title">🔑 APIキーを設定</div>
@@ -377,6 +393,13 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="key-row">
       <label class="key-label">🧠 Anthropic API Key</label>
       <input class="key-input" id="keyAnthropic" type="password" placeholder="sk-ant-...">
+    </div>
+    <div class="key-row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:6px">🛡️ 安全機能</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 0">
+        <input type="checkbox" id="hardLockToggle" checked onchange="toggleHardLock(this.checked)" style="width:16px;height:16px;cursor:pointer">
+        <span style="font-size:12px;color:var(--t2);line-height:1.5">損切り未設定時に買い記録をロック<br><span style="font-size:10px;color:var(--t3)">(短期回転戦略の安全装置、推奨 ON)</span></span>
+      </label>
     </div>
     <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
     <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
@@ -446,7 +469,17 @@ function set(id, v, cls) { const e = document.getElementById(id); e.textContent 
 function rDash() {
   calcS();
   const he = document.getElementById('dh');
-  he.innerHTML = H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map((h,i) => hHTML(h, true, i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>';
+  // Phase A-1: 損切り未設定アラート (短期回転戦略で SL 未設定は致命傷)
+  let alertHtml = '';
+  const noSL = H.filter(h => !h.sl || h.sl <= 0);
+  if (noSL.length > 0) {
+    alertHtml += '<div style="background:linear-gradient(135deg,var(--red-soft),var(--yellow-soft));border:2px solid var(--red);border-radius:12px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
+      '<div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px">🚨 損切りライン未設定: ' + noSL.length + ' 銘柄</div>' +
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:8px">短期回転戦略では損切り無しは致命傷です。各銘柄の損切り価格を設定してください。</div>' +
+      '<button onclick="openBulkSLModal()" style="width:100%;background:var(--red);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:10px;cursor:pointer">⚙️ 一括設定する</button>' +
+      '</div>';
+  }
+  he.innerHTML = alertHtml + (H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map((h,i) => hHTML(h, true, i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>');
   const te = document.getElementById('dt');
   const rec = [...T].reverse().slice(0, 3);
   te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
@@ -1698,6 +1731,82 @@ function delH(idx) {
 }
 function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map((h,i)=>hHTML(h,false,i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
 
+// ============================================================
+//  Phase A-1: 損切り一括設定モーダル + ハードロック
+// ============================================================
+
+function toggleHardLock(on) {
+  sv('tj_hard_lock', !!on);
+  toast(on ? '🛡️ 損切り未設定ロック ON' : '⚠️ ロック OFF (買い記録時の警告なし)');
+}
+
+function openBulkSLModal() {
+  const noSL = H.map((h,i)=>({h,i})).filter(({h}) => !h.sl || h.sl <= 0);
+  if (noSL.length === 0) { toast('✅ 全銘柄に損切り設定済み'); return; }
+  const el = document.getElementById('bulkSLItems');
+  // 各銘柄カード: -8% / -5% / カスタム の3択
+  el.innerHTML = noSL.map(({h,i}) => {
+    const cp = h.cp || h.bp || 0;
+    const sl8 = Math.round(cp * 0.92);
+    const sl5 = Math.round(cp * 0.95);
+    return '<div class="modal-item" data-idx="' + i + '">' +
+      '<div class="modal-item-top">' +
+        '<div><div class="modal-item-name">' + _escape(h.nm || h.cd) + '</div>' +
+        '<div class="modal-item-meta">' + h.cd + ' / 現値 ' + cp.toLocaleString() + '円 / ' + (h.sh||0) + '株</div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:8px">' +
+        '<label style="display:flex;flex-direction:column;align-items:center;padding:7px 4px;border-radius:7px;border:1.5px solid var(--red);background:var(--red-soft);cursor:pointer">' +
+          '<input type="radio" name="sl-' + i + '" value="' + sl8 + '" checked style="margin-bottom:3px"><span style="font-size:10px;color:var(--red);font-weight:700">-8% 推奨</span>' +
+          '<span style="font-size:11px;font-family:var(--mono);color:var(--text);font-weight:700">' + sl8.toLocaleString() + '円</span>' +
+        '</label>' +
+        '<label style="display:flex;flex-direction:column;align-items:center;padding:7px 4px;border-radius:7px;border:1.5px solid var(--yellow);background:var(--yellow-soft);cursor:pointer">' +
+          '<input type="radio" name="sl-' + i + '" value="' + sl5 + '" style="margin-bottom:3px"><span style="font-size:10px;color:var(--yellow);font-weight:700">-5% タイト</span>' +
+          '<span style="font-size:11px;font-family:var(--mono);color:var(--text);font-weight:700">' + sl5.toLocaleString() + '円</span>' +
+        '</label>' +
+        '<label style="display:flex;flex-direction:column;align-items:center;padding:7px 4px;border-radius:7px;border:1.5px solid var(--border);background:var(--s1);cursor:pointer">' +
+          '<input type="radio" name="sl-' + i + '" value="custom" style="margin-bottom:3px"><span style="font-size:10px;color:var(--t2);font-weight:700">カスタム</span>' +
+          '<input type="number" inputmode="decimal" placeholder="円" id="sl-custom-' + i + '" style="width:100%;background:transparent;border:none;border-bottom:1px dashed var(--border);font-size:11px;font-family:var(--mono);text-align:center;outline:none;color:var(--text)" onfocus="this.parentNode.querySelector(\'input[type=radio]\').checked=true">' +
+        '</label>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  document.getElementById('bulkSLModal').classList.add('on');
+}
+
+function closeBulkSLModal() {
+  document.getElementById('bulkSLModal').classList.remove('on');
+}
+
+function applyBulkSL() {
+  const items = document.querySelectorAll('#bulkSLItems .modal-item');
+  let applied = 0, skipped = 0;
+  for (const item of items) {
+    const idx = parseInt(item.getAttribute('data-idx'));
+    const radio = item.querySelector('input[name="sl-' + idx + '"]:checked');
+    if (!radio) { skipped++; continue; }
+    let val;
+    if (radio.value === 'custom') {
+      const cust = document.getElementById('sl-custom-' + idx);
+      val = parseFloat(cust?.value);
+      if (!val || val <= 0) { skipped++; continue; }
+    } else {
+      val = parseFloat(radio.value);
+    }
+    if (val > 0 && H[idx]) {
+      H[idx].sl = val;
+      applied++;
+    }
+  }
+  if (applied === 0) {
+    toast('⚠️ 設定対象なし');
+    return;
+  }
+  sv(KH, H);
+  closeBulkSLModal();
+  calcS(); rDash(); rHold();
+  toast('🛡️ ' + applied + ' 銘柄に損切り設定' + (skipped > 0 ? ' (' + skipped + ' 件スキップ)' : ''));
+}
+
 // ウォッチリスト
 function addWatch() {
   const cd = document.getElementById('wCode').value.trim();
@@ -1736,6 +1845,18 @@ function doTrade() {
   if (!cd||!nm||!sh||!p) { toast('⚠️ コード・銘柄名・株数・価格は必須'); return; }
   // 売買共通: 現物/信用区分はフォームから (信用建玉の売りでも参照)
   const ttype = document.getElementById('ttype').value || 'spot';
+  // Phase A-1: 損切り未設定ハードロック (短期回転戦略の安全装置)
+  if (a === 'buy') {
+    const lockEnabled = ld('tj_hard_lock', true);
+    const noSL = H.filter(h => !h.sl || h.sl <= 0);
+    if (lockEnabled && noSL.length > 0) {
+      const names = noSL.map(h => h.nm || h.cd).join(', ');
+      if (!confirm('⚠️ 損切り未設定の保有銘柄があります:\n' + names + '\n\n短期回転戦略では損切り無しは致命的です。先に設定することを強く推奨しますが、今回はこのまま進めますか？')) {
+        toast('💡 概況タブの「一括設定」ボタンから設定できます');
+        return;
+      }
+    }
+  }
   if (a === 'buy') {
     const sl = parseFloat(document.getElementById('tsl').value) || null;
     const tgt = parseFloat(document.getElementById('ttgt').value) || null;
@@ -1944,6 +2065,9 @@ function openKeyModal() {
   document.getElementById('keyModal').style.display='flex';
   document.getElementById('keyGemini').value=GK;
   document.getElementById('keyAnthropic').value=CK;
+  // Phase A-1: ハードロック設定の現在値を反映
+  const lockEl = document.getElementById('hardLockToggle');
+  if (lockEl) lockEl.checked = ld('tj_hard_lock', true) !== false;
 }
 function closeKeyModal() { document.getElementById('keyModal').style.display='none'; }
 function saveKeys() {
