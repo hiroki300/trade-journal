@@ -869,7 +869,9 @@ function renderTaxAfterSummary() {
 }
 
 function _escape(s) {
-  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // s===0 が空文字にならないよう null/undefined のみガード (旧: String(s||'') は 0 を吸収していた)
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function renderMacro(d) {
@@ -1862,7 +1864,10 @@ function addDualMsg(gTxt, cTxt) {
 }
 function sC() { const w=document.getElementById('cMsgs'); setTimeout(()=>w.scrollTop=w.scrollHeight,50); }
 function autoH(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,90)+'px'; }
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
 
 // Gemini API
 async function callGemini(prompt, sys, history) {
