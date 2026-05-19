@@ -702,22 +702,25 @@ function computeNetPnl(buy_price, sell_price, shares, tax_rate) {
 
 function matchRoundTrips(trades) {
   // FIFO で買い/売りをペアリング (部分売却対応)
-  const open_buys = {};  // code → [{shares_remaining, price, date}]
+  // code+type をキーにすることで現物と信用を独立してペアリング
+  const open_buys = {};  // "cd:type" → [{shares_remaining, price, date}]
   const rounds = [];
   for (const t of trades) {
     const cd = t.cd, a = t.a, sh = parseInt(t.sh || 0), p = parseFloat(t.p || 0), dt = t.dt || '';
+    const tp = t.type || 'spot';
+    const key = cd + ':' + tp;
     if (a === 'buy') {
-      if (!open_buys[cd]) open_buys[cd] = [];
-      open_buys[cd].push({ shares_remaining: sh, price: p, date: dt });
+      if (!open_buys[key]) open_buys[key] = [];
+      open_buys[key].push({ shares_remaining: sh, price: p, date: dt });
     } else if (a === 'sell') {
       let remaining = sh;
-      const lots = open_buys[cd] || [];
+      const lots = open_buys[key] || [];
       while (remaining > 0 && lots.length > 0) {
         const lot = lots[0];
         const matched = Math.min(remaining, lot.shares_remaining);
         if (matched > 0) {
           rounds.push({
-            code: cd,
+            code: cd, type: tp,
             buy_price: lot.price,
             sell_price: p,
             shares: matched,
@@ -729,7 +732,7 @@ function matchRoundTrips(trades) {
         }
         if (lot.shares_remaining <= 0) lots.shift();
       }
-      if (lots.length === 0) delete open_buys[cd];
+      if (lots.length === 0) delete open_buys[key];
     }
   }
   return rounds;
@@ -1706,7 +1709,7 @@ function doTrade() {
     else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, execution_meta:exec_meta});
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY, execution_meta:exec_meta}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, execution_meta:exec_meta}); sv(KT,T);
     const driftHint = exec_meta && exec_meta.drift_entry_pct != null
       ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
       : '';
@@ -1720,7 +1723,7 @@ function doTrade() {
     if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
     cash+=p*sh; sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,pnl, execution_meta:exec_meta}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl, execution_meta:exec_meta}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
     const driftHint = exec_meta && exec_meta.drift_exit_pct_vs_target != null
       ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
@@ -2115,7 +2118,7 @@ function doImport() {
         const h=H.find(h=>h.cd===(cd||nm));
         if(h){pnl=(it.price-h.bp)*(it.shares||0);if(h.sh<=(it.shares||0))H=H.filter(hh=>hh.cd!==h.cd);else h.sh-=(it.shares||0);sv(KH,H);}
       }
-      T.push({id:Date.now()+Math.random(),a:it.action,cd:cd||nm,nm,sh:it.shares||0,p:it.price||0,dt:it.date||TODAY,pnl}); count++;
+      T.push({id:Date.now()+Math.random(),a:it.action,cd:cd||nm,nm,sh:it.shares||0,p:it.price||0,dt:it.date||TODAY,type:it.type||'spot',pnl}); count++;
     }
     sv(KT,T);
   }else if(ssType==='pnl'){
@@ -2123,7 +2126,7 @@ function doImport() {
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!nm)continue;
       if(T.find(t=>t.cd===cd&&t.dt===it.date&&t.a==='sell'))continue;
-      T.push({id:Date.now()+Math.random(),a:'sell',cd:cd||nm,nm,sh:it.shares||0,p:it.sell_price||0,dt:it.date||TODAY,pnl:it.realized_pnl||0}); count++;
+      T.push({id:Date.now()+Math.random(),a:'sell',cd:cd||nm,nm,sh:it.shares||0,p:it.sell_price||0,dt:it.date||TODAY,type:it.type||'spot',pnl:it.realized_pnl||0}); count++;
     }
     sv(KT,T);
   }else if(ssType==='cash'){
