@@ -494,6 +494,18 @@ function calcS() {
   set('sv', f(val), c(val)); set('sct', H.length + '銘柄', '');
   set('sp', f(pnl), c(pnl)); set('spp', (pnl>=0?'+':'') + pct.toFixed(2) + '%', c(pnl));
   set('sr', f(rel), c(rel)); document.getElementById('stc').textContent = T.length + '件';
+  // Phase A-3: ポジション集中度 (1銘柄が運用資産の20%超なら警告)
+  const capital = val + (cash || 0);
+  const warnings = [];
+  if (capital > 0) {
+    for (const h of H) {
+      const hVal = (h.cp || h.bp || 0) * (h.sh || 0);
+      const p = hVal / capital * 100;
+      if (p >= 20) warnings.push({cd: h.cd, nm: h.nm, type: h.type||'spot', pct: Math.round(p * 10) / 10});
+    }
+  }
+  warnings.sort((a, b) => b.pct - a.pct);
+  window._concentrationWarnings = warnings;
 }
 function set(id, v, cls) { const e = document.getElementById(id); e.textContent = v; e.className = 'sv' + (cls ? ' ' + cls : ''); }
 
@@ -508,6 +520,15 @@ function rDash() {
       '<div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px">🚨 損切りライン未設定: ' + noSL.length + ' 銘柄</div>' +
       '<div style="font-size:11px;color:var(--t2);margin-bottom:8px">短期回転戦略では損切り無しは致命傷です。各銘柄の損切り価格を設定してください。</div>' +
       '<button onclick="openBulkSLModal()" style="width:100%;background:var(--red);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:10px;cursor:pointer">⚙️ 一括設定する</button>' +
+      '</div>';
+  }
+  // Phase A-3: ポジション集中度の警告 (1 銘柄 ≥ 20%)
+  const conc = window._concentrationWarnings || [];
+  if (conc.length > 0) {
+    alertHtml += '<div style="background:var(--yellow-soft);border:1px solid var(--yellow);border-radius:10px;padding:10px 12px;margin-bottom:12px">' +
+      '<div style="font-size:12px;font-weight:700;color:var(--yellow);margin-bottom:6px">⚠️ ポジション集中: 運用資産の 20% を超える銘柄</div>' +
+      conc.map(c => '<div style="font-size:11px;color:var(--t2)">・' + _escape(c.nm) + ' <span style="color:var(--t3)">(' + c.cd + ' ' + (c.type==='margin'?'信用':'現物') + ')</span> <span style="font-family:var(--mono);font-weight:700;color:var(--text)">' + c.pct + '%</span></div>').join('') +
+      '<div style="font-size:10px;color:var(--t3);margin-top:6px">短期回転戦略では1銘柄20%以下を推奨。分散・部分利確を検討。</div>' +
       '</div>';
   }
   he.innerHTML = alertHtml + (H.length ? '<div class="sec-lbl">保有銘柄</div>' + H.map((h,i) => hHTML(h, true, i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>');
