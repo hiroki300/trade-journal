@@ -1147,9 +1147,13 @@ function renderCandidatesFromCache() {
   const cache = window._candidatesCache;
   if (!cache) return;
   let watchlist = cache.watchlist;
+  // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
+  if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
+    watchlist = watchlist.watchlist;
+  }
   const pickup = cache.pickup;
   const el = document.getElementById('dcandidates');
-  if (!watchlist || watchlist.length === 0) {
+  if (!Array.isArray(watchlist) || watchlist.length === 0) {
     el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">買い候補なし (limit_watchlist 未公開 or 空)</div>';
     return;
   }
@@ -1467,11 +1471,15 @@ async function compareCandidates() {
   panel.style.display = 'block';
   panel.innerHTML = '<div style="padding:14px;color:var(--t2);font-size:12px">🤝 GeminiとClaudeが全候補を比較中...</div>';
 
-  const [watchlist, pickup] = await Promise.all([
+  let [watchlist, pickup] = await Promise.all([
     _fetchJSON('limit_watchlist.json'),
     _fetchJSON('pickup_stocks.json'),
   ]);
-  if (!watchlist || watchlist.length === 0) {
+  // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
+  if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
+    watchlist = watchlist.watchlist;
+  }
+  if (!Array.isArray(watchlist) || watchlist.length === 0) {
     panel.innerHTML = '<div style="padding:14px;color:var(--red);font-size:12px">⚠️ 候補データが取得できませんでした</div>';
     return;
   }
