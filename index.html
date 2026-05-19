@@ -1160,7 +1160,14 @@ function renderCandidatesFromCache() {
     const before = watchlist.length;
     watchlist = watchlist.filter(s => {
       // 最も近い指値 (最低価格) で 100株買えるか判定
-      const minPrice = Math.min(s.current_price, ...((s.levels || []).map(l => l.price)));
+      // current_price / level.price が null だと Math.min(null, ...) → NaN になり常に false で落ちるためガード
+      const prices = [];
+      if (typeof s.current_price === 'number' && s.current_price > 0) prices.push(s.current_price);
+      for (const l of (s.levels || [])) {
+        if (typeof l.price === 'number' && l.price > 0) prices.push(l.price);
+      }
+      if (prices.length === 0) return true;  // 価格不明なら除外せず通す
+      const minPrice = Math.min(...prices);
       return minPrice * 100 <= cash;
     });
     if (watchlist.length === 0) {
