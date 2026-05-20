@@ -2462,8 +2462,38 @@ function doImport() {
   document.getElementById('ssResult').classList.remove('show');
 }
 
+// Phase C-1: Web Share Target で受け取った画像を売買タブに流す (Android Chrome のみ動作)
+async function handleSharedFiles() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('share-target') !== 'true') return;
+  const count = parseInt(params.get('count'), 10) || 0;
+  // URL をクリーンに戻す (リロード時に再処理されないよう)
+  history.replaceState({}, '', location.pathname);
+  if (count === 0) { toast('⚠️ 共有された画像がありません'); return; }
+  try {
+    const cache = await caches.open('tj-share-v1');
+    const files = [];
+    for (let i = 0; i < count; i++) {
+      const resp = await cache.match('/__share-target-image-' + i);
+      if (!resp) continue;
+      const blob = await resp.blob();
+      const filename = decodeURIComponent(resp.headers.get('X-Share-Filename') || ('shared-' + i + '.jpg'));
+      files.push(new File([blob], filename, { type: blob.type || 'image/jpeg' }));
+      await cache.delete('/__share-target-image-' + i);
+    }
+    if (files.length === 0) return;
+    go('trade');
+    setTimeout(() => loadImages(files.slice(0, 20)), 200);
+    toast('📥 ' + files.length + ' 枚を共有から取込');
+  } catch (e) {
+    console.error('handleSharedFiles failed:', e);
+    toast('⚠️ 共有画像の取込失敗: ' + e.message);
+  }
+}
+
 // 初期化
 calcS(); rTH(); rWatch();
+handleSharedFiles();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 </script>
 <script>
