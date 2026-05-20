@@ -227,6 +227,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sec-lbl">🏷️ タグ別パフォーマンス (Phase D-1)</div>
     <div id="dtags" style="margin-bottom:14px">読み込み中…</div>
 
+    <div class="sec-lbl">🎯 AI 判定別の的中率 (Phase D-4)</div>
+    <div id="daiacc" style="margin-bottom:14px">読み込み中…</div>
+
     <div class="sec-lbl">🔥 ピックアップ銘柄</div>
     <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
 
@@ -615,6 +618,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderDriftSummary();
     renderTaxAfterSummary();
     renderTagPerformance();  // Phase D-1
+    renderAIAccuracy();      // Phase D-4
     return;
   }
   try {
@@ -640,6 +644,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderDriftSummary();           // T0-3 Stage A: 執行癖セクション
     renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
     renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
+    renderAIAccuracy();             // Phase D-4: AI 判定別の的中率
     const gen = (pickup && pickup.generated_at) || '';
     document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
     _isReportsFetched = true;
@@ -814,6 +819,69 @@ function getDriftPromptInjection() {
   return '\n\n【あなたの執行癖 (過去 ' + d.sample_size + ' 回の実績)】\n' +
     d.summary_text + '\n' +
     '※ この癖を踏まえ、推奨価格や保有期間を調整してください。';
+}
+
+// ============================================================
+//  Phase D-4: AI 的中率ダッシュボード
+//   execution_meta.verdict_at_entry / tier_at_entry が記録された
+//   完了取引から、判定別 / tier 別の勝率と累計 PnL を集計する。
+// ============================================================
+
+function buildAIAccuracy() {
+  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && (t.execution_meta.verdict_at_entry || t.execution_meta.tier_at_entry));
+  if (sells.length === 0) return null;
+  const byVerdict = {};
+  const byTier = {};
+  for (const s of sells) {
+    const v = s.execution_meta.verdict_at_entry;
+    const tier = s.execution_meta.tier_at_entry;
+    const win = (s.pnl || 0) > 0;
+    if (v) {
+      if (!byVerdict[v]) byVerdict[v] = {n:0, wins:0, pnl:0};
+      byVerdict[v].n++;
+      if (win) byVerdict[v].wins++;
+      byVerdict[v].pnl += (s.pnl || 0);
+    }
+    if (tier) {
+      if (!byTier[tier]) byTier[tier] = {n:0, wins:0, pnl:0};
+      byTier[tier].n++;
+      if (win) byTier[tier].wins++;
+      byTier[tier].pnl += (s.pnl || 0);
+    }
+  }
+  return {sample_size: sells.length, byVerdict, byTier};
+}
+
+function renderAIAccuracy() {
+  const el = document.getElementById('daiacc');
+  if (!el) return;
+  const a = buildAIAccuracy();
+  if (!a) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI 判定別の的中率: サンプル蓄積中 (verdict/tier 付き売り取引の完了後に表示)</div>';
+    return;
+  }
+  const fmt = stats => {
+    if (stats.n < 3) return '<span style="color:var(--t3)">サンプル不足 (' + stats.n + '回)</span>';
+    const wr = Math.round(stats.wins / stats.n * 100);
+    const wrColor = wr >= 60 ? 'var(--green)' : (wr >= 40 ? 'var(--yellow)' : 'var(--red)');
+    const pnlColor = stats.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    return '<span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:' + pnlColor + ';font-family:var(--mono);font-weight:700">' + (stats.pnl>=0?'+':'') + Math.round(stats.pnl).toLocaleString() + '円</span>';
+  };
+  const renderGroup = (title, obj, sortKey) => {
+    const entries = Object.entries(obj).sort((x, y) => sortKey(y[1]) - sortKey(x[1]));
+    if (entries.length === 0) return '';
+    return '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--t2);font-weight:700;margin-bottom:4px">' + title + '</div>' +
+      entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px dashed var(--border);font-size:11px">' +
+        '<span style="color:var(--text);font-weight:600">' + _escape(k) + '</span>' +
+        '<span>' + fmt(s) + '</span>' +
+      '</div>').join('') +
+      '</div>';
+  };
+  el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
+    renderGroup('判定別 (verdict_at_entry)', a.byVerdict, s => s.n) +
+    renderGroup('tier 別 (Deep Insight)', a.byTier, s => s.n) +
+    '<div style="font-size:9px;color:var(--t3);margin-top:6px">※ Deep Insight Agent のコスト対効果検証。n≥3 で集計</div>' +
+    '</div>';
 }
 
 // Phase D-3: 過去の負けパターンを AI プロンプトに注入 (同じパターンの早期警告)
