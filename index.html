@@ -512,8 +512,40 @@ function set(id, v, cls) { const e = document.getElementById(id); e.textContent 
 function rDash() {
   calcS();
   const he = document.getElementById('dh');
-  // Phase A-1: 損切り未設定アラート (短期回転戦略で SL 未設定は致命傷)
+  // Phase B-3: 「今日のアクション」カード (片手 30 秒判断用、3 件まで)
   let alertHtml = '';
+  {
+    const slHit = H.filter(h => h.sl && (h.cp || h.bp) <= h.sl);
+    const tgtHit = H.filter(h => h.tgt && (h.cp || h.bp) >= h.tgt);
+    const slNear = H.filter(h => {
+      if (!h.sl) return false;
+      const cp = h.cp || h.bp;
+      const toS = (cp - h.sl) / cp * 100;
+      return toS > 0 && toS <= 3;
+    });
+    const actions = [];
+    if (slHit.length > 0)  actions.push({icon:'🚨', label:'損切り検討', items: slHit, color:'var(--red)'});
+    if (tgtHit.length > 0) actions.push({icon:'🎯', label:'利確検討', items: tgtHit, color:'var(--green)'});
+    if (slNear.length > 0) actions.push({icon:'⚠️', label:'損切り接近', items: slNear, color:'var(--yellow)'});
+    const pickup = window._pickupData;
+    if (pickup && Array.isArray(pickup.stocks) && pickup.stocks.length > 0) {
+      const top = pickup.stocks.filter(s => s.tier === 'S' || s.tier === 'A')[0];
+      if (top) actions.push({icon:'💡', label:'新規買い候補', items:[{nm:top.name, cd:top.code}], color:'var(--purple)'});
+    }
+    if (actions.length > 0) {
+      alertHtml += '<div style="background:linear-gradient(135deg,var(--acc-soft),var(--purple-soft));border:1px solid var(--acc);border-radius:12px;padding:12px;margin-bottom:14px;box-shadow:var(--shadow)">' +
+        '<div style="font-size:12px;font-weight:700;color:var(--acc);margin-bottom:8px;letter-spacing:.04em">📌 今日のアクション (' + actions.length + ')</div>';
+      for (const a of actions.slice(0, 3)) {
+        alertHtml += '<div style="background:var(--s1);border-radius:8px;padding:8px 10px;margin-bottom:6px;border-left:3px solid ' + a.color + '">' +
+          '<div style="font-size:11px;color:' + a.color + ';font-weight:700;margin-bottom:3px">' + a.icon + ' ' + a.label + ' (' + a.items.length + ')</div>' +
+          a.items.slice(0, 2).map(it => '<div style="font-size:11px;color:var(--t2)">・' + _escape(it.nm || '?') + ' <span style="color:var(--t3)">(' + (it.cd || '-') + ')</span></div>').join('') +
+          (a.items.length > 2 ? '<div style="font-size:10px;color:var(--t3);margin-top:2px">他 ' + (a.items.length - 2) + ' 件</div>' : '') +
+          '</div>';
+      }
+      alertHtml += '</div>';
+    }
+  }
+  // Phase A-1: 損切り未設定アラート (短期回転戦略で SL 未設定は致命傷)
   const noSL = H.filter(h => !h.sl || h.sl <= 0);
   if (noSL.length > 0) {
     alertHtml += '<div style="background:linear-gradient(135deg,var(--red-soft),var(--yellow-soft));border:2px solid var(--red);border-radius:12px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
