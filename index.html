@@ -1494,7 +1494,8 @@ async function analyzeCandidate(code4) {
       '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(gRes) + '</div>' +
       '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略・指値判断):</div>' +
       '<div style="background:#fff;border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(cRes) + '</div>';
-    window._candAICache[code4] = {fmGem, fmCld, detailHTML};
+    // Phase B-2: SBI コピーボタン用に銘柄情報と raw AI 出力もキャッシュ
+    window._candAICache[code4] = {fmGem, fmCld, detailHTML, code: code4, name: s.name, gRes, cRes};
     _renderAIResult(panel, code4);
   } catch (e) {
     panel.textContent = '⚠️ ' + e.message;
@@ -1523,10 +1524,49 @@ function _extractHonne(text) {
   return text.trim().slice(0, 80);
 }
 
+// Phase B-2: AI 出力から推奨指値・損切り・利確を正規表現で抽出
+function _extractOrderParams(text) {
+  if (!text) return null;
+  // 「推奨エントリー価格: 2934円」「指値 2,934 円」「エントリー: 2934円」等
+  const entryMatch = text.match(/(?:推奨(?:エントリー(?:価格)?|指値|買値)|エントリー(?:価格)?|指値|買値)[\s::]*([\d,]+)\s*円/);
+  const stopMatch  = text.match(/(?:損切り?(?:ライン|価格)?|ストップ(?:ロス)?)[\s::]*([\d,]+)\s*円/);
+  const targetMatch = text.match(/(?:利確(?:目標|価格|ライン)?|第1?目標|ターゲット)[\s::]*([\d,]+)\s*円/);
+  const parse = m => m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
+  const entry = parse(entryMatch);
+  if (!entry || entry <= 0) return null;
+  return { entry, stop: parse(stopMatch), target: parse(targetMatch) };
+}
+
+// Phase B-2: SBI 用の注文情報を整形してクリップボードへ
+async function copyOrderInfo(code, name, params, shares) {
+  shares = shares || 100;
+  const lines = [
+    '📋 SBI 証券 発注情報',
+    '銘柄: ' + code + ' ' + (name || ''),
+    '株数: ' + shares + ' 株',
+    '指値: ' + params.entry.toLocaleString() + ' 円',
+  ];
+  if (params.stop)   lines.push('損切り: ' + params.stop.toLocaleString() + ' 円 (逆指値で別途設定)');
+  if (params.target) lines.push('利確目標: ' + params.target.toLocaleString() + ' 円');
+  lines.push('期間: 当日中');
+  lines.push('（生成: ' + new Date().toLocaleString('ja-JP') + '）');
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    toast('📋 注文情報をコピー (' + params.entry.toLocaleString() + '円)');
+  } catch (e) {
+    toast('⚠️ コピー失敗: ' + e.message);
+  }
+}
+
 function _renderAIResult(panel, code4) {
   const cache = window._candAICache[code4];
   if (!cache) return;
-  const {fmGem, fmCld, detailHTML} = cache;
+  const {fmGem, fmCld, detailHTML, code, name, gRes, cRes} = cache;
+  // Phase B-2: Claude 優先で注文情報を抽出 (戦略判断側を信頼)、無ければ Gemini から
+  const params = _extractOrderParams(cRes) || _extractOrderParams(gRes);
+  const orderBtn = params
+    ? '<button onclick="copyOrderInfo(\'' + code + '\',\'' + (name||'').replace(/'/g, '') + '\',{entry:' + params.entry + ',stop:' + (params.stop||0) + ',target:' + (params.target||0) + '},100)" style="width:100%;background:linear-gradient(135deg,var(--orange),var(--yellow));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer;margin-top:10px;box-shadow:var(--shadow)">📋 SBI 用 注文情報をコピー (指値 ' + params.entry.toLocaleString() + '円' + (params.stop ? ' / 損切' + params.stop.toLocaleString() : '') + ')</button>'
+    : '';
   panel.innerHTML =
     // ━━━ 本音を最上段に大きく表示 ━━━
     '<div style="background:linear-gradient(135deg,var(--pink-soft),var(--purple-soft));border:2px solid var(--pink);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
@@ -1537,6 +1577,7 @@ function _renderAIResult(panel, code4) {
     '<div style="font-size:13px;color:var(--text);line-height:1.6">' +
     '<span style="font-size:10px;color:var(--cld);font-weight:700">🧠 Claude</span> ' + _escape(fmCld) +
     '</div>' +
+    orderBtn +
     '</div>' +
     // ━━━ 詳細セクション (折りたたみ) ━━━
     '<details style="background:var(--s2);border-radius:10px;padding:8px 12px;border:1px solid var(--border)">' +
