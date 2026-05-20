@@ -375,6 +375,22 @@ select.fi{appearance:none;-webkit-appearance:none;}
   </div>
 </div>
 
+<!-- 取得単価 一括入力モーダル (SBI リスト画面 OCR 取込後) -->
+<div class="modal-overlay" id="bulkBPModal" onclick="if(event.target===this)closeBulkBPModal()">
+  <div class="modal">
+    <div class="modal-title">💰 取得単価 一括入力</div>
+    <div style="font-size:11px;color:var(--t2);margin-bottom:10px;line-height:1.6">
+      SBI 口座管理リスト画面では取得単価が取れないため、現在値で仮置きされています。<br>
+      実際の取得単価 (per-share, 円) を入力してください。空欄ならスキップ。
+    </div>
+    <div id="bulkBPItems"></div>
+    <div class="modal-btns">
+      <button class="btn-sm btn-cancel" onclick="closeBulkBPModal()">キャンセル</button>
+      <button class="btn-sm btn-import" onclick="applyBulkBP()">✅ 設定する</button>
+    </div>
+  </div>
+</div>
+
 <!-- Phase A-1: 損切り一括設定モーダル -->
 <div class="modal-overlay" id="bulkSLModal" onclick="if(event.target===this)closeBulkSLModal()">
   <div class="modal">
@@ -509,8 +525,17 @@ function saveCash() { cash = parseFloat(document.getElementById('cashIn').value)
 
 function calcS() {
   let cost = 0, val = 0;
-  for (const h of H) { cost += h.bp * h.sh; val += (h.cp || h.bp) * h.sh; }
-  const pnl = val - cost, pct = cost > 0 ? pnl / cost * 100 : 0;
+  for (const h of H) {
+    // bp_unknown は cost/pnl 集計から除外 (cp は val に含める = 評価額には反映)
+    if (!h.bp_unknown && h.bp > 0) cost += h.bp * h.sh;
+    val += (h.cp || h.bp || 0) * h.sh;
+  }
+  // bp_unknown 銘柄の cp を val から差し引いて pnl 計算 (cost 側との対応を取るため)
+  let costless_val = 0;
+  for (const h of H) {
+    if (h.bp_unknown || !(h.bp > 0)) costless_val += (h.cp || 0) * h.sh;
+  }
+  const pnl = (val - costless_val) - cost, pct = cost > 0 ? pnl / cost * 100 : 0;
   const rel = T.filter(t => t.a === 'sell').reduce((s, t) => s + (t.pnl || 0), 0);
   const f = v => (v >= 0 ? '¥' : '-¥') + Math.abs(Math.round(v)).toLocaleString();
   const c = v => v >= 0 ? 'up' : 'dn';
@@ -575,6 +600,15 @@ function rDash() {
       '<div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px">🚨 損切りライン未設定: ' + noSL.length + ' 銘柄</div>' +
       '<div style="font-size:11px;color:var(--t2);margin-bottom:8px">短期回転戦略では損切り無しは致命傷です。各銘柄の損切り価格を設定してください。</div>' +
       '<button onclick="openBulkSLModal()" style="width:100%;background:var(--red);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:10px;cursor:pointer">⚙️ 一括設定する</button>' +
+      '</div>';
+  }
+  // SBI リスト画面 OCR 由来の取得単価未確認バナー (bp_unknown フラグ)
+  const noBP = H.filter(h => h.bp_unknown);
+  if (noBP.length > 0) {
+    alertHtml += '<div style="background:var(--yellow-soft);border:2px solid var(--yellow);border-radius:12px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow)">' +
+      '<div style="font-size:13px;font-weight:700;color:var(--yellow);margin-bottom:8px">⚠️ 取得単価未確認: ' + noBP.length + ' 銘柄</div>' +
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:8px">口座管理リスト画面のスクショからは取得単価が取れないため、現在値で仮置きされています。実際の買値を入力してください (損益計算に必須)。</div>' +
+      '<button onclick="openBulkBPModal()" style="width:100%;background:var(--yellow);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:10px;cursor:pointer">⚙️ 取得単価を一括入力</button>' +
       '</div>';
   }
   // Phase A-3: ポジション集中度の警告 (1 銘柄 ≥ 20%)
@@ -1826,8 +1860,12 @@ async function compareCandidates() {
 }
 
 function hHTML(h, compact, idx) {
-  const cp = h.cp || h.bp, pnl = (cp - h.bp) * h.sh, pct = (cp - h.bp) / h.bp * 100;
-  const cls = pnl >= 0 ? 'up' : 'dn';
+  const cp = h.cp || h.bp;
+  // bp_unknown または bp<=0 のときは損益計算を抑制 (Infinity / NaN 回避)
+  const bpValid = !h.bp_unknown && h.bp > 0;
+  const pnl = bpValid ? (cp - h.bp) * h.sh : 0;
+  const pct = bpValid ? (cp - h.bp) / h.bp * 100 : 0;
+  const cls = bpValid ? (pnl >= 0 ? 'up' : 'dn') : '';
   const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
   let al = '';
   if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
@@ -1835,14 +1873,16 @@ function hHTML(h, compact, idx) {
   else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
   // idx 未指定 (古い呼び出し互換) なら cd で逆引き
   const i = (typeof idx === 'number') ? idx : H.findIndex(x => x.cd === h.cd && (x.type||'spot') === (h.type||'spot'));
+  const pnlDisplay = bpValid ? ((pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString()) : '<span style="color:var(--t3);font-size:11px">取得単価未確認</span>';
+  const pctDisplay = bpValid ? ((pct>=0?'+':'') + pct.toFixed(2) + '%') : '';
   let html = '<div class="hrow">' + al +
     '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
-    '<div><div class="hpnl ' + cls + '">' + (pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString() + '</div>' +
-    '<div class="hpct ' + cls + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</div></div></div>' +
+    '<div><div class="hpnl ' + cls + '">' + pnlDisplay + '</div>' +
+    '<div class="hpct ' + cls + '">' + pctDisplay + '</div></div></div>' +
     '<div class="hmeta">' +
     '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
     '<span class="hbg">' + h.sh + '株</span>' +
-    '<span class="hbg" title="買値をタップして手動修正">買 <input class="bpin" type="number" step="0.1" min="0" value="' + h.bp + '" onchange="uBP(' + i + ',this.value)" onclick="this.select()">円</span>' +
+    '<span class="hbg" title="' + (h.bp_unknown ? '⚠️ 取得単価未確認 (口座管理リスト画面 OCR、要手動設定)' : '買値をタップして手動修正') + '">' + (h.bp_unknown ? '⚠️買' : '買') + ' <input class="bpin" type="number" step="0.1" min="0" value="' + h.bp + '" onchange="uBP(' + i + ',this.value)" onclick="this.select()">円</span>' +
     '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(' + i + ',this.value)">円</span>' +
     (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
     '</div>';
@@ -1957,6 +1997,7 @@ function uBP(idx, v) {
   }
   h.bp = newBP;
   h.bp_edited_at = new Date().toISOString();
+  h.bp_unknown = false;  // 手動設定で「取得単価未確認」フラグを解除
   sv(KH, H); calcS(); rHold(); rDash();
   toast('💰 ' + (h.nm||h.cd) + ' の買値を ' + newBP.toLocaleString() + ' 円に変更');
 }
@@ -2157,6 +2198,54 @@ function openBulkSLModal() {
 
 function closeBulkSLModal() {
   document.getElementById('bulkSLModal').classList.remove('on');
+}
+
+// 取得単価 一括入力モーダル (bp_unknown フラグ付き保有が対象)
+function openBulkBPModal() {
+  const noBP = H.map((h,i)=>({h,i})).filter(({h}) => h.bp_unknown);
+  if (noBP.length === 0) { toast('✅ 全銘柄に取得単価設定済み'); return; }
+  const el = document.getElementById('bulkBPItems');
+  el.innerHTML = noBP.map(({h,i}) => {
+    const cp = h.cp || h.bp || 0;
+    return '<div class="modal-item" data-idx="' + i + '">' +
+      '<div class="modal-item-top">' +
+        '<div><div class="modal-item-name">' + _escape(h.nm || h.cd) + ' <span style="font-size:10px;color:var(--t3)">(' + h.cd + ' ' + (h.type==='margin'?'信用':'現物') + ')</span></div>' +
+        '<div class="modal-item-meta">' + (h.sh||0) + '株 / 現値 ' + cp.toLocaleString() + '円 (仮置き)</div></div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
+        '<label style="font-size:11px;color:var(--t2);min-width:80px">取得単価:</label>' +
+        '<input type="number" inputmode="decimal" step="0.1" min="0" id="bp-input-' + i + '" placeholder="例: ' + Math.round(cp) + '" style="flex:1;background:var(--s1);border:1.5px solid var(--border);border-radius:6px;padding:7px 9px;font-size:13px;font-family:var(--mono);text-align:right;outline:none;color:var(--text)">' +
+        '<span style="font-size:11px;color:var(--t2)">円</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  document.getElementById('bulkBPModal').classList.add('on');
+}
+
+function closeBulkBPModal() {
+  document.getElementById('bulkBPModal').classList.remove('on');
+}
+
+function applyBulkBP() {
+  const items = document.querySelectorAll('#bulkBPItems .modal-item');
+  let applied = 0, skipped = 0;
+  for (const item of items) {
+    const idx = parseInt(item.getAttribute('data-idx'));
+    const input = document.getElementById('bp-input-' + idx);
+    const val = parseFloat(input?.value);
+    if (!val || val <= 0) { skipped++; continue; }
+    if (H[idx]) {
+      H[idx].bp = val;
+      H[idx].bp_unknown = false;
+      H[idx].bp_edited_at = new Date().toISOString();
+      applied++;
+    }
+  }
+  if (applied === 0) { toast('⚠️ 設定対象なし (全て空欄)'); return; }
+  sv(KH, H);
+  closeBulkBPModal();
+  calcS(); rDash(); rHold();
+  toast('💰 ' + applied + ' 銘柄の取得単価を設定' + (skipped > 0 ? ' (' + skipped + ' 件スキップ)' : ''));
 }
 
 function applyBulkSL() {
@@ -2536,7 +2625,7 @@ async function analyzeScreenshots() {
   const btn=document.getElementById('ssAnalyzeBtn');
   btn.disabled=true;
   const prompts={
-    hold:'あなたは SBI 証券スマホアプリのスクリーンショットを精密に読み取る OCR 専門アシスタントです。\n画像には「保有証券一覧」「保有証券詳細」「信用建玉一覧」「信用建玉詳細」のいずれか、または複合画面が表示されています。\n\n【最重要】複数銘柄が縦に並んでいる場合は、漏れなく**すべての行**を抽出してください。スクロールで隠れていない範囲をすべて。\n\n【数値の読み取りルール】\n- 数値はカンマ区切りで表示される (例: 1,234,567)。**カンマを取り除いた純粋な整数または小数**で返す\n- 通貨記号「¥」「円」、単位「株」「口」、空白は除外\n- 「+」プラスは符号維持、「▲」「△」「-」「△印」はマイナスとして扱う\n- 小数点は維持 (例: 「2,850.5」→ 2850.5)\n- 4桁の証券コード (3000〜9999 が多い、ETF は 1xxx) を必ず特定\n\n【ラベル → JSON フィールド対応表】 ※SBI の表記揺れに対応\n- buy_price ← 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」「単価(建)」\n- shares    ← 「保有株数」「保有数量」「建株数」「建玉数量」「株数」「数量」\n- current_price ← 「現在値」「現値」「時価」「最終値」\n- type      ← 以下のキーワードで判別:\n             ・「現物買」「現物」「特定預り」「一般預り」「NISA」 → "spot"\n             ・「信用買建」「信用新規買」「制度買」「一般買」「買建」「信用買」「制度信用」「一般信用」 → "margin"\n             ・画面タイトルが「信用建玉」系なら全行 "margin"、「保有証券」系なら "spot"\n- buy_date  ← 「建日」「取得日」「約定日」「買付日」(YYYY-MM-DD に正規化、和暦は西暦変換、無ければ null)\n\n【同一銘柄が複数表示されている場合】\n- 現物と信用が両方ある銘柄は **必ず別オブジェクト** として返す (type が異なる)\n- 同じ type で複数行 (建日違い等) ある場合も **行ごとに別オブジェクト** で返す\n- 集計合計行 (「合計」「ポートフォリオ計」など) は無視する\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"code":"4桁コード","name":"銘柄名","shares":整数,"buy_price":数値,"current_price":数値,"type":"spot"または"margin","buy_date":"YYYY-MM-DD"またはnull}]\n\n【読み取れない項目の扱い】\n- 値が不明なフィールドは null。配列を空にはせず、確実に読めたフィールドのみで返す\n- type が判別できない場合は "spot" にフォールバック\n- 銘柄名が判読困難でも、コード+株数+単価が読めれば name は推測せず空文字 "" で良い',
+    hold:'あなたは SBI 証券スマホアプリのスクリーンショットを精密に読み取る OCR 専門アシスタントです。\n以下の **3 つの画面パターン** のいずれかが表示されています。\n\n【画面A】口座管理 → 「保有証券」タブ (現物のリスト)\n  - 列: 銘柄(銘柄名+4桁コード+「特定」) / 保有株数(注文数) / 評価額 と 評価額前日比\n  - **取得単価・現在値は per-share では表示されない**\n  - 評価額 (例: 328,600円) は **その銘柄の保有株すべての合計時価**\n  - すべての行を type="spot" で抽出\n  - buy_price=null, current_price=null, evaluation_amount に評価額の数値 (カンマ抜き) を入れる\n\n【画面B】口座管理 → 「信用建玉」タブ (信用のリスト)\n  - 列: 銘柄(銘柄名+4桁コード+「買建/売建」+「特定」+「N ヵ月」) / 建株数(注文数) / 評価額 と 前日比\n  - すべての行を type="margin" で抽出 (買建/売建 の区別は memo フィールドに「信用買建」「信用売建」と入れる)\n  - buy_price=null, current_price=null, evaluation_amount に評価額\n\n【画面C】保有証券詳細 / 信用建玉詳細 (単一銘柄の詳細画面)\n  - 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」が **per-share で明示**\n  - 「現在値」「現値」「時価」「最終値」も per-share で表示される場合あり\n  - buy_price / current_price をそれぞれ数値で埋める。evaluation_amount は null OK\n\n【無視すべきもの】\n- ヘッダーの「評価損益合計」「評価損益率」「明細数」「総資産」「ポートフォリオ計」(集計)\n- 「評価額前日比」(当日の変動量、エントリーには無関係)\n- 株数の括弧内 (例: 100株 (0)、200株 (200)) — 括弧内は注文中の数なので shares には含めない (保有確定数のみ)\n- 「表示・並替」ボタンや「N」マークなどの UI 要素\n\n【数値の読み取りルール】\n- 数値はカンマ区切り (例: 1,234,567)。**カンマを取り除いた純粋な整数または小数**で返す\n- 通貨記号「¥」「円」、単位「株」「口」、空白は除外\n- 「+」プラスは符号維持、「▲」「△」「-」「△印」はマイナスとして扱う\n- 小数点は維持 (例: 「2,850.5」→ 2850.5)\n- 証券コード: 数字 4 桁 (例: 1802, 3231, 7267) または英数字 4 桁 (例: 247A)\n\n【ラベル → JSON フィールド対応表】 ※SBI の表記揺れに対応\n- buy_price ← 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」「単価(建)」 (画面 C のみ)\n- current_price ← 「現在値」「現値」「時価」「最終値」 (画面 C のみ)\n- evaluation_amount ← 「評価額」 (per-row 合計、画面 A/B のみ)\n- shares    ← 「保有株数」「保有数量」「建株数」「建玉数量」「株数」「数量」 (括弧内は除く)\n- type      ← 「保有証券」タブ=spot、「信用建玉」タブ=margin、銘柄行の「買建/売建」「現物買」「信用買建」等から判別\n- memo      ← 信用建玉の場合、「信用買建」または「信用売建」+「N ヵ月」を入れる (例: "信用買建 6ヵ月")。現物は null\n- buy_date  ← 「建日」「取得日」「約定日」「買付日」(YYYY-MM-DD に正規化、和暦は西暦変換、無ければ null)\n\n【同一銘柄が複数表示されている場合】\n- 現物と信用が両方ある銘柄は **必ず別オブジェクト** として返す (type が異なる)\n- 同じ type で複数行 (建日違い等) ある場合も **行ごとに別オブジェクト** で返す\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"code":"コード","name":"銘柄名","shares":整数,"buy_price":数値またはnull,"current_price":数値またはnull,"evaluation_amount":数値またはnull,"type":"spot"または"margin","memo":文字列またはnull,"buy_date":"YYYY-MM-DD"またはnull}]\n\n【読み取れない項目の扱い】\n- 値が不明なフィールドは null。配列を空にはせず、確実に読めたフィールドのみで返す\n- 画面 A/B では buy_price と current_price は必ず null (表示されないため推測禁止)\n- type が判別できない場合は "spot" にフォールバック\n- 銘柄名が判読困難でも、コード+株数+評価額が読めれば name は推測せず空文字 "" で良い',
     hist:'この画像はSBI証券アプリの約定・取引履歴画面です。日付を必ず読み取ってください。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"または"margin"}]\nJSONのみ返す。',
     pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
     watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
@@ -2604,7 +2693,20 @@ async function analyzeScreenshots() {
     resEl.textContent+='💴 現物評価額: '+(o.spot_value?.toLocaleString()||'?')+'円 損益'+(sp>=0?'+':'')+sp.toLocaleString()+'円\n';
     resEl.textContent+='📊 信用建玉額: '+(o.margin_value?.toLocaleString()||'?')+'円 損益'+(mp>=0?'+':'')+mp.toLocaleString()+'円';
   } else if(ssType==='hold'){
-    resEl.textContent+=parsedItems.map(i=>(i.type==='margin'?'📊信用 ':'💴現物 ')+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株 買値'+(i.buy_price?.toLocaleString()||'?')+'円 現値'+(i.current_price?.toLocaleString()||'?')+'円').join('\n');
+    // 画面 A/B (リスト) の場合は current_price を 評価額/株数 で逆算してプレビュー、buy_price 不明は ⚠️ 付き
+    resEl.textContent+=parsedItems.map(i=>{
+      const sh = i.shares || 0;
+      let cp = i.current_price;
+      if (!cp && i.evaluation_amount && sh > 0) cp = Math.round(i.evaluation_amount / sh * 10) / 10;
+      const bpStr = i.buy_price ? i.buy_price.toLocaleString() + '円' : '⚠️未表示(後で手動)';
+      const cpStr = cp ? cp.toLocaleString() + '円' : '?';
+      const evStr = i.evaluation_amount ? ' / 評価額' + i.evaluation_amount.toLocaleString() + '円' : '';
+      return (i.type==='margin'?'📊信用 ':'💴現物 ') + (i.code||'?') + ' ' + i.name + '  ' + (sh||'?') + '株 買値' + bpStr + ' 現値' + cpStr + evStr;
+    }).join('\n');
+    const bpUnknownCount = parsedItems.filter(i => !i.buy_price).length;
+    if (bpUnknownCount > 0) {
+      resEl.textContent += '\n\n⚠️ ' + bpUnknownCount + ' 銘柄で取得単価が読めませんでした (口座管理リスト画面のため)。\n取込後、概況タブの「取得単価未確認」バナーから手動入力してください。';
+    }
   }else if(ssType==='hist'){
     resEl.textContent+=parsedItems.map(i=>(i.action==='buy'?'🟢買':'🔴売')+' '+(i.code||'?')+' '+i.name+'  '+(i.shares||'?')+'株×'+(i.price?.toLocaleString()||'?')+'円 ('+(i.date||'日付不明')+')').join('\n');
   }else if(ssType==='pnl'){
@@ -2623,18 +2725,28 @@ function showImportModal() {
   const fmtItem=(item,i,l0,l1)=>'<div class="modal-item"><div class="modal-item-top"><div><div class="modal-item-name">'+l0+'</div><div class="modal-item-meta">'+l1+'</div></div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div></div>';
   if(ssType==='hold'){
     // Phase D-2: 各銘柄に「📝 エントリー理由」入力欄 + 🎤 音声入力ボタンを追加
-    el.innerHTML=parsedItems.map((it,i)=>'<div class="modal-item">'+
-      '<div class="modal-item-top"><div>'+
-      '<div class="modal-item-name">'+(it.type==='margin'?'📊信用 ':'💴現物 ')+(it.code||'?')+' '+it.name+'</div>'+
-      '<div class="modal-item-meta">'+
-        (it.shares||'?')+'株 / 取得単価 '+(it.buy_price?.toLocaleString()||'?')+'円 / 現値 '+(it.current_price?.toLocaleString()||'?')+'円<br>'+
-        '取得金額: 約'+((it.buy_price&&it.shares)?Math.round(it.buy_price*it.shares).toLocaleString():'?')+'円'+
-      '</div>'+
-      '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
-      '<input type="text" id="mmemo'+i+'" placeholder="📝 エントリー理由 (なぜ買ったか・推奨)" style="width:100%;background:var(--s1);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:11px;margin-top:8px;color:var(--text);outline:none">'+
-      '<button onclick="startVoiceInput('+i+')" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-top:4px;padding:2px 0">🎤 音声で入力 (ja-JP)</button>'+
-      '</div>'
-    ).join('');
+    // SBI 口座管理リスト画面では buy_price/current_price 不明、evaluation_amount/shares から逆算
+    el.innerHTML=parsedItems.map((it,i)=>{
+      const sh = it.shares || 0;
+      let cp = it.current_price;
+      if (!cp && it.evaluation_amount && sh > 0) cp = Math.round(it.evaluation_amount / sh * 10) / 10;
+      const bpStr = it.buy_price ? it.buy_price.toLocaleString() + '円' : '<span style="color:var(--yellow)">⚠️未表示</span>';
+      const cpStr = cp ? cp.toLocaleString() + '円' : '?';
+      const acqStr = (it.buy_price && sh) ? '約' + Math.round(it.buy_price * sh).toLocaleString() + '円' : (it.evaluation_amount ? '評価額 ' + it.evaluation_amount.toLocaleString() + '円' : '?');
+      const warningRow = !it.buy_price ? '<div style="font-size:10px;color:var(--yellow);margin-top:4px;background:var(--yellow-soft);padding:4px 6px;border-radius:5px">⚠️ 取得単価未表示 — 取込後に概況タブのバナーから手動入力してください</div>' : '';
+      return '<div class="modal-item">'+
+        '<div class="modal-item-top"><div>'+
+        '<div class="modal-item-name">'+(it.type==='margin'?'📊信用 ':'💴現物 ')+(it.code||'?')+' '+(it.name||'')+'</div>'+
+        '<div class="modal-item-meta">'+
+          sh+'株 / 取得単価 '+bpStr+' / 現値 '+cpStr+'<br>'+
+          (it.buy_price ? '取得金額: ' + acqStr : acqStr)+
+        '</div>'+
+        '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
+        warningRow +
+        '<input type="text" id="mmemo'+i+'" placeholder="📝 エントリー理由 (なぜ買ったか・推奨)" style="width:100%;background:var(--s1);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:11px;margin-top:8px;color:var(--text);outline:none">'+
+        '<button onclick="startVoiceInput('+i+')" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-top:4px;padding:2px 0">🎤 音声で入力 (ja-JP)</button>'+
+        '</div>';
+    }).join('');
   }else if(ssType==='hist'){
     el.innerHTML=parsedItems.map((it,i)=>fmtItem(it,i,(it.action==='buy'?'🟢買':'🔴売')+' '+(it.code||'?')+' '+it.name,(it.shares||'?')+'株 × '+(it.price?.toLocaleString()||'?')+'円 / '+(it.date||'日付不明'))).join('');
   }else if(ssType==='pnl'){
@@ -2697,19 +2809,26 @@ function doImport() {
       const t=it.type||'spot';
       // Phase D-2: モーダル入力からメモを引き継ぎ (空欄なら 'SS取込' フォールバック)
       const itemIdx = parsedItems.indexOf(it);
-      const memoVal = (document.getElementById('mmemo'+itemIdx)?.value || '').trim() || 'SS取込';
+      const memoVal = (document.getElementById('mmemo'+itemIdx)?.value || '').trim() || (it.memo || 'SS取込');
+      // 口座管理リスト画面 (画面 A/B) の場合: current_price を 評価額 / 株数 で逆算
+      const sh = it.shares || 0;
+      let cp = it.current_price;
+      if (!cp && it.evaluation_amount && sh > 0) cp = Math.round(it.evaluation_amount / sh * 10) / 10;
+      // buy_price 不明な場合: bp を cp で仮置きし、bp_unknown フラグを立てる (Infinity 表示と除算エラー回避)
+      const bpUnknown = !it.buy_price || it.buy_price <= 0;
+      const bpVal = bpUnknown ? (cp || 0) : it.buy_price;
       // 現物と信用は別ポジションとして区別
       const idx=H.findIndex(h=>h.cd===(cd||nm) && (h.type||'spot')===t);
       if(idx>=0){
         // 再取込: OCR の値を信頼して上書き (買値が初回 OCR で誤っていた場合の修正手段)
-        if(it.current_price)H[idx].cp=it.current_price;
-        if(it.buy_price && it.buy_price>0)H[idx].bp=it.buy_price;
+        if(cp)H[idx].cp=cp;
+        // buy_price が今回 OCR で読めた (画面 C) ら上書き & bp_unknown 解除
+        if(it.buy_price && it.buy_price>0){ H[idx].bp=it.buy_price; H[idx].bp_unknown=false; }
         if(it.shares && it.shares>0)H[idx].sh=it.shares;
         if(!H[idx].nm && nm)H[idx].nm=nm;
-        // ユーザーが新たにメモを入力した場合のみ上書き (旧メモを保護)
         if(memoVal !== 'SS取込')H[idx].memo=memoVal;
       } else {
-        H.push({cd:cd||nm,nm:nm||cd,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:memoVal,dt:TODAY,type:t});
+        H.push({cd:cd||nm,nm:nm||cd,sh,bp:bpVal,cp:cp||bpVal,sl:null,tgt:null,memo:memoVal,dt:TODAY,type:t,bp_unknown:bpUnknown});
       }
       count++;
     }
