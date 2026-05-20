@@ -224,6 +224,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sec-lbl">📊 あなたの執行癖 (Phase 6 T0-3 計測)</div>
     <div id="ddrift" style="margin-bottom:14px">読み込み中…</div>
 
+    <div class="sec-lbl">🏷️ タグ別パフォーマンス (Phase D-1)</div>
+    <div id="dtags" style="margin-bottom:14px">読み込み中…</div>
+
     <div class="sec-lbl">🔥 ピックアップ銘柄</div>
     <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
 
@@ -302,6 +305,13 @@ select.fi{appearance:none;-webkit-appearance:none;}
           <option value="margin">信用買</option>
         </select>
       </div>
+    </div>
+    <!-- Phase D-1: 手法タグ・感情タグ -->
+    <div style="margin-top:8px">
+      <label class="fl">手法（複数選択可）</label>
+      <div id="tagSetupRow" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
+      <label class="fl">感情（複数選択可）</label>
+      <div id="tagEmotionRow" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
     </div>
     <div style="margin-top:8px"><label class="fl">メモ（任意）</label><input class="fi" id="tmemo" placeholder="エントリー理由など" style="margin-bottom:0"></div>
     </div>
@@ -604,6 +614,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderCandidatesFromCache();
     renderDriftSummary();
     renderTaxAfterSummary();
+    renderTagPerformance();  // Phase D-1
     return;
   }
   try {
@@ -628,6 +639,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderCandidates(watch, pickup);
     renderDriftSummary();           // T0-3 Stage A: 執行癖セクション
     renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
+    renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
     const gen = (pickup && pickup.generated_at) || '';
     document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
     _isReportsFetched = true;
@@ -1882,6 +1894,82 @@ function toggleHardLock(on) {
 }
 
 // ============================================================
+//  Phase D-1: 手法タグ・感情タグ
+// ============================================================
+
+const TAG_PRESETS = {
+  setup:   ['#ブレイクアウト', '#押し目買い', '#決算プレイ', '#リバウンド', '#材料先取り', '#指値待ち', '#踏み上げ'],
+  emotion: ['#FOMO', '#自信あり', '#リベンジ', '#なんとなく', '#計画通り', '#焦り'],
+};
+let _selectedTags = {setup:[], emotion:[]};
+
+function renderTagChips() {
+  const make = (kind, presets) => presets.map(t => {
+    const on = _selectedTags[kind].includes(t);
+    return '<span onclick="toggleTag(\'' + kind + '\',\'' + t + '\')" style="font-size:11px;padding:4px 9px;border-radius:12px;cursor:pointer;border:1px solid ' + (on ? 'var(--acc)' : 'var(--border)') + ';background:' + (on ? 'var(--acc)' : 'var(--s2)') + ';color:' + (on ? '#fff' : 'var(--t2)') + ';font-weight:' + (on ? '700' : '500') + ';user-select:none">' + t + '</span>';
+  }).join('');
+  const su = document.getElementById('tagSetupRow');
+  const em = document.getElementById('tagEmotionRow');
+  if (su) su.innerHTML = make('setup', TAG_PRESETS.setup);
+  if (em) em.innerHTML = make('emotion', TAG_PRESETS.emotion);
+}
+
+function toggleTag(kind, tag) {
+  const arr = _selectedTags[kind];
+  const i = arr.indexOf(tag);
+  if (i >= 0) arr.splice(i, 1);
+  else arr.push(tag);
+  renderTagChips();
+}
+
+function clearTagSelection() {
+  _selectedTags = {setup:[], emotion:[]};
+  renderTagChips();
+}
+
+// 売買履歴の売り取引タグ別パフォーマンス集計
+function buildTagPerformance() {
+  const sells = T.filter(t => t.a === 'sell' && t.pnl != null && Array.isArray(t.tags) && t.tags.length > 0);
+  if (sells.length === 0) return [];
+  const byTag = {};
+  for (const s of sells) {
+    for (const tag of s.tags) {
+      if (!byTag[tag]) byTag[tag] = {tag, trades:0, wins:0, pnl:0};
+      byTag[tag].trades++;
+      if (s.pnl > 0) byTag[tag].wins++;
+      byTag[tag].pnl += s.pnl;
+    }
+  }
+  return Object.values(byTag)
+    .map(x => ({...x, win_rate: x.trades > 0 ? x.wins / x.trades : 0}))
+    .sort((a, b) => b.trades - a.trades);
+}
+
+function renderTagPerformance() {
+  const el = document.getElementById('dtags');
+  if (!el) return;
+  const rows = buildTagPerformance();
+  const usable = rows.filter(r => r.trades >= 3);
+  if (usable.length === 0) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 タグ別パフォーマンス: サンプル蓄積中 (各タグ 3 件以上の売り取引で表示)</div>';
+    return;
+  }
+  const fmt = v => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString();
+  el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
+    '<div style="font-size:11px;color:var(--t2);margin-bottom:6px;font-weight:700">📊 タグ別パフォーマンス (n≥3)</div>' +
+    usable.map(r => {
+      const wr = Math.round(r.win_rate * 100);
+      const color = r.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+      const wrColor = wr >= 50 ? 'var(--green)' : (wr >= 30 ? 'var(--yellow)' : 'var(--red)');
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px dashed var(--border);font-size:11px">' +
+        '<span style="color:var(--text);font-weight:600">' + _escape(r.tag) + '</span>' +
+        '<span><span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + r.trades + '回)</span> <span style="color:' + color + ';font-family:var(--mono);font-weight:700">' + fmt(r.pnl) + '円</span></span>' +
+        '</div>';
+    }).join('') +
+    '</div>';
+}
+
+// ============================================================
 //  Phase C-2: ローカル JSON エクスポート/インポート
 // ============================================================
 
@@ -2070,15 +2158,17 @@ function doTrade() {
     const tgt = parseFloat(document.getElementById('ttgt').value) || null;
     const memo = document.getElementById('tmemo').value.trim();
     const tdt = document.getElementById('tdt').value || TODAY;
+    // Phase D-1: 選択されたタグ (手法 + 感情) を取引と保有に保存
+    const tags = [..._selectedTags.setup, ..._selectedTags.emotion];
     // T0-3 Stage A: 買い注文時に AI 推奨を lookup し execution_meta を保存
     const exec_meta = buildExecutionMetaOnBuy(cd, p);
     // 現物と信用は別ポジションとして区別 (doImport と整合)
     const idx = H.findIndex(h => h.cd===cd && (h.type||'spot')===ttype);
-    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10}; }
-    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, execution_meta:exec_meta});
+    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, tags: [...new Set([...(ex.tags||[]), ...tags])]}; }
+    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, execution_meta:exec_meta});
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, execution_meta:exec_meta}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, execution_meta:exec_meta}); sv(KT,T);
     const driftHint = exec_meta && exec_meta.drift_entry_pct != null
       ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
       : '';
@@ -2089,10 +2179,12 @@ function doTrade() {
     let pnl=null;
     // T0-3 Stage A: 売り注文時に drift_exit_pct を計算し execution_meta を更新
     const exec_meta = h ? buildExecutionMetaOnSell(h, p) : null;
+    // Phase D-1: 売り取引のタグは「H に保存済の買い時タグ」+「今回追加で選択したタグ」
+    const sellTags = [...new Set([...(h && h.tags ? h.tags : []), ..._selectedTags.setup, ..._selectedTags.emotion])];
     if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
     cash+=p*sh; sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl, execution_meta:exec_meta}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl,tags:sellTags, execution_meta:exec_meta}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
     const driftHint = exec_meta && exec_meta.drift_exit_pct_vs_target != null
       ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
@@ -2102,6 +2194,7 @@ function doTrade() {
     renderTaxAfterSummary();     // T0-4: 税後 PnL も更新
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
+  clearTagSelection();  // Phase D-1: タグ選択リセット
   rTH();
 }
 function rTH() {
@@ -2570,6 +2663,7 @@ async function handleSharedFiles() {
 
 // 初期化
 calcS(); rTH(); rWatch();
+renderTagChips();  // Phase D-1: タグチップを初期描画
 handleSharedFiles();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 </script>
