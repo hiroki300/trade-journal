@@ -401,6 +401,16 @@ select.fi{appearance:none;-webkit-appearance:none;}
         <span style="font-size:12px;color:var(--t2);line-height:1.5">損切り未設定時に買い記録をロック<br><span style="font-size:10px;color:var(--t3)">(短期回転戦略の安全装置、推奨 ON)</span></span>
       </label>
     </div>
+    <!-- Phase C-2: データのバックアップ -->
+    <div class="key-row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">💾 データのバックアップ</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">機種変更やキャッシュクリアの保険に。保有・履歴・残金・ウォッチ・設定を 1 つの JSON に。</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <button onclick="exportAllData()" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer">📤 エクスポート</button>
+        <button onclick="document.getElementById('importDataInput').click()" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer">📥 インポート</button>
+      </div>
+      <input type="file" id="importDataInput" accept="application/json" style="display:none" onchange="importAllData(event)">
+    </div>
     <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
     <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
   </div>
@@ -1869,6 +1879,73 @@ function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map
 function toggleHardLock(on) {
   sv('tj_hard_lock', !!on);
   toast(on ? '🛡️ 損切り未設定ロック ON' : '⚠️ ロック OFF (買い記録時の警告なし)');
+}
+
+// ============================================================
+//  Phase C-2: ローカル JSON エクスポート/インポート
+// ============================================================
+
+function exportAllData() {
+  const payload = {
+    schema: 'trade-journal-v1',
+    exported_at: new Date().toISOString(),
+    exported_at_jst: ymdJST(),
+    holdings: H,
+    trades: T,
+    cash: cash,
+    watchlist: W,
+    settings: {
+      hard_lock: ld('tj_hard_lock', true),
+    },
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'trade-journal-backup-' + ymdJST() + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('📤 バックアップを保存 (保有 ' + H.length + ' / 履歴 ' + T.length + ')');
+}
+
+function importAllData(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.schema !== 'trade-journal-v1') throw new Error('スキーマ不一致 (' + (data.schema || 'なし') + ')');
+      const msg = '現在のデータを以下で上書きします:\n' +
+        '・保有: ' + (data.holdings?.length || 0) + ' 銘柄\n' +
+        '・履歴: ' + (data.trades?.length || 0) + ' 件\n' +
+        '・残金: ' + (data.cash || 0).toLocaleString() + ' 円\n' +
+        '・ウォッチ: ' + (data.watchlist?.length || 0) + ' 件\n\n' +
+        '(エクスポート日時: ' + (data.exported_at_jst || data.exported_at || '不明') + ')\n\n' +
+        '続行しますか？ (元のデータは復元できません)';
+      if (!confirm(msg)) return;
+      H = Array.isArray(data.holdings)  ? data.holdings  : []; sv(KH, H);
+      T = Array.isArray(data.trades)    ? data.trades    : []; sv(KT, T);
+      cash = typeof data.cash === 'number' ? data.cash : 0; sv(KC, cash);
+      W = Array.isArray(data.watchlist) ? data.watchlist : []; sv(KW, W);
+      if (data.settings && typeof data.settings === 'object') {
+        sv('tj_hard_lock', data.settings.hard_lock !== false);
+        const lockEl = document.getElementById('hardLockToggle');
+        if (lockEl) lockEl.checked = data.settings.hard_lock !== false;
+      }
+      document.getElementById('cashIn').value = cash || '';
+      calcS(); rDash(); rHold(); rTH(); rWatch();
+      toast('📥 ' + H.length + ' 銘柄 / ' + T.length + ' 取引を復元しました');
+    } catch (err) {
+      toast('⚠️ インポート失敗: ' + err.message);
+    } finally {
+      // 同じファイルを再選択できるよう input をリセット
+      event.target.value = '';
+    }
+  };
+  reader.readAsText(file);
 }
 
 function openBulkSLModal() {
