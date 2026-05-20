@@ -816,6 +816,24 @@ function getDriftPromptInjection() {
     '※ この癖を踏まえ、推奨価格や保有期間を調整してください。';
 }
 
+// Phase D-3: 過去の負けパターンを AI プロンプトに注入 (同じパターンの早期警告)
+function getLossPatternInjection() {
+  // 売り取引のうち pnl < 0 を損益額の小さい順 (=大損) で 3 件
+  const losses = T.filter(t => t.a === 'sell' && t.pnl != null && t.pnl < 0)
+    .sort((a, b) => a.pnl - b.pnl)
+    .slice(0, 3);
+  if (losses.length === 0) return '';
+  const lines = losses.map(l => {
+    const tags = (Array.isArray(l.tags) && l.tags.length > 0) ? l.tags.join(' ') : '(タグなし)';
+    // 同じコードの最新買い取引のメモを引っ張る (なければ売却時メモ)
+    const buyTrade = [...T].reverse().find(t => t.a === 'buy' && t.cd === l.cd && (t.dt || '') <= (l.dt || ''));
+    const memo = (buyTrade && buyTrade.memo) || l.memo || '(理由記録なし)';
+    return '・' + (l.dt || '?') + ' ' + (l.nm || l.cd) + ' ' + Math.round(l.pnl).toLocaleString() + '円損 / ' + tags + ' / 理由: ' + memo;
+  }).join('\n');
+  return '\n\n【あなたの過去の大きな失敗 (直近の負け Top3)】\n' + lines + '\n' +
+    '※ 今回の判断でこれらと同じパターンが見えたら、明確に警告してください (例: 「過去 #FOMO で損切り遅れた失敗と同じ匂い」)。';
+}
+
 // ============================================================
 //  Phase 6 T0-4: 真の税後 PnL 計測 (handbook §1 T0-4)
 // ============================================================
@@ -1534,7 +1552,7 @@ async function analyzeCandidate(code4) {
     '推奨エントリーから RR 1:2 (= +16%) を基準に第1目標。可能なら最終目標も。\n\n' +
     '## 【今日の最新材料・リスク】\n' +
     'Google検索で取得した **本日の動き** (場中の値動き・速報・出来高変化)、直近の決算/材料、最大リスク要因を 1 つずつ。' +
-    getDriftPromptInjection();  // T0-3 Stage A: 執行癖を末尾に注入
+    getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
     const [gRes, cRes] = await Promise.all([
@@ -1710,7 +1728,7 @@ async function compareCandidates() {
     '残りの候補について、見送り推奨/様子見/微妙 の振り分けを 1 行ずつ。\n\n' +
     '## 💬 本音\n' +
     '今日この中から1銘柄だけ買うなら? 30字以内で断言。' +
-    getDriftPromptInjection();  // T0-3 Stage A: 執行癖を末尾に注入
+    getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
     const [gRes, cRes] = await Promise.all([
@@ -1832,7 +1850,7 @@ async function analyzeHolding(cd) {
     'この銘柄の最大のリスク要因も1つ挙げること。\n\n'+
     '## 【シニアFMの本音】\n'+
     '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。' +
-    getDriftPromptInjection();  // T0-3 Stage A: 執行癖を末尾に注入
+    getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
     const [gRes, cRes] = await Promise.all([
