@@ -2515,6 +2515,7 @@ function showImportModal() {
   const el=document.getElementById('modalItems');
   const fmtItem=(item,i,l0,l1)=>'<div class="modal-item"><div class="modal-item-top"><div><div class="modal-item-name">'+l0+'</div><div class="modal-item-meta">'+l1+'</div></div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div></div>';
   if(ssType==='hold'){
+    // Phase D-2: 各銘柄に「📝 エントリー理由」入力欄 + 🎤 音声入力ボタンを追加
     el.innerHTML=parsedItems.map((it,i)=>'<div class="modal-item">'+
       '<div class="modal-item-top"><div>'+
       '<div class="modal-item-name">'+(it.type==='margin'?'📊信用 ':'💴現物 ')+(it.code||'?')+' '+it.name+'</div>'+
@@ -2523,6 +2524,8 @@ function showImportModal() {
         '取得金額: 約'+((it.buy_price&&it.shares)?Math.round(it.buy_price*it.shares).toLocaleString():'?')+'円'+
       '</div>'+
       '</div><input type="checkbox" class="modal-chk" id="mchk'+i+'" checked></div>'+
+      '<input type="text" id="mmemo'+i+'" placeholder="📝 エントリー理由 (なぜ買ったか・推奨)" style="width:100%;background:var(--s1);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:11px;margin-top:8px;color:var(--text);outline:none">'+
+      '<button onclick="startVoiceInput('+i+')" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-top:4px;padding:2px 0">🎤 音声で入力 (ja-JP)</button>'+
       '</div>'
     ).join('');
   }else if(ssType==='hist'){
@@ -2549,14 +2552,45 @@ function showImportModal() {
 }
 function closeModal() { document.getElementById('importModal').classList.remove('on'); }
 
+// Phase D-2: Web Speech API でメモ欄に音声入力
+function startVoiceInput(idx) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('⚠️ 音声入力に未対応のブラウザです'); return; }
+  const recog = new SR();
+  recog.lang = 'ja-JP';
+  recog.interimResults = false;
+  recog.maxAlternatives = 1;
+  toast('🎤 話してください...');
+  recog.onresult = e => {
+    const text = e.results[0][0].transcript;
+    const input = document.getElementById('mmemo' + idx);
+    if (input) {
+      input.value = (input.value ? input.value + ' / ' : '') + text;
+      input.focus();
+    }
+    toast('🎤 入力完了');
+  };
+  recog.onerror = e => toast('⚠️ 音声入力エラー: ' + (e.error || 'unknown'));
+  recog.start();
+}
+
 function doImport() {
   const checked=parsedItems.filter((_,i)=>document.getElementById('mchk'+i)?.checked);
   let count=0;
   if(ssType==='hold'){
+    // Phase D-2: メモ未入力チェック (チェック済かつメモが空白のものをカウント)
+    const checkedIdx = parsedItems.map((_,i)=>i).filter(i=>document.getElementById('mchk'+i)?.checked);
+    const blankMemo = checkedIdx.filter(i => !(document.getElementById('mmemo'+i)?.value?.trim()));
+    if (blankMemo.length > 0) {
+      if (!confirm('📝 エントリー理由が未入力の銘柄が ' + blankMemo.length + ' 件あります。\n後で AI 分析 (負けパターン RAG) の精度に影響します。このまま進めますか？')) return;
+    }
     for(const it of checked){
       const cd=String(it.code||'').trim(), nm=String(it.name||'').trim();
       if(!cd && !nm)continue;
       const t=it.type||'spot';
+      // Phase D-2: モーダル入力からメモを引き継ぎ (空欄なら 'SS取込' フォールバック)
+      const itemIdx = parsedItems.indexOf(it);
+      const memoVal = (document.getElementById('mmemo'+itemIdx)?.value || '').trim() || 'SS取込';
       // 現物と信用は別ポジションとして区別
       const idx=H.findIndex(h=>h.cd===(cd||nm) && (h.type||'spot')===t);
       if(idx>=0){
@@ -2565,8 +2599,10 @@ function doImport() {
         if(it.buy_price && it.buy_price>0)H[idx].bp=it.buy_price;
         if(it.shares && it.shares>0)H[idx].sh=it.shares;
         if(!H[idx].nm && nm)H[idx].nm=nm;
+        // ユーザーが新たにメモを入力した場合のみ上書き (旧メモを保護)
+        if(memoVal !== 'SS取込')H[idx].memo=memoVal;
       } else {
-        H.push({cd:cd||nm,nm:nm||cd,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:'SS取込',dt:TODAY,type:t});
+        H.push({cd:cd||nm,nm:nm||cd,sh:it.shares||0,bp:it.buy_price||0,cp:it.current_price||it.buy_price||0,sl:null,tgt:null,memo:memoVal,dt:TODAY,type:t});
       }
       count++;
     }
