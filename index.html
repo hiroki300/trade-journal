@@ -1657,9 +1657,10 @@ async function analyzeCandidate(code4) {
     getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
+    // analyzeCandidate: 6 セクション (本音+売買判断+エントリー+損切り+利確+材料) — 6000 tokens
     const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: ' + e.message),
-      callClaude(prompt, null, null).catch(e => '⚠️ Claude: ' + e.message),
+      callGemini(prompt, null, null, 6000).catch(e => '⚠️ Gemini: ' + e.message),
+      callClaude(prompt, null, null, 6000).catch(e => '⚠️ Claude: ' + e.message),
     ]);
     const fmGem = _extractHonne(gRes);
     const fmCld = _extractHonne(cRes);
@@ -1833,9 +1834,10 @@ async function compareCandidates() {
     getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
+    // compareCandidates: Top1/Top2/Top3 詳細 + 全体比較 + 本音 — 候補数次第で長文化、8000 tokens
     const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: ' + e.message),
-      callClaude(prompt, null, null).catch(e => '⚠️ Claude: ' + e.message),
+      callGemini(prompt, null, null, 8000).catch(e => '⚠️ Gemini: ' + e.message),
+      callClaude(prompt, null, null, 8000).catch(e => '⚠️ Claude: ' + e.message),
     ]);
     const honneG = _extractHonne(gRes);
     const honneC = _extractHonne(cRes);
@@ -1961,9 +1963,10 @@ async function analyzeHolding(cd) {
     getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
+    // analyzeHolding: 5 セクション (売買判断+損切り+利確+材料・リスク+本音) — 6000 tokens
     const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null).catch(e => '⚠️ Gemini: '+e.message),
-      callClaude(prompt, null, null).catch(e => '⚠️ Claude: '+e.message),
+      callGemini(prompt, null, null, 6000).catch(e => '⚠️ Gemini: '+e.message),
+      callClaude(prompt, null, null, 6000).catch(e => '⚠️ Claude: '+e.message),
     ]);
 
     panel.textContent =
@@ -2446,11 +2449,13 @@ async function doRev() {
     '<span class="ai-pill pill-c" style="margin-left:auto">🧠 Claude</span></div>' +
     '<div class="rbody"><div class="ldg"><div class="spin"></div><span>精査中...</span></div></div>';
   out.appendChild(cldCard);
+  // doRev (今日の振り返り): GEM_STEPS は各 6000 トークン (調査項目 4-5 件を網羅)
+  //                          CLD_STEP は 8000 トークン (銘柄ごと損切/利確円表示 + 寄前/引前計画 + 戦略総括)
   const gemPs = GEM_STEPS.map((s, i) =>
-    callGemini(s.p(pf)).then(txt => { gemCards[i].querySelector('.rbody').textContent = txt; })
+    callGemini(s.p(pf), null, null, 6000).then(txt => { gemCards[i].querySelector('.rbody').textContent = txt; })
       .catch(e => { gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; })
   );
-  const cldP = callClaude(CLD_STEP.p(pf)).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
+  const cldP = callClaude(CLD_STEP.p(pf), null, null, 8000).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
     .catch(e => { cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; });
   await Promise.all([...gemPs, cldP]);
   btn.disabled = false; btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>';
@@ -2476,22 +2481,23 @@ async function doChat() {
   ldEl.innerHTML = '<div class="cav">' + (chatMode==='gc'?'🤝':chatMode==='g'?'🤖':'🧠') + '</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
   document.getElementById('cMsgs').appendChild(ldEl); sC();
   try {
+    // doChat: 通常チャットでも詳細な分析を返せるよう 5000 tokens
     if (chatMode==='g') {
       gemHist.push({role:'user',parts:[{text:txt}]});
-      const r = await callGemini(txt, gemSys, gemHist.slice(-8));
+      const r = await callGemini(txt, gemSys, gemHist.slice(-8), 5000);
       ldEl.remove(); addAIMsg('g', r);
       gemHist.push({role:'model',parts:[{text:r}]});
     } else if (chatMode==='c') {
       cldHist.push({role:'user',content:txt});
-      const r = await callClaude(txt, cldSys, cldHist.slice(-10));
+      const r = await callClaude(txt, cldSys, cldHist.slice(-10), 5000);
       ldEl.remove(); addAIMsg('c', r);
       cldHist.push({role:'assistant',content:r});
     } else {
       gemHist.push({role:'user',parts:[{text:txt}]});
       cldHist.push({role:'user',content:txt});
       const [gr, cr] = await Promise.all([
-        callGemini(txt, gemSys, gemHist.slice(-8)).catch(e => '⚠️ ' + e.message),
-        callClaude(txt, cldSys, cldHist.slice(-10)).catch(e => '⚠️ ' + e.message),
+        callGemini(txt, gemSys, gemHist.slice(-8), 5000).catch(e => '⚠️ ' + e.message),
+        callClaude(txt, cldSys, cldHist.slice(-10), 5000).catch(e => '⚠️ ' + e.message),
       ]);
       ldEl.remove(); addDualMsg(gr, cr);
       gemHist.push({role:'model',parts:[{text:gr}]});
@@ -2526,11 +2532,13 @@ function esc(s) {
 }
 
 // Gemini API
-async function callGemini(prompt, sys, history) {
+// maxTokens 省略時は 4096 (旧 1500 から大幅増、振り返り・合議で途切れ防止)。
+// 振り返りなど超長文を期待する場合は呼び出し側で 8000 等を渡す。
+async function callGemini(prompt, sys, history, maxTokens) {
   const contents = [];
   if (history && history.length > 0) contents.push(...history.slice(0, -1));
   contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
-  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens:1500}};
+  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens: maxTokens || 4096}};
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
     {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
@@ -2539,9 +2547,10 @@ async function callGemini(prompt, sys, history) {
 }
 
 // Claude API
-async function callClaude(prompt, sys, history) {
+// maxTokens 省略時は 4096 (旧 1500 から大幅増)。振り返りなど超長文は 8000 等を渡す。
+async function callClaude(prompt, sys, history, maxTokens) {
   const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
-  const body = {model:'claude-sonnet-4-20250514', max_tokens:1500, messages:msgs};
+  const body = {model:'claude-sonnet-4-20250514', max_tokens: maxTokens || 4096, messages:msgs};
   if (sys) body.system = sys;
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
