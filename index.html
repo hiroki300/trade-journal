@@ -110,7 +110,8 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .ai-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:.04em;}
 .pill-g{background:rgba(66,133,244,.15);color:var(--gem);}
 .pill-c{background:rgba(217,119,6,.15);color:var(--cld);}
-#page-chat{padding:0;display:flex;flex-direction:column;}
+#page-watchchat{padding:0;display:flex;flex-direction:column;}
+.watch-section{padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--s1);box-shadow:var(--shadow);}
 .cscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 8px;min-height:0;}
 .cmsg{display:flex;gap:7px;margin-bottom:8px;align-items:flex-start;}
 .cmsg.u{flex-direction:row-reverse;}
@@ -193,11 +194,11 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </header>
 <nav>
   <div class="tab on" onclick="go('dash')"><span class="ti">📊</span>概況</div>
+  <div class="tab" onclick="go('market')"><span class="ti">🌍</span>市場</div>
+  <div class="tab" onclick="go('discover')"><span class="ti">💡</span>発掘</div>
   <div class="tab" onclick="go('trade')"><span class="ti">💱</span>売買</div>
   <div class="tab" onclick="go('hold')"><span class="ti">💼</span>保有</div>
-  <div class="tab" onclick="go('watch')"><span class="ti">👁</span>注目</div>
-  <div class="tab" onclick="go('rev')"><span class="ti">🔍</span>振り返り</div>
-  <div class="tab" onclick="go('chat')"><span class="ti">💬</span>相談</div>
+  <div class="tab" onclick="go('watchchat')"><span class="ti">💬</span>相談</div>
 </nav>
 <div class="pages">
 
@@ -210,47 +211,54 @@ select.fi{appearance:none;-webkit-appearance:none;}
   </div>
   <div id="dh"></div><div id="dt" style="margin-top:8px"></div>
   <!-- ========= Phase 3 朝会レポート (Mon 05:00 JST 自動更新) ========= -->
-  <div id="mr-section" style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
-    <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span id="mr-gen" style="opacity:.6"></span>
-      <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
-    </div>
+</div>
 
-    <div class="sec-lbl">🌍 マクロ判定</div>
-    <div id="dmacro" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--t2)">読み込み中…</div>
-
-    <div class="sec-lbl">💴 真の税後 PnL (Phase 6 T0-4 計測)</div>
-    <div id="dpnl" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">📊 あなたの執行癖 (Phase 6 T0-3 計測)</div>
-    <div id="ddrift" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">🏷️ タグ別パフォーマンス (Phase D-1)</div>
-    <div id="dtags" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">🎯 AI 判定別の的中率 (Phase D-4)</div>
-    <div id="daiacc" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">🔥 ピックアップ銘柄</div>
-    <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">📋 Deep Insight 全候補 (tier 別)</div>
-    <div id="ddisummary" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">📅 決算カレンダー (推定 ±3日)</div>
-    <div id="dearnings" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">📊 動意テーマ (週次)</div>
-    <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
-
-    <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
-    <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:8px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
-    <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
-      <input type="checkbox" id="cashFilter" onchange="renderCandidatesFromCache()" style="width:16px;height:16px;cursor:pointer">
-      <span>💰 残金 (<span id="cashFilterAmount">0</span>円) で <strong>100株</strong> 買える銘柄のみ表示</span>
-    </label>
-    <div id="comparePanel" style="display:none;margin-bottom:14px"></div>
-    <div id="dcandidates" style="margin-bottom:14px">読み込み中…</div>
+<div class="page" id="page-market">
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span class="mr-gen" style="opacity:.6"></span>
+    <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
   </div>
+
+  <div class="sec-lbl">🌍 マクロ判定</div>
+  <div id="dmacro" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--t2)">読み込み中…</div>
+
+  <div class="sec-lbl">📅 決算カレンダー (推定 ±3日)</div>
+  <div id="dearnings" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">📊 動意テーマ (週次)</div>
+  <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
+</div>
+
+<div class="page" id="page-discover">
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span class="mr-gen" style="opacity:.6"></span>
+    <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
+  </div>
+
+  <div class="sec-lbl">🔥 ピックアップ銘柄</div>
+  <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">📋 Deep Insight 全候補 (tier 別)</div>
+  <div id="ddisummary" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
+  <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:8px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
+  <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
+    <input type="checkbox" id="cashFilter" onchange="renderCandidatesFromCache()" style="width:16px;height:16px;cursor:pointer">
+    <span>💰 残金 (<span id="cashFilterAmount">0</span>円) で <strong>100株</strong> 買える銘柄のみ表示</span>
+  </label>
+  <div id="comparePanel" style="display:none;margin-bottom:14px"></div>
+  <div id="dcandidates" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">💴 真の税後 PnL (Phase 6 T0-4 計測)</div>
+  <div id="dpnl" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">📊 あなたの執行癖 (Phase 6 T0-3 計測)</div>
+  <div id="ddrift" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">🏷️ タグ別パフォーマンス (Phase D-1)</div>
+  <div id="dtags" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">🎯 AI 判定別の的中率 (Phase D-4)</div>
+  <div id="daiacc" style="margin-bottom:14px">読み込み中…</div>
 </div>
 
 <div class="page" id="page-trade">
@@ -322,31 +330,32 @@ select.fi{appearance:none;-webkit-appearance:none;}
   </div>
   <div class="sec-lbl" style="margin-top:14px">売買履歴</div>
   <div id="tHist"></div>
+
+  <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
+    <div class="sec-lbl">🔍 今日の振り返り</div>
+    <div class="cost-note"><span>🤖 Gemini: 情報収集　🧠 Claude: 戦略分析</span></div>
+    <button class="rev-btn" id="revBtn" onclick="doRev()">
+      今日の振り返りを開始する<br>
+      <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>
+    </button>
+    <div id="revOut"></div>
+  </div>
 </div>
 
 <div class="page" id="page-hold"><div id="hList"></div></div>
 
-<div class="page" id="page-watch">
-  <div class="sec-lbl">👁 注目銘柄ウォッチリスト</div>
-  <div style="display:flex;gap:6px;margin-bottom:10px">
-    <input class="fi" id="wCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:80px;flex:none;margin-bottom:0">
-    <input class="fi" id="wName" type="text" placeholder="銘柄名" style="flex:1;margin-bottom:0">
-    <input class="fi" id="wTag" type="text" placeholder="メモ" style="flex:1;margin-bottom:0">
-    <button class="btn btnb" style="width:52px;padding:0;font-size:20px;margin-top:0" onclick="addWatch()">＋</button>
+<div class="page" id="page-watchchat">
+  <div class="watch-section">
+    <div class="sec-lbl">👁 注目銘柄ウォッチリスト</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <input class="fi" id="wCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:80px;flex:none;margin-bottom:0">
+      <input class="fi" id="wName" type="text" placeholder="銘柄名" style="flex:1;margin-bottom:0">
+      <input class="fi" id="wTag" type="text" placeholder="メモ" style="flex:1;margin-bottom:0">
+      <button class="btn btnb" style="width:52px;padding:0;font-size:20px;margin-top:0" onclick="addWatch()">＋</button>
+    </div>
+    <div id="watchList"></div>
   </div>
-  <div id="watchList"></div>
-</div>
 
-<div class="page" id="page-rev">
-  <div class="cost-note"><span>🤖 Gemini: 情報収集　🧠 Claude: 戦略分析</span></div>
-  <button class="rev-btn" id="revBtn" onclick="doRev()">
-    🔍 今日の振り返りを開始する<br>
-    <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>
-  </button>
-  <div id="revOut"></div>
-</div>
-
-<div class="page" id="page-chat">
   <div class="mode-row">
     <button class="mode-btn on" id="modeGC" onclick="setMode('gc')">🤝 合議</button>
     <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini</button>
@@ -470,11 +479,11 @@ document.getElementById('cashIn').value = cash || '';
 
 // タブ
 function go(id) {
-  const ids = ['dash','trade','hold','watch','rev','chat'];
+  const ids = ['dash','market','discover','trade','hold','watchchat'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('on', ids[i]===id));
   document.querySelectorAll('.page').forEach(p => {
     const active = p.id === 'page-' + id;
-    if (active && p.id === 'page-chat') {
+    if (active && p.id === 'page-watchchat') {
       p.style.display = 'flex';
       p.style.flexDirection = 'column';
     } else {
@@ -487,7 +496,7 @@ function go(id) {
   if (id==='dash')  rDash();
   if (id==='hold')  rHold();
   if (id==='trade') { rTH(); checkMacroWarning(); }  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
-  if (id==='watch') rWatch();
+  if (id==='watchchat') rWatch();
 }
 
 // Phase A-2: マクロガード storm/halt 時の警告 (日次 1 回)
@@ -680,12 +689,13 @@ async function loadMorningReports(forceRefresh = false) {
     renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
     renderAIAccuracy();             // Phase D-4: AI 判定別の的中率
     const gen = (pickup && pickup.generated_at) || '';
-    document.getElementById('mr-gen').textContent = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
+    const genStr = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
+    document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
     _isReportsFetched = true;
     _reportsFetchedAt = now;
   } catch (e) {
     console.error('loadMorningReports failed:', e);
-    document.getElementById('mr-gen').textContent = '(取得失敗)';
+    document.querySelectorAll('.mr-gen').forEach(e => e.textContent = '(取得失敗)');
   }
 }
 
@@ -1628,32 +1638,36 @@ async function analyzeCandidate(code4) {
 
   const prompt =
     buildPersonaPrefix() +
-    '⚠️ 重要: 必ず Google 検索を実行して「' + s.name + ' 速報」「' + s.name + ' ニュース 今日」「' + s.code + ' 出来高 最新」「' + s.name + ' 決算」など複数クエリで **当日 (' + ymdJST() + ') の最新情報** を取得してから回答してください。前日終値ベースのデータは参考に留め、当日の場中の値動き・出来高・速報・関連業界動向を最優先で評価。\n\n' +
-    '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) で買うかどうかを断言。曖昧表現は禁止、数字で具体的に。\n\n' +
+    '⚠️ 重要: あなたの役割は、すでに銘柄選定された候補について、本日の最新値動き（チャート）、直近の需給（信用倍率・空売り残高）、および企業のファンダメンタルズ（事業内容・決算）から「リアルタイムのいまエントリーすべきか」の執行判断を下すことです。\n' +
+    '必ず Google 検索を実行して以下の3点を調べてください。\n' +
+    '1. 「' + s.name + ' 事業内容」 (企業概要)\n' +
+    '2. 「' + s.name + ' 直近 決算」 (業績トレンドや決算発表予定日)\n' +
+    '3. 「' + s.name + ' 株価 本日」 (本日の値動きや材料)\n\n' +
+    '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) に基づき、前置きなしで以下の項目のみ簡潔に答えてください。**各項目50文字以内**を厳守し、結論ファーストで回答してください。\n\n' +
     '【候補銘柄】\n' +
-    s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', score ' + (s.total_score || '-') + ')\n' +
-    '現値: ' + Math.round(s.current_price).toLocaleString() + '円\n' +
-    'ATR: ' + (s.atr || '-') + ' / MA25: ' + (s.ma25 ? Math.round(s.ma25).toLocaleString() + '円' : '-') + ' / 20日安値: ' + (s.recent_low_20d ? Math.round(s.recent_low_20d).toLocaleString() + '円' : '-') + ' / -2σ: ' + (s.minus_2sigma ? Math.round(s.minus_2sigma).toLocaleString() + '円' : '-') + '\n' +
-    '出来高比 (20日比): ×' + (s.vol_ratio || '-') + '\n' +
-    '信用倍率前週比: ' + (s.mr_trend_pct == null ? '不明' : s.mr_trend_pct + '%') + '\n' +
-    '空売残高%: ' + (s.short_balance_pct == null ? '不明' : s.short_balance_pct + '%') + ' / 踏み上げ候補: ' + (s.squeeze_candidate ? 'YES' : 'NO') + '\n' +
-    '次回決算: ' + (s.next_earnings || '-') + '\n\n' +
+    s.code + ' ' + s.name + '\n' +
+    '現値: ' + Math.round(s.current_price).toLocaleString() + '円 / ATR: ' + (s.atr || '-') + ' / MA25: ' + (s.ma25 ? Math.round(s.ma25).toLocaleString() + '円' : '-') + ' / 20日安値: ' + (s.recent_low_20d ? Math.round(s.recent_low_20d).toLocaleString() + '円' : '-') + ' / -2σ: ' + (s.minus_2sigma ? Math.round(s.minus_2sigma).toLocaleString() + '円' : '-') + '\n' +
+    '出来高比: ×' + (s.vol_ratio || '-') + ' / 信用倍率比: ' + (s.mr_trend_pct == null ? '不明' : s.mr_trend_pct + '%') + ' / 空売残: ' + (s.short_balance_pct == null ? '不明' : s.short_balance_pct + '%') + ' / 踏み上げ候補: ' + (s.squeeze_candidate ? 'YES' : 'NO') + '\n' +
+    '次回決算: ' + (s.next_earnings || '-') + '\n' +
+    '現在の余力(残金): ' + Math.round(cash).toLocaleString() + '円\n\n' +
     '【指値ライン】\n' + levelsTxt + '\n\n' +
-    (pickupEntry ? '【Sonnet 事前分析 (Deep Insight)】\n' + (pickupEntry.synthesis_notes || '(なし)') + '\n' + (pickupEntry.warning_reason ? '警告: ' + pickupEntry.warning_reason + '\n' : '') + '\n' : '') +
-    '【依頼】超一流FMとして以下の順で答えてください。**最初の「シニアFMの本音」が最重要**:\n\n' +
+    (pickupEntry ? '【事前分析】\n' + (pickupEntry.synthesis_notes || '(なし)').slice(0, 100) + '\n' : '') +
+    '【依頼】以下の順で出力してください（マークダウン可、挨拶不要、各項目50字以内）:\n\n' +
     '## 【シニアFMの本音】\n' +
-    '自分のファンドでこの銘柄を買うか? **30字以内で率直に断言**。例: 「今すぐ買い、指値2934円で 100株」「材料弱い、見送り」「指値到達まで待つ」など、行動が一意に決まる形で。\n\n' +
-    '## 【売買判断】\n' +
-    '「今すぐ買い」「指値で待つ」「見送り」のどれか1つを断言、理由を3行で。\n\n' +
-    '## 【推奨エントリー価格】\n' +
-    '上記指値リストから最も妥当な価格を1つ選び、その根拠 (テクニカル・需給・材料) を説明。\n' +
-    '別の価格が望ましいなら独自に提示してその根拠も。\n\n' +
-    '## 【損切りライン】\n' +
-    '推奨エントリーから -8% を基準に具体的な価格 (円) を1つ。テクニカル節目も考慮。\n\n' +
-    '## 【利確目標】\n' +
-    '推奨エントリーから RR 1:2 (= +16%) を基準に第1目標。可能なら最終目標も。\n\n' +
-    '## 【今日の最新材料・リスク】\n' +
-    'Google検索で取得した **本日の動き** (場中の値動き・速報・出来高変化)、直近の決算/材料、最大リスク要因を 1 つずつ。' +
+    '買うか見送るか? 30字以内で断言。例:「今すぐ買う。2934円で指値」「見送り。決算前リスク大」\n\n' +
+    '## 【総合スコア判定】\n' +
+    '「ファンダ: ★☆☆」「需給: ★★☆」「チャート: ★★★」など3項目の星評価と、総合判定（買い・見送り等）を1行で。\n\n' +
+    '## 【事業内容・決算リスク】\n' +
+    'どんな事業か、直近の業績は良いか、直近に決算発表が控えていないか（リスク）を1行で。\n\n' +
+    '## 【チャート・需給分析】\n' +
+    '現在のテクニカル位置と、信用残などの需給チャンス・リスクを1行で。\n\n' +
+    '## 【推奨エントリー・資金管理】\n' +
+    '・推奨買値: ◯◯円\n' +
+    '・推奨ロット: ◯◯株 (余力 '+Math.round(cash).toLocaleString()+'円 で安全に買える株数)\n' +
+    '・損切りライン: ◯◯円 (買値から-8%基準)\n' +
+    '・利確目標: ◯◯円 (買値から+16%基準)\n\n' +
+    '## 【本日の材料】\n' +
+    '本日の値動きの背景を1行で。' +
     getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
 
   try {
@@ -1797,7 +1811,7 @@ async function compareCandidates() {
     const closest = Math.min(...s.levels.map(l => l.discount_pct ?? 99));
     const hasNotified = s.levels.some(l => l.notified);
     return hasNotified || closest <= 5.0;
-  }).slice(0, 12);   // 12 銘柄 cap (プロンプト膨張防止)
+  }).slice(0, 6);   // 6 銘柄 cap (3社目の内容欠落・途切れ防止)
 
   if (targets.length === 0) {
     panel.innerHTML = '<div style="padding:14px;color:var(--t3);font-size:12px">🤔 通知済 or 接近の候補が無いため比較対象なし</div>';
@@ -1815,29 +1829,32 @@ async function compareCandidates() {
 
   const prompt =
     buildPersonaPrefix() +
-    '⚠️ 重要: 必ず Google 検索で当日 (' + ymdJST() + ') の市場全体の動き・各銘柄の本日速報を取得してから回答。前日データではなく当日の動きで判断。\n\n' +
+    '⚠️ 重要: あなたの役割は、すでに銘柄選定された候補から、本日の値動き（チャート）と需給（信用倍率・空売り残高）に基づき「今日エントリーを最優先すべき Top 3」を選ぶことです。長文の材料まとめは不要です。\n' +
+    '必ず Google 検索を実行して、各銘柄の **本日 (' + ymdJST() + ') の場中の値動き・出来高** を取得して比較判断してください。\n\n' +
+    '短期回転戦略 (損切り-8%/RR2/数日〜数週間保有) の視点で、前置きなしで以下の項目のみ簡潔に答えてください。説明はすべて各項目1〜2行（50文字以内）で厳しく制限します。**結論ファースト**で回答してください。\n\n' +
     '【比較対象 ' + targets.length + ' 銘柄】\n' + listTxt + '\n\n' +
-    '【依頼】短期回転戦略 (損切り-8%/RR2/数日〜数週間保有) の視点で、上記から **今日エントリーを優先すべき Top 3** を選び、以下フォーマットで答えてください:\n\n' +
+    '【依頼】以下のフォーマットで答えてください。**各項目50文字以内**を厳守:\n\n' +
     '## 🥇 第1位: <コード> <銘柄名>\n' +
     '- 推奨指値: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
-    '- 1 位の理由 (他候補との比較で何が決定的か、2-3 行)\n' +
-    '- 本日の決定打となる材料・速報\n\n' +
+    '- チャート・需給による根拠 (他候補との比較で何が決定的か、1行で)\n' +
+    '- 本日の材料・速報 (値動きの背景、1行で)\n\n' +
     '## 🥈 第2位: <コード> <銘柄名>\n' +
-    '- 推奨指値・損切り・目標\n' +
-    '- 2 位の理由\n\n' +
+    '- 推奨指値: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
+    '- チャート・需給による根拠 (1行で)\n\n' +
     '## 🥉 第3位: <コード> <銘柄名>\n' +
-    '- 同上\n\n' +
+    '- 推奨指値: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
+    '- チャート・需給による根拠 (1行で)\n\n' +
     '## 📊 全体比較サマリ\n' +
-    '残りの候補について、見送り推奨/様子見/微妙 の振り分けを 1 行ずつ。\n\n' +
+    '残りの候補について、「コード：見送り/様子見の理由」を15文字以内の短い一言で1行ずつ整理してください。\n\n' +
     '## 💬 本音\n' +
     '今日この中から1銘柄だけ買うなら? 30字以内で断言。' +
-    getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
+    getDriftPromptInjection() + getLossPatternInjection();
 
   try {
-    // compareCandidates: Top1/Top2/Top3 詳細 + 全体比較 + 本音 — 候補数次第で長文化、8000 tokens
+    // compareCandidates: Top1/Top2/Top3 詳細 + 全体比較 + 本音 — 途切れ防止のため4000トークン指定
     const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null, 8000).catch(e => '⚠️ Gemini: ' + e.message),
-      callClaude(prompt, null, null, 8000).catch(e => '⚠️ Claude: ' + e.message),
+      callGemini(prompt, null, null, 4000).catch(e => '⚠️ Gemini: ' + e.message),
+      callClaude(prompt, null, null, 4000).catch(e => '⚠️ Claude: ' + e.message),
     ]);
     const honneG = _extractHonne(gRes);
     const honneC = _extractHonne(cRes);
@@ -1936,37 +1953,36 @@ async function analyzeHolding(cd) {
 
   const prompt =
     buildPersonaPrefix() +
-    'Google検索で今日の最新情報（株価・ニュース・需給・材料）を必ず調べてから回答してください。\n'+
-    '曖昧な表現は禁止。プロとして断言し、具体的な数字で答えてください。\n\n'+
+    '⚠️ 重要: あなたの役割は、保有銘柄について、本日の最新値動き（チャート）と直近の需給（信用倍率・空売り残高）から「いま売るべきか、継続か、買い増しか」の執行判断を下すことです。ニュースの長文まとめは不要です。\n' +
+    '必ず Google 検索を実行して「' + h.nm + ' 株価 本日」「' + h.nm + ' 材料 速報」などで **当日 (' + ymdJST() + ') の場中の最新の値動き・出来高** を取得して判断してください。\n\n' +
+    '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) に基づき、前置きなしで以下の項目のみ簡潔に答えてください。説明はすべて各項目1〜2行（50文字以内）で厳しく制限します。**結論ファースト**で回答してください。\n\n' +
     '【保有銘柄】\n'+
     '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
-    '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株）\n'+
-    '現在値: '+cp.toLocaleString()+'円\n'+
+    '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株） / 現在値: '+cp.toLocaleString()+'円\n'+
     '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
-    (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円\n':'')+
-    (h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'')+
-    (h.memo?'メモ: '+h.memo+'\n':'')+
-    '\n【依頼内容】私の大切な資産です。以下を超一流FMとして率直に答えてください：\n\n'+
+    (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円 / ':'')+(h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'') +
+    (h.memo?'メモ: '+h.memo+'\n':'') + '\n' +
+    '【依頼】以下の順で、余計な挨拶文は一切なしで出力してください。**各項目50文字以内**を厳守:\n\n' +
     '## 【売買判断】\n'+
-    '「今すぐ売る」「継続保有」「買い増し」のどれか1つを断言し、その理由を3行で。\n\n'+
-    '## 【損切りライン】\n'+
-    '具体的な価格（円）を1つ示し、その根拠（テクニカル・リスク管理の観点）を説明。\n'+
-    '現在値からの下落率も示すこと。\n\n'+
-    '## 【利確目標】\n'+
-    '具体的な価格（円）を1つ示し、その根拠を説明。\n'+
-    '段階的利確が望ましい場合は第1目標・最終目標を示すこと。\n\n'+
-    '## 【最新材料・リスク】\n'+
-    'Google検索で調べた直近のニュース・決算・需給の状況。\n'+
-    'この銘柄の最大のリスク要因も1つ挙げること。\n\n'+
+    '「今すぐ売る」「継続保有」「買い増し」のどれか1つを断言。その理由（チャート・需給の根拠）を1行で。\n\n'+
+    '## 【チャート分析（テクニカル）】\n' +
+    '移動平均線やボリンジャーバンド、出来高から見た現在のチャート位置の評価を1行で。\n\n' +
+    '## 【需給状況】\n' +
+    '信用倍率や空売り残高、踏み上げの可能性から見たリスクやチャンスを1行で。\n\n' +
+    '## 【推奨損切り・利確目標】\n'+
+    '・推奨損切りライン: ◯◯円 (取得単価から-8%基準、現在値からの下落率も併記)\n'+
+    '・推奨利確目標: ◯◯円 (取得単価から+16%基準)\n\n'+
+    '## 【本日の材料・リスク】\n'+
+    '本日の株価の動きの背景と、最大の懸念点（決算近接など）を1行で。\n\n'+
     '## 【シニアFMの本音】\n'+
-    '自分のファンドにこの銘柄を持ち続けるか？率直に一言で。' +
-    getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
+    '自分のファンドにこの銘柄を持ち続けるか？30字以内で率直に断言。' +
+    getDriftPromptInjection() + getLossPatternInjection();
 
   try {
-    // analyzeHolding: 5 セクション (売買判断+損切り+利確+材料・リスク+本音) — 6000 tokens
+    // analyzeHolding: 5 セクション — 途切れ防止のため4000トークン指定
     const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null, 6000).catch(e => '⚠️ Gemini: '+e.message),
-      callClaude(prompt, null, null, 6000).catch(e => '⚠️ Claude: '+e.message),
+      callGemini(prompt, null, null, 4000).catch(e => '⚠️ Gemini: '+e.message),
+      callClaude(prompt, null, null, 4000).catch(e => '⚠️ Claude: '+e.message),
     ]);
 
     panel.textContent =
@@ -2422,12 +2438,12 @@ const GEM_STEPS = [
 const CLD_STEP = {
   icon:'🎯', title:'振り返り・明日の戦略', color:'var(--cld)',
   p: pf => buildPersonaPrefix() + '【ポートフォリオ】\n' + pf +
-    '\n以下を**数字と具体価格で**率直に答えてください:\n' +
-    '1. 今日の振り返り (含み損益の変化、勝因/敗因を 2-3 行で)\n' +
-    '2. 保有銘柄ごとの判断: 銘柄ごとに「継続 / 利確 / 損切り」を 1 つ断言、各銘柄の損切り価格と利確目標を円単位で明示\n' +
-    '3. 残金の活用法: 新規買い候補があれば銘柄コード + 推奨指値 (円) + 株数を提示、なければ「待機」と断言\n' +
-    '4. 明日の行動計画: 寄付前のチェック項目 3 つ、引け前の判断ポイント 2 つ\n' +
-    '5. シニアFMとしての一言: 30 字以内で本音'
+    '\n前置きや時候の挨拶は一切不要です。以下の内容を、余計な長文を省き簡潔に数字と具体価格で答えてください。説明は各項目2行（100文字）以内に制限します。**結論ファースト**で回答してください。:\n' +
+    '1. 今日の振り返り: チャート・需給面から見た全体損益の変化、勝因/敗因を2行以内で。\n' +
+    '2. 保有銘柄ごとの判断: 銘柄ごとに「継続 / 利確 / 損切り」の結論を断言し、具体的な損切り価格・利確目標（円）と、そう判断したチャート・需給上の理由を**1行（50文字以内）**で明記してください。\n' +
+    '3. 残金の活用法: 新規買い候補があれば「コード・推奨指値（円）・株数」を提示し、なければ「待機」と断言（1行以内で）。\n' +
+    '4. 明日の行動計画: 寄付前のチェック項目2つ、引け前の判断ポイント2つ（それぞれ1行以内で）。\n' +
+    '5. シニアFMとしての一言: 30字以内で本音。'
 };
 
 async function doRev() {
@@ -2455,7 +2471,7 @@ async function doRev() {
     callGemini(s.p(pf), null, null, 6000).then(txt => { gemCards[i].querySelector('.rbody').textContent = txt; })
       .catch(e => { gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; })
   );
-  const cldP = callClaude(CLD_STEP.p(pf), null, null, 8000).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
+  const cldP = callClaude(CLD_STEP.p(pf), null, null, 4000).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
     .catch(e => { cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; });
   await Promise.all([...gemPs, cldP]);
   btn.disabled = false; btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>';
@@ -2475,8 +2491,8 @@ async function doChat() {
   document.getElementById('csend').disabled = true;
   addMsg('u', txt);
   const pf = pfS();
-  const gemSys = buildPersonaPrefix() + 'Google検索で最新情報を確認しながら回答してください。\nポートフォリオ: ' + pf;
-  const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n率直・具体的にアドバイスしてください。';
+  const gemSys = buildPersonaPrefix() + 'Google検索を用いて対象企業の【事業内容】や【直近の決算結果】などの最新情報を確認しながら回答してください。現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\nポートフォリオ: ' + pf;
+  const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\n率直・具体的にアドバイスしてください。';
   const ldEl = document.createElement('div'); ldEl.className='cmsg';
   ldEl.innerHTML = '<div class="cav">' + (chatMode==='gc'?'🤝':chatMode==='g'?'🤖':'🧠') + '</div><div class="cb"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
   document.getElementById('cMsgs').appendChild(ldEl); sC();
