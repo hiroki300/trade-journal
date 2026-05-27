@@ -125,7 +125,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .dhg{background:rgba(66,133,244,.15);color:var(--gem);}
 .dhc{background:rgba(217,119,6,.15);color:var(--cld);}
 .cbar{display:flex;gap:7px;padding:8px 12px;background:var(--s1);border-top:1px solid var(--border);}
-.cin{flex:1;background:var(--s2);border:1.5px solid var(--border);border-radius:9px;color:var(--text);font-family:var(--font);font-size:14px;padding:9px 11px;outline:none;resize:none;transition:border-color .15s;max-height:90px;}
+.cin{flex:1;background:var(--s2);border:1.5px solid var(--border);border-radius:9px;color:var(--text);font-family:var(--font);font-size:16px;padding:9px 11px;outline:none;resize:none;transition:border-color .15s;max-height:90px;}
 .cin:focus{border-color:var(--acc);}
 .csend{width:40px;height:40px;background:var(--acc);border:none;border-radius:9px;color:#fff;font-size:17px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
 .csend:disabled{opacity:.4;}
@@ -1639,7 +1639,7 @@ function _renderCandidateCard(s, pickupMap, cat) {
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">' +
     '<button onclick="toggleChart(\'' + code4 + '\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート</button>' +
     '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">🤝 AI合議</button>' +
-    '<button onclick="askAboutStock(\'' + code4 + '\',\'' + s.name.replace(/'/g, "\\'") + '\');showTab(\'chat\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">💬 AI相談</button>' +
+    '<button onclick="askAISodanForCandidate(\'' + code4 + '\',\'' + s.name.replace(/'/g, "\\'") + '\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">💬 AI相談</button>' +
     '<a href="https://www.buffett-code.com/company/' + code4 + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow);text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center">📊 企業情報 (決算)</a>' +
     '</div>' +
     '<div id="chart-' + code4 + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>' +
@@ -1662,26 +1662,30 @@ function toggleChart(code4, prefix) {
   }
   // 安全に文字列にキャストし、トリムと小数点以下を除去（数値型・実数型対策）
   let strCode = String(code4).trim().split('.')[0];
-  // TradingView の symbol 形式: TSE:XXXX (4 桁数字コード)
   // J-Quants の 5 桁コード (例: "30480", "213A0") → 末尾の "0" を除去して TradingView 用 4 桁に
   let symbol = (strCode.length === 5 && strCode.endsWith('0')) ? strCode.slice(0, 4) : strCode;
-  const url = 'https://s.tradingview.com/widgetembed/?frameElementId=tv-' + prefix + code4 +
-    '&symbol=TSE%3A' + symbol +
+
+  // 4桁の英数字（例: 7203 や 247A）であるかチェック
+  const isValidSymbol = /^[0-9a-zA-Z]{4}$/.test(symbol);
+  if (!isValidSymbol) {
+    el.style.display = 'block';
+    el.innerHTML = '<div style="background:var(--s2);padding:10px;font-size:11px;color:var(--red);text-align:center">⚠️ 4桁の有効な証券コードが確認できないため、チャートを表示できません。</div>';
+    return;
+  }
+
+  const url = 'https://s.tradingview.com/widgetembed/?symbol=TSE%3A' + symbol +
     '&interval=D' +
     '&theme=light' +
     '&style=1' +
     '&locale=ja' +
-    '&toolbarbg=f1f5f9' +
-    '&studies=%5B%22MASimple%40tv-basicstudies%22%5D' +
-    '&hideideas=1' +
-    '&timezone=Asia%2FTokyo' +
-    '&saveimage=1';
+    '&timezone=Asia%2FTokyo';
+
   el.innerHTML =
     '<div style="background:var(--s2);padding:6px 10px;font-size:11px;color:var(--t2);display:flex;justify-content:space-between;align-items:center">' +
-    '<span>📈 TradingView ' + symbol + ' (日足、25 日移動平均線)</span>' +
+    '<span>📈 TradingView ' + symbol + ' (日足)</span>' +
     '<button onclick="toggleChart(\'' + code4 + '\',\'' + prefix + '\')" style="background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer">×</button>' +
     '</div>' +
-    '<iframe src="' + url + '" style="width:100%;height:380px;border:0;display:block" loading="lazy"></iframe>';
+    '<iframe src="' + url + '" style="width:100%;height:350px;border:none;display:block"></iframe>';
   el.style.display = 'block';
 }
 
@@ -1766,9 +1770,9 @@ async function analyzeCandidate(code4) {
     const fmCld = _extractHonne(cRes);
     const detailHTML =
       '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🤖 Gemini (本日の市場情報):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(gRes) + '</div>' +
+      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + md(gRes) + '</div>' +
       '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略・指値判断):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(cRes) + '</div>';
+      '<div style="background:#fff;border-radius:8px;padding:10px;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + md(cRes) + '</div>';
     // Phase B-2: SBI コピーボタン用に銘柄情報と raw AI 出力もキャッシュ
     window._candAICache[code4] = {fmGem, fmCld, detailHTML, code: code4, name: s.name, gRes, cRes};
     _renderAIResult(panel, code4);
@@ -2001,7 +2005,7 @@ function hHTML(h, compact, idx) {
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">'+
       '<button onclick="toggleChart(\'' + h.cd + '\',\'chart-hold-\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">📈 チャート</button>'+
       '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">🤝 売買判断</button>'+
-      '<button onclick="askAboutStock(\'' + h.cd + '\',\'' + h.nm.replace(/'/g, "\\'") + '\');showTab(\'chat\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">💬 AI相談</button>'+
+      '<button onclick="askAISodanForHolding(\'' + h.cd + '\',\'' + h.nm.replace(/'/g, "\\'") + '\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">💬 AI相談</button>'+
       '<a href="https://www.buffett-code.com/company/' + h.cd + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center">📊 企業情報 (決算)</a>'+
       '</div>'+
       '<button class="delbtn" onclick="delH(' + i + ')" style="margin-top:6px">🗑 削除</button>'+
@@ -2682,6 +2686,93 @@ function clearChatHistory() {
     renderChatHistory();
   }
 }
+async function askAISodanForCandidate(code4, name) {
+  const panel = document.getElementById('aic-' + code4);
+  if (!panel) return;
+
+  if (panel.style.display === 'block' && panel.innerHTML.includes('AI詳細相談結果') && !panel.innerHTML.includes('分析中')) {
+    panel.style.display = 'none'; return;
+  }
+
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:10px"><div class="spin"></div><span>💬 Google検索で事業内容と直近決算を読み込み中... (約10〜15秒)</span></div>';
+
+  const prompt = buildPersonaPrefix() +
+    'あなたはプロの投資アシスタントです。Google検索を実行して「' + name + ' 事業内容」「' + name + ' 直近 決算」「' + name + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
+    '回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用し、段落や箇条書きを用いて読みやすく出力してください。\n\n' +
+    '【対象銘柄】\n' + code4 + ' ' + name + '\n' +
+    '現在の余力(残金): ' + Math.round(cash).toLocaleString() + '円\n\n' +
+    '【出力構成】:\n' +
+    '### ■ どのような企業か（事業内容の要約）\n' +
+    '（主な事業、強みや市場での立ち位置について分かりやすく解説してください）\n\n' +
+    '### ■ 直近の決算状況と業績予測\n' +
+    '（直近の決算発表の結果、前年比の業績、次回決算発表予定日とそれにかかる決算ギャップリスクについて）\n\n' +
+    '### ■ チャート・テクニカル現在位置\n' +
+    '（現在の株価位置、サポートラインやレジスタンスライン、移動平均線との関係）\n\n' +
+    '### ■ 需給面の分析\n' +
+    '（信用倍率、空売り残高などの動向から見た買い手の優位性とリスク）\n\n' +
+    '### ■ 総合的なエントリー判断と資金管理\n' +
+    '（いま買うべきか、見送るべきか、買う場合の推奨買値と、余力 ' + Math.round(cash).toLocaleString() + ' 円に応じた安全な推奨ロット数・損切り・利確目標価格）';
+
+  try {
+    const res = await callGemini(prompt, null, null, 5000);
+    panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">💬 AI詳細相談結果 (' + name + ')</div>' +
+      '<div class="ai-sodan-content" style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
+      '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'aic-' + code4 + '\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
+    saveChatHistory(code4, name);
+  } catch (e) {
+    panel.innerHTML = '<div style="color:var(--red);padding:10px">⚠️ 相談エラー: ' + e.message + '</div>';
+  }
+}
+
+async function askAISodanForHolding(cd, nm) {
+  const panel = document.getElementById('ai-' + cd);
+  if (!panel) return;
+
+  if (panel.style.display === 'block' && panel.innerHTML.includes('AI詳細相談結果') && !panel.innerHTML.includes('分析中')) {
+    panel.style.display = 'none'; return;
+  }
+
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:10px"><div class="spin"></div><span>💬 Google検索で事業内容と直近決算を読み込み中... (約10〜15秒)</span></div>';
+
+  const h = H.find(x => x.cd === cd);
+  const cp = h ? (h.cp || h.bp) : 0;
+  const pnl = h ? (cp - h.bp) * h.sh : 0;
+  const pct = h ? ((cp - h.bp) / h.bp * 100).toFixed(2) : '0';
+  const typeStr = h ? (h.type === 'margin' ? '信用買建' : '現物') : '現物';
+
+  const prompt = buildPersonaPrefix() +
+    'あなたはプロの投資アシスタントです。Google検索を実行して「' + nm + ' 事業内容」「' + nm + ' 直近 決算」「' + nm + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
+    '回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用し、段落や箇条書きを用いて読みやすく出力してください。\n\n' +
+    '【保有銘柄】\n' +
+    '銘柄: ' + cd + ' ' + nm + ' (' + typeStr + ')\n' +
+    '取得単価: ' + (h ? h.bp.toLocaleString() : '0') + '円 × ' + (h ? h.sh : '0') + '株 / 現在値: ' + cp.toLocaleString() + '円\n' +
+    '含み損益: ' + (pnl >= 0 ? '+' : '') + Math.round(pnl).toLocaleString() + '円 (' + (parseFloat(pct) >= 0 ? '+' : '') + pct + '%)\n' +
+    '現在の余力(残金): ' + Math.round(cash).toLocaleString() + '円\n\n' +
+    '【出力構成】:\n' +
+    '### ■ どのような企業か（事業内容の要約）\n' +
+    '（主な事業、強みや市場での立ち位置について分かりやすく解説してください）\n\n' +
+    '### ■ 直近の決算状況と業績予測\n' +
+    '（直近の決算発表の結果、前年比の業績、次回決算発表予定日とそれにかかる決算ギャップリスクについて）\n\n' +
+    '### ■ チャート・テクニカル現在位置と今後の見通し\n' +
+    '（現在の株価位置、今後のサポートラインやレジスタンスライン、目標値と損切り価格の妥当性について）\n\n' +
+    '### ■ 需給面の分析\n' +
+    '（信用倍率、空売り残高などの動向から見た買い手・売り手の需給パワーバランス）\n\n' +
+    '### ■ 今後の売買シナリオと資金管理アドバイス\n' +
+    '（このまま継続保有すべきか、利益確定すべきか、あるいは損切り・ナンピンを検討すべきか、具体的にそのロット数や価格の目安を含めてアドバイスしてください）';
+
+  try {
+    const res = await callGemini(prompt, null, null, 5000);
+    panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">💬 AI詳細相談結果 (' + nm + ')</div>' +
+      '<div class="ai-sodan-content" style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
+      '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'ai-' + cd + '\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
+    saveChatHistory(cd, nm);
+  } catch (e) {
+    panel.innerHTML = '<div style="color:var(--red);padding:10px">⚠️ 相談エラー: ' + e.message + '</div>';
+  }
+}
+
 function askAboutStock(cd, nm) {
   const inp = document.getElementById('cinp');
   if (!inp) return;
@@ -2787,6 +2878,11 @@ function md(s) {
   // 太字 **text** -> <strong>text</strong>
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   
+  // 行頭や改行直後の見出しパース (### 見出し)
+  html = html.replace(/(?:^|\n)###\s*(.*?)(?=\n|$)/g, '\n<div style="font-weight:bold;font-size:12px;color:var(--acc);margin-top:10px;margin-bottom:4px;border-left:3px solid var(--acc);padding-left:6px">$1</div>');
+  // (## 見出し)
+  html = html.replace(/(?:^|\n)##\s*(.*?)(?=\n|$)/g, '\n<div style="font-weight:bold;font-size:13px;color:var(--text);margin-top:12px;margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:3px">$1</div>');
+
   // 改行を <br> に
   html = html.replace(/\n/g, '<br>');
   return html;
