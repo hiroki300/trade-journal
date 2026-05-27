@@ -259,6 +259,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
   <div class="sec-lbl">🎯 AI 判定別の的中率 (Phase D-4)</div>
   <div id="daiacc" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">📊 AI バックテスト成績 (全推奨・仮想)</div>
+  <div id="dbacktest" style="margin-bottom:14px">読み込み中…</div>
 </div>
 
 <div class="page" id="page-trade">
@@ -673,22 +676,25 @@ async function loadMorningReports(forceRefresh = false) {
     renderTaxAfterSummary();
     renderTagPerformance();  // Phase D-1
     renderAIAccuracy();      // Phase D-4
+    renderCounterfactualAccuracy(); // バックテスト成績
     return;
   }
   try {
-    const [macro, pickup, earn, themes, watch, synth] = await Promise.all([
+    const [macro, pickup, earn, themes, watch, synth, backtest] = await Promise.all([
       _fetchJSON('macro_state.json'),
       _fetchJSON('pickup_stocks.json'),
       _fetchJSON('earnings_calendar.json'),
       _fetchJSON('industry_report.json'),
       _fetchJSON('limit_watchlist.json'),
       _fetchJSON('deep_insight_synth.json'),
+      _fetchJSON('backtest_synthetic.json'),
     ]);
     // Phase 6 T0-3 Stage A: 買い注文時の AI 推奨値 lookup 用に window へキャッシュ
     window._synthData = synth;
     window._pickupData = pickup;
     window._watchlistData = watch;
     window._macroData = macro;  // Phase A-2: マクロ警告 + AI ペルソナ切替で参照
+    window._backtestData = backtest;
     renderMacro(macro);
     renderPickup(pickup);
     renderDISummary(synth);
@@ -699,6 +705,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
     renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
     renderAIAccuracy();             // Phase D-4: AI 判定別の的中率
+    renderCounterfactualAccuracy();  // バックテスト成績
     const gen = (pickup && pickup.generated_at) || '';
     const genStr = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
     document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
@@ -738,6 +745,7 @@ function lookupAIRecommendationByCode(cd) {
         tier_at_entry: found.tier,
         extraction_source: found.extraction_source || 'tdnet_pdf',
         source: 'deep_insight_synth',
+        momentum_pass: found.momentum_pass ?? null
       };
     }
   }
@@ -754,6 +762,24 @@ function lookupAIRecommendationByCode(cd) {
         tier_at_entry: found.tier,
         extraction_source: found.extraction_source || 'tdnet_pdf',
         source: 'pickup_stocks',
+        momentum_pass: found.momentum_pass ?? null
+      };
+    }
+  }
+  // フォールバック2: limit_watchlist.json (買い候補) からも lookup
+  const watch = window._watchlistData;
+  if (watch && Array.isArray(watch)) {
+    const found = watch.find(w => w.code === cd || w.code === code5);
+    if (found) {
+      return {
+        ai_recommended_entry: found.trigger_price || null,
+        ai_recommended_stop: found.stop_loss || null,
+        ai_recommended_target: found.target || null,
+        verdict_at_entry: found.rank || null,
+        tier_at_entry: found.rank || null,
+        extraction_source: 'limit_watchlist',
+        source: 'limit_watchlist',
+        momentum_pass: found.momentum_pass ?? null
       };
     }
   }
@@ -883,13 +909,15 @@ function getDriftPromptInjection() {
 // ============================================================
 
 function buildAIAccuracy() {
-  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && (t.execution_meta.verdict_at_entry || t.execution_meta.tier_at_entry));
+  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && (t.execution_meta.verdict_at_entry || t.execution_meta.tier_at_entry || t.execution_meta.momentum_pass !== undefined));
   if (sells.length === 0) return null;
   const byVerdict = {};
   const byTier = {};
+  const byMomentum = {};
   for (const s of sells) {
     const v = s.execution_meta.verdict_at_entry;
     const tier = s.execution_meta.tier_at_entry;
+    const mom = s.execution_meta.momentum_pass;
     const win = (s.pnl || 0) > 0;
     if (v) {
       if (!byVerdict[v]) byVerdict[v] = {n:0, wins:0, pnl:0};
@@ -903,8 +931,15 @@ function buildAIAccuracy() {
       if (win) byTier[tier].wins++;
       byTier[tier].pnl += (s.pnl || 0);
     }
+    if (mom !== undefined && mom !== null) {
+      const mKey = mom ? 'モメンタム合格' : 'モメンタム不適合';
+      if (!byMomentum[mKey]) byMomentum[mKey] = {n:0, wins:0, pnl:0};
+      byMomentum[mKey].n++;
+      if (win) byMomentum[mKey].wins++;
+      byMomentum[mKey].pnl += (s.pnl || 0);
+    }
   }
-  return {sample_size: sells.length, byVerdict, byTier};
+  return {sample_size: sells.length, byVerdict, byTier, byMomentum};
 }
 
 function renderAIAccuracy() {
@@ -912,7 +947,7 @@ function renderAIAccuracy() {
   if (!el) return;
   const a = buildAIAccuracy();
   if (!a) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI 判定別の的中率: サンプル蓄積中 (verdict/tier 付き売り取引の完了後に表示)</div>';
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI 判定別の的中率: サンプル蓄積中 (verdict/tier/モメンタム付き売り取引の完了後に表示)</div>';
     return;
   }
   const fmt = stats => {
@@ -935,7 +970,41 @@ function renderAIAccuracy() {
   el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
     renderGroup('判定別 (verdict_at_entry)', a.byVerdict, s => s.n) +
     renderGroup('tier 別 (Deep Insight)', a.byTier, s => s.n) +
+    renderGroup('モメンタム別 (momentum_pass)', a.byMomentum, s => s.n) +
     '<div style="font-size:9px;color:var(--t3);margin-top:6px">※ Deep Insight Agent のコスト対効果検証。n≥3 で集計</div>' +
+    '</div>';
+}
+
+function renderCounterfactualAccuracy() {
+  const el = document.getElementById('dbacktest');
+  if (!el) return;
+  const b = window._backtestData;
+  if (!b) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI バックテスト成績: 準備中 (データ生成待ち)</div>';
+    return;
+  }
+  const fmt = stats => {
+    const wr = Math.round(stats.win_pct || 0);
+    const wrColor = wr >= 60 ? 'var(--green)' : (wr >= 40 ? 'var(--yellow)' : 'var(--red)');
+    const avgRr = stats.avg_rr != null ? stats.avg_rr.toFixed(2) : '-';
+    return '<span style="color:' + wrColor + ';font-weight:700">仮想勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:var(--t2);font-weight:600">平均RR ' + avgRr + '</span>';
+  };
+  const renderGroup = (title, obj) => {
+    const entries = Object.entries(obj);
+    if (entries.length === 0) return '';
+    return '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--t2);font-weight:700;margin-bottom:4px">' + title + '</div>' +
+      entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px dashed var(--border);font-size:11px">' +
+        '<span style="color:var(--text);font-weight:600">' + _escape(k) + '</span>' +
+        '<span>' + fmt(s) + '</span>' +
+        '</div>').join('') +
+      '</div>';
+  };
+  el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">期間: ' + b.sample_period.from + ' 〜 ' + b.sample_period.to + ' / 全 ' + b.n_recommendations + ' 推奨</div>' +
+    renderGroup('AI 判定別', b.byVerdict || {}) +
+    renderGroup('Tier 別', b.byTier || {}) +
+    renderGroup('モメンタム別', b.byMomentum || {}) +
+    '<div style="font-size:9px;color:var(--t3);margin-top:6px">※ 全推奨をルール通りに自動発注したと仮定したシミュレーション結果。</div>' +
     '</div>';
 }
 
@@ -1518,6 +1587,9 @@ function _renderCandidateCard(s, pickupMap, cat) {
   else if (s.vol_ratio && s.vol_ratio >= 1.5) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🔥 出来高×' + s.vol_ratio + '</span>');
   if (pickup) flags.push('<span style="background:rgba(59,130,246,.15);color:var(--acc);font-size:9px;padding:2px 6px;border-radius:4px">' + pickup.label + ' tier ' + pickup.tier + '</span>');
   if (pickup && pickup.extraction_source === 'fins_summary') flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">📊 数値のみ</span>');
+  // モメンタム合格バッジ
+  if (s.momentum_pass === true) flags.push('<span style="background:rgba(16,185,129,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:4px">📈 モメンタム合格</span>');
+  else if (s.momentum_pass === false) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">📉 モメンタム不適合</span>');
 
   // 次回決算日 (近いと警告)
   let earnTag = '';
@@ -2136,6 +2208,55 @@ function renderTagPerformance() {
 // ============================================================
 
 function exportAllData() {
+  // 最新の execution_meta が全 trade に揃っているかのバリデーションと補完
+  let updatedCount = 0;
+  let missingCount = 0;
+  for (const t of T) {
+    if (!t.execution_meta) {
+      const latest = lookupAIRecommendationByCode(t.cd);
+      if (latest) {
+        t.execution_meta = latest;
+        updatedCount++;
+      } else {
+        missingCount++;
+      }
+    } else {
+      const current = t.execution_meta;
+      const latest = lookupAIRecommendationByCode(t.cd);
+      if (latest) {
+        let changed = false;
+        if ((current.momentum_pass === undefined || current.momentum_pass === null) && latest.momentum_pass !== null) {
+          current.momentum_pass = latest.momentum_pass;
+          changed = true;
+        }
+        if (!current.verdict_at_entry && latest.verdict_at_entry) {
+          current.verdict_at_entry = latest.verdict_at_entry;
+          changed = true;
+        }
+        if (!current.tier_at_entry && latest.tier_at_entry) {
+          current.tier_at_entry = latest.tier_at_entry;
+          changed = true;
+        }
+        if (changed) {
+          updatedCount++;
+        }
+      }
+    }
+  }
+
+  if (updatedCount > 0) {
+    sv(KT, T);
+  }
+
+  if (missingCount > 0) {
+    const msg = '【データ品質チェック】\n' +
+      '取引履歴 ' + T.length + ' 件中、' + missingCount + ' 件に AI 判定情報（execution_meta）がありません。\n' +
+      '（通常の自己判断取引、または過去のAIデータから消去された銘柄です）\n\n' +
+      'バックエンドで分析を行う際、これらの取引は分析対象外となります。\n' +
+      'このままエクスポートを続行しますか？';
+    if (!confirm(msg)) return;
+  }
+
   const payload = {
     schema: 'trade-journal-v1',
     exported_at: new Date().toISOString(),
@@ -2152,12 +2273,16 @@ function exportAllData() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'trade-journal-backup-' + ymdJST() + '.json';
+  a.download = 'trade-journal-backup-v1-' + ymdJST() + '.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('📤 バックアップを保存 (保有 ' + H.length + ' / 履歴 ' + T.length + ')');
+  let statusStr = '📤 バックアップを保存 (保有 ' + H.length + ' / 履歴 ' + T.length + ')';
+  if (updatedCount > 0) {
+    statusStr += ' ※' + updatedCount + '件のAI情報を補完';
+  }
+  toast(statusStr);
 }
 
 function importAllData(event) {
