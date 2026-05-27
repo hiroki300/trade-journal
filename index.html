@@ -1637,8 +1637,10 @@ function _renderCandidateCard(s, pickupMap, cat) {
     (pickup && pickup.notes ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);border-radius:6px;padding:8px;margin-top:6px">🧠 ' + _escape(pickup.notes) + '</div>' : '') +
     (pickup && pickup.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(pickup.warning_reason) + '</div>' : '') +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">' +
-    '<button onclick="toggleChart(\'' + code4 + '\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート (TradingView)</button>' +
-    '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer;box-shadow:var(--shadow)">🤝 Gemini+Claude 合議</button>' +
+    '<button onclick="toggleChart(\'' + code4 + '\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート</button>' +
+    '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">🤝 AI合議</button>' +
+    '<button onclick="askAboutStock(\'' + code4 + '\',\'' + s.name.replace(/'/g, "\\'") + '\');showTab(\'chat\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">💬 AI相談</button>' +
+    '<a href="https://www.buffett-code.com/company/' + code4 + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow);text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center">📊 企業情報 (決算)</a>' +
     '</div>' +
     '<div id="chart-' + code4 + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>' +
     '<div id="' + cardId + '" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>' +
@@ -1997,8 +1999,10 @@ function hHTML(h, compact, idx) {
       (h.memo ? '<div style="font-size:11px;color:var(--t2);margin-top:5px">📝' + h.memo + '</div>' : '') +
       // Phase B-1: 保有カードにも TradingView チャートボタンを追加 (候補と DOM 衝突しないよう prefix=chart-hold-)
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">'+
-      '<button onclick="toggleChart(\'' + h.cd + '\',\'chart-hold-\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">📈 チャート</button>'+
-      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:7px;cursor:pointer">🤝 売買判断</button>'+
+      '<button onclick="toggleChart(\'' + h.cd + '\',\'chart-hold-\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">📈 チャート</button>'+
+      '<button onclick="analyzeHolding(\'' + h.cd + '\')" style="background:linear-gradient(135deg,#1e3a5f,#0e4d3a);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">🤝 売買判断</button>'+
+      '<button onclick="askAboutStock(\'' + h.cd + '\',\'' + h.nm.replace(/'/g, "\\'") + '\');showTab(\'chat\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer">💬 AI相談</button>'+
+      '<a href="https://www.buffett-code.com/company/' + h.cd + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center">📊 企業情報 (決算)</a>'+
       '</div>'+
       '<button class="delbtn" onclick="delH(' + i + ')" style="margin-top:6px">🗑 削除</button>'+
       '<div id="chart-hold-' + h.cd + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>'+
@@ -2865,8 +2869,10 @@ function loadImages(files) {
   const reads=files.map(file=>new Promise(res=>{
     const reader=new FileReader();
     reader.onload=ev=>{
-      const b64=ev.target.result.split(',')[1];
-      ssImageList.push({b64, name:file.name});
+      const parts=ev.target.result.split(',');
+      const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const b64=parts[1];
+      ssImageList.push({b64, name:file.name, mime});
       const img=document.createElement('img');
       img.src=ev.target.result;
       img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--border)';
@@ -2908,7 +2914,7 @@ async function analyzeScreenshots() {
     btn.textContent='🤖 読み取り中... '+(i+1)+'/'+ssImageList.length+'枚';
     resEl.textContent+='['+( i+1)+'/'+ssImageList.length+'] '+img.name+'\n';
     try{
-      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.1}};
+      const body={contents:[{parts:[{text:prompts[ssType]},{inlineData:{mimeType:img.mime||'image/jpeg',data:img.b64}}]}],generationConfig:{maxOutputTokens:2000,temperature:0.1}};
       const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+GK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(!r.ok){
       const e=await r.json().catch(()=>({}));
