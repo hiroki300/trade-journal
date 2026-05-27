@@ -3301,7 +3301,24 @@ if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
-      .then(() => console.log('SW登録完了'))
+      .then(reg => {
+        console.log('SW登録完了');
+        // サービスワーカーのアップデートを監視
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                // 新しいSWがインストールされ、適用可能になったら自動でリロードして適用
+                toast('✨ アプリが最新版に更新されました。再読み込みして適用します...', 4000);
+                setTimeout(() => {
+                  location.reload();
+                }, 1500);
+              }
+            });
+          }
+        });
+      })
       .catch(e => console.log('SW登録失敗:', e));
   });
 }
