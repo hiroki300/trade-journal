@@ -983,28 +983,64 @@ function renderCounterfactualAccuracy() {
     el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI バックテスト成績: 準備中 (データ生成待ち)</div>';
     return;
   }
+
+  const overall = b.byVerdict && b.byVerdict["-"];
+  let overallHtml = '';
+  if (overall) {
+    const wr = Math.round(overall.win_pct || 0);
+    const wrColor = wr >= 50 ? 'var(--green)' : (wr >= 35 ? 'var(--yellow)' : 'var(--red)');
+    const avgRr = overall.avg_rr != null ? overall.avg_rr.toFixed(2) : '-';
+    const sharpe = overall.sharpe != null ? overall.sharpe.toFixed(2) : '-';
+    const maxDd = overall.max_dd != null ? Math.round(overall.max_dd).toLocaleString() + '%' : '-';
+    const avgPnl = overall.avg_pnl_pct != null ? (overall.avg_pnl_pct >= 0 ? '+' : '') + overall.avg_pnl_pct.toFixed(2) + '%' : '-';
+
+    overallHtml = '<div style="background:var(--s2);border-radius:8px;padding:8px 10px;margin-bottom:10px;border-left:3px solid ' + wrColor + '">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:4px">📈 全推奨の仮想成績サマリ</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:11px;line-height:1.6">' +
+      '<div>仮想勝率: <span style="color:' + wrColor + ';font-weight:700">' + wr + '%</span></div>' +
+      '<div>平均利益率: <span style="font-weight:600">' + avgPnl + '</span></div>' +
+      '<div>平均RR: <span style="font-weight:600">' + avgRr + '</span></div>' +
+      '<div>シャープレシオ: <span style="font-weight:600">' + sharpe + '</span></div>' +
+      '<div style="grid-column:span 2">最大ドローダウン: <span style="font-weight:600;color:var(--red)">' + maxDd + '</span></div>' +
+      '</div>' +
+      '</div>';
+  }
+
+  let matchRateHtml = '';
+  if (b.n_recommendations && b.n_entered) {
+    const pct = (b.n_entered / b.n_recommendations * 100).toFixed(1);
+    matchRateHtml = '<div style="font-size:10px;color:var(--t2);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">' +
+      '📢 推薦 ' + b.n_recommendations + ' 件中 ' + b.n_entered + ' 件がエントリー成立 <span style="color:var(--t3)">(' + pct + '% 約定)</span>' +
+      '</div>';
+  }
+
   const fmt = stats => {
     const wr = Math.round(stats.win_pct || 0);
-    const wrColor = wr >= 60 ? 'var(--green)' : (wr >= 40 ? 'var(--yellow)' : 'var(--red)');
+    const wrColor = wr >= 50 ? 'var(--green)' : (wr >= 35 ? 'var(--yellow)' : 'var(--red)');
     const avgRr = stats.avg_rr != null ? stats.avg_rr.toFixed(2) : '-';
-    return '<span style="color:' + wrColor + ';font-weight:700">仮想勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:var(--t2);font-weight:600">平均RR ' + avgRr + '</span>';
+    return '<span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:var(--t2);font-weight:600">平均RR ' + avgRr + '</span>';
   };
+
   const renderGroup = (title, obj) => {
     const entries = Object.entries(obj);
     if (entries.length === 0) return '';
     return '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--t2);font-weight:700;margin-bottom:4px">' + title + '</div>' +
-      entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px dashed var(--border);font-size:11px">' +
+      entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px dashed var(--border);font-size:11px">' +
         '<span style="color:var(--text);font-weight:600">' + _escape(k) + '</span>' +
         '<span>' + fmt(s) + '</span>' +
         '</div>').join('') +
       '</div>';
   };
+
   el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
-    '<div style="font-size:10px;color:var(--t3);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">期間: ' + b.sample_period.from + ' 〜 ' + b.sample_period.to + ' / 全 ' + b.n_recommendations + ' 推奨</div>' +
-    renderGroup('AI 判定別', b.byVerdict || {}) +
-    renderGroup('Tier 別', b.byTier || {}) +
-    renderGroup('モメンタム別', b.byMomentum || {}) +
-    '<div style="font-size:9px;color:var(--t3);margin-top:6px">※ 全推奨をルール通りに自動発注したと仮定したシミュレーション結果。</div>' +
+    '<div style="font-size:10px;color:var(--t3);margin-bottom:8px">期間: ' + b.sample_period.from + ' 〜 ' + b.sample_period.to + '</div>' +
+    overallHtml +
+    matchRateHtml +
+    renderGroup('出来高比（vol_ratio）別', b.byVolRatio || {}) +
+    '<div style="font-size:9px;color:var(--t3);margin-top:8px;border-top:1px solid var(--border);padding-top:6px;line-height:1.4">' +
+    '※ AI判定別・Tier別・レジーム別・モメンタム別の分析は Phase B で実データ検証対応予定です（現状はデータ未分類）。<br>' +
+    '※ 全推奨をルール通りに自動発注したと仮定したシミュレーション結果。' +
+    '</div>' +
     '</div>';
 }
 
@@ -1164,7 +1200,7 @@ function _addPct(agg, capital_jpy) {
   return agg;
 }
 
-function buildTaxAfterSummary(trades, capital_jpy, as_of_str, tax_rate) {
+function buildTaxAfterSummary(trades, capital_jpy, as_of_str = null, tax_rate = null) {
   // backend realized_pnl_calculator.build_summary の JS ミラー
   if (!as_of_str) as_of_str = ymdJST();
   const as_of = new Date(as_of_str);
