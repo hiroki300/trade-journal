@@ -327,6 +327,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
       <label class="fl">感情（複数選択可）</label>
       <div id="tagEmotionRow" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
     </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="tYutai" style="width:16px;height:16px;margin:0;cursor:pointer">
+      <label for="tYutai" style="font-size:12px;color:var(--t1);cursor:pointer;font-weight:700">🎁 優待目的 (AI分析の対象外にする)</label>
+    </div>
     <div style="margin-top:8px"><label class="fl">メモ（任意）</label><input class="fi" id="tmemo" placeholder="エントリー理由など" style="margin-bottom:0"></div>
     </div>
     <button class="btn btnb" id="tBtn" style="margin-top:10px" onclick="doTrade()">💱 買いを記録する</button>
@@ -823,7 +827,7 @@ function buildExecutionMetaOnSell(holding, actual_exit) {
 
 function buildDriftSummary() {
   // 完了済売買 (T で sell + execution_meta あり) から平均ドリフトを計算
-  const sells = T.filter(t => t.a === 'sell' && t.execution_meta);
+  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && !t.yutai);
   if (sells.length === 0) return null;
   const drifts_entry = sells
     .map(s => s.execution_meta.drift_entry_pct)
@@ -909,7 +913,7 @@ function getDriftPromptInjection() {
 // ============================================================
 
 function buildAIAccuracy() {
-  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && (t.execution_meta.verdict_at_entry || t.execution_meta.tier_at_entry || t.execution_meta.momentum_pass !== undefined));
+  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && (t.execution_meta.verdict_at_entry || t.execution_meta.tier_at_entry || t.execution_meta.momentum_pass !== undefined) && !t.yutai);
   if (sells.length === 0) return null;
   const byVerdict = {};
   const byTier = {};
@@ -1036,9 +1040,12 @@ function renderCounterfactualAccuracy() {
     '<div style="font-size:10px;color:var(--t3);margin-bottom:8px">期間: ' + b.sample_period.from + ' 〜 ' + b.sample_period.to + '</div>' +
     overallHtml +
     matchRateHtml +
+    renderGroup('AI判定別', b.byVerdict || {}) +
+    renderGroup('Tier別', b.byTier || {}) +
+    renderGroup('マクロレジーム別', b.byRegime || {}) +
+    renderGroup('モメンタム別', b.byMomentum || {}) +
     renderGroup('出来高比（vol_ratio）別', b.byVolRatio || {}) +
     '<div style="font-size:9px;color:var(--t3);margin-top:8px;border-top:1px solid var(--border);padding-top:6px;line-height:1.4">' +
-    '※ AI判定別・Tier別・レジーム別・モメンタム別の分析は Phase B で実データ検証対応予定です（現状はデータ未分類）。<br>' +
     '※ 全推奨をルール通りに自動発注したと仮定したシミュレーション結果。' +
     '</div>' +
     '</div>';
@@ -1047,7 +1054,7 @@ function renderCounterfactualAccuracy() {
 // Phase D-3: 過去の負けパターンを AI プロンプトに注入 (同じパターンの早期警告)
 function getLossPatternInjection() {
   // 売り取引のうち pnl < 0 を損益額の小さい順 (=大損) で 3 件
-  const losses = T.filter(t => t.a === 'sell' && t.pnl != null && t.pnl < 0)
+  const losses = T.filter(t => t.a === 'sell' && t.pnl != null && t.pnl < 0 && !t.yutai)
     .sort((a, b) => a.pnl - b.pnl)
     .slice(0, 3);
   if (losses.length === 0) return '';
@@ -2030,6 +2037,7 @@ function hHTML(h, compact, idx) {
     '<span class="hbg" title="' + (h.bp_unknown ? '⚠️ 取得単価未確認 (口座管理リスト画面 OCR、要手動設定)' : '買値をタップして手動修正') + '">' + (h.bp_unknown ? '⚠️買' : '買') + ' <input class="bpin" type="number" step="0.1" min="0" value="' + h.bp + '" onchange="uBP(' + i + ',this.value)" onclick="this.select()">円</span>' +
     '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(' + i + ',this.value)">円</span>' +
     (h.dt ? '<span class="hbg">📅' + h.dt + '</span>' : '') +
+    '<span class="hbg"><label style="display:inline-flex;align-items:center;gap:3px;margin:0;cursor:pointer"><input type="checkbox" ' + (h.yutai ? 'checked' : '') + ' onchange="tYutaiH(' + i + ',this.checked)" style="margin:0;cursor:pointer"> 🎁優待(分析除外)</label></span>' +
     '</div>';
   if (!compact) {
     html += '<div class="hlines">' +
@@ -2071,6 +2079,10 @@ async function analyzeHolding(cd) {
     panel.style.display = 'none'; return;
   }
   panel.style.display = 'block';
+  if (h.yutai) {
+    panel.innerHTML = '<div style="background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:var(--t2)">🎁 この銘柄は<strong>優待目的（分析除外）</strong>として登録されているため、AI売買判断の対象外です。</div>';
+    return;
+  }
   panel.textContent = '🤝 GeminiとClaudeが合議中...';
 
   const cp = h.cp || h.bp;
@@ -2159,6 +2171,15 @@ function delH(idx) {
   H.splice(idx, 1);
   sv(KH, H); rHold(); calcS(); rDash();
   toast('削除しました');
+}
+function tYutaiH(idx, checked) {
+  const h = H[idx];
+  if (!h) return;
+  h.yutai = !!checked;
+  sv(KH, H);
+  toast('🎁 ' + (h.nm||h.cd) + ' を' + (checked ? '優待株（分析除外）に設定' : '通常株に設定'));
+  rHold();
+  rDash();
 }
 function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map((h,i)=>hHTML(h,false,i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
 
@@ -2523,10 +2544,12 @@ function doTrade() {
   if (!cd||!nm||!sh||!p) { toast('⚠️ コード・銘柄名・株数・価格は必須'); return; }
   // 売買共通: 現物/信用区分はフォームから (信用建玉の売りでも参照)
   const ttype = document.getElementById('ttype').value || 'spot';
+  const yutai = document.getElementById('tYutai') ? document.getElementById('tYutai').checked : false;
+
   // Phase A-1: 損切り未設定ハードロック (短期回転戦略の安全装置)
   if (a === 'buy') {
     const lockEnabled = ld('tj_hard_lock', true);
-    const noSL = H.filter(h => !h.sl || h.sl <= 0);
+    const noSL = H.filter(h => (!h.sl || h.sl <= 0) && !h.yutai);
     if (lockEnabled && noSL.length > 0) {
       const names = noSL.map(h => h.nm || h.cd).join(', ');
       if (!confirm('⚠️ 損切り未設定の保有銘柄があります:\n' + names + '\n\n短期回転戦略では損切り無しは致命的です。先に設定することを強く推奨しますが、今回はこのまま進めますか？')) {
@@ -2546,11 +2569,11 @@ function doTrade() {
     const exec_meta = buildExecutionMetaOnBuy(cd, p);
     // 現物と信用は別ポジションとして区別 (doImport と整合)
     const idx = H.findIndex(h => h.cd===cd && (h.type||'spot')===ttype);
-    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, tags: [...new Set([...(ex.tags||[]), ...tags])]}; }
-    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, execution_meta:exec_meta});
+    if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, tags: [...new Set([...(ex.tags||[]), ...tags])], yutai}; }
+    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, execution_meta:exec_meta, yutai});
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, execution_meta:exec_meta}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, execution_meta:exec_meta, yutai}); sv(KT,T);
     const driftHint = exec_meta && exec_meta.drift_entry_pct != null
       ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
       : '';
@@ -2558,15 +2581,16 @@ function doTrade() {
   } else {
     // 売り時もフォームの ttype で現物/信用を区別
     const h = H.find(h => h.cd===cd && (h.type||'spot')===ttype);
+    const isYutai = h ? !!h.yutai : false;
     let pnl=null;
     // T0-3 Stage A: 売り注文時に drift_exit_pct を計算し execution_meta を更新
     const exec_meta = h ? buildExecutionMetaOnSell(h, p) : null;
     // Phase D-1: 売り取引のタグは「H に保存済の買い時タグ」+「今回追加で選択したタグ」
     const sellTags = [...new Set([...(h && h.tags ? h.tags : []), ..._selectedTags.setup, ..._selectedTags.emotion])];
-    if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd); else h.sh-=sh; sv(KH,H); }
+    if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd || (hh.type||'spot')!==ttype); else h.sh-=sh; sv(KH,H); }
     cash+=p*sh; sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl,tags:sellTags, execution_meta:exec_meta}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl,tags:sellTags, execution_meta:exec_meta, yutai: isYutai}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
     const driftHint = exec_meta && exec_meta.drift_exit_pct_vs_target != null
       ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
@@ -2576,6 +2600,7 @@ function doTrade() {
     renderTaxAfterSummary();     // T0-4: 税後 PnL も更新
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
+  if (document.getElementById('tYutai')) document.getElementById('tYutai').checked = false;
   clearTagSelection();  // Phase D-1: タグ選択リセット
   rTH();
 }
