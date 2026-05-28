@@ -1025,8 +1025,9 @@ function renderCounterfactualAccuracy() {
     return '<span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:var(--t2);font-weight:600">平均RR ' + avgRr + '</span>';
   };
 
+  const PLACEHOLDER_KEYS = new Set(['-', 'unknown', '']);
   const renderGroup = (title, obj) => {
-    const entries = Object.entries(obj);
+    const entries = Object.entries(obj).filter(([k]) => !PLACEHOLDER_KEYS.has(k));
     if (entries.length === 0) return '';
     return '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--t2);font-weight:700;margin-bottom:4px">' + title + '</div>' +
       entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px dashed var(--border);font-size:11px">' +
@@ -1700,7 +1701,7 @@ function toggleChart(code4, prefix) {
   if (!el) return;
   if (el.style.display === 'block') {
     el.style.display = 'none';
-    el.innerHTML = '';   // unload iframe to save resources
+    el.innerHTML = '';   // unload widget to save resources
     return;
   }
   // 安全に文字列にキャストし、トリムと小数点以下を除去（数値型・実数型対策）
@@ -1716,20 +1717,42 @@ function toggleChart(code4, prefix) {
     return;
   }
 
-  const url = 'https://s.tradingview.com/widgetembed/?symbol=TSE%3A' + symbol +
-    '&interval=D' +
-    '&theme=light' +
-    '&style=1' +
-    '&locale=ja' +
-    '&timezone=Asia%2FTokyo';
-
+  el.style.display = 'block';
+  // ヘッダー (×ボタン) は innerHTML で OK
   el.innerHTML =
     '<div style="background:var(--s2);padding:6px 10px;font-size:11px;color:var(--t2);display:flex;justify-content:space-between;align-items:center">' +
     '<span>📈 TradingView ' + symbol + ' (日足)</span>' +
     '<button onclick="toggleChart(\'' + code4 + '\',\'' + prefix + '\')" style="background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer">×</button>' +
-    '</div>' +
-    '<iframe src="' + url + '" style="width:100%;height:350px;border:none;display:block"></iframe>';
-  el.style.display = 'block';
+    '</div>';
+
+  // ウィジェットコンテナは DOM API で生成 (script を実行させるため必須)
+  const container = document.createElement('div');
+  container.className = 'tradingview-widget-container';
+  container.style.height = '350px';
+  const widgetDiv = document.createElement('div');
+  widgetDiv.className = 'tradingview-widget-container__widget';
+  widgetDiv.style.height = '100%';
+  container.appendChild(widgetDiv);
+
+  const script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  script.async = true;
+  script.text = JSON.stringify({
+    symbol: 'TSE:' + symbol,
+    interval: 'D',
+    timezone: 'Asia/Tokyo',
+    theme: 'light',
+    style: '1',
+    locale: 'ja',
+    width: '100%',
+    height: 350,
+    hide_side_toolbar: true,
+    allow_symbol_change: false,
+    save_image: false
+  });
+  container.appendChild(script);
+  el.appendChild(container);
 }
 
 async function analyzeCandidate(code4) {
