@@ -672,10 +672,50 @@ async function _fetchJSON(name) {
 // 朝会レポートの TTL キャッシュ (タブ切替時に毎回 GitHub raw を叩かないため)
 let _isReportsFetched = false;
 let _reportsFetchedAt = 0;
-const REPORTS_TTL_MS = 5 * 60 * 1000;  // 5分でTTL切れ
+const REPORTS_TTL_MS = 12 * 60 * 60 * 1000;  // 12時間でTTL切れ (朝夕2回更新の想定)
 
 async function loadMorningReports(forceRefresh = false) {
   const now = Date.now();
+  
+  // 初回呼び出し時、localStorage からキャッシュを即座に読み込んで表示 (チラつき排除)
+  if (!_isReportsFetched) {
+    try {
+      const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
+      if (cached && cached.fetchedAt) {
+        const { macro, pickup, earn, themes, watch, synth, backtest, brief, fetchedAt } = cached;
+        _reportsFetchedAt = fetchedAt || 0;
+        
+        window._synthData = synth;
+        window._pickupData = pickup;
+        window._watchlistData = watch;
+        window._macroData = macro;
+        window._backtestData = backtest;
+        window._briefData = brief;
+        
+        renderMacro(macro);
+        renderPickup(pickup);
+        renderDISummary(synth);
+        renderEarnings(earn);
+        renderThemes(themes);
+        renderCandidates(watch, pickup);
+        renderCandidateBrief(brief);
+        renderDriftSummary();
+        renderTaxAfterSummary();
+        renderTagPerformance();
+        renderAIAccuracy();
+        renderCounterfactualAccuracy();
+        
+        const gen = (pickup && pickup.generated_at) || '';
+        const genStr = gen ? '(キャッシュ ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
+        document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
+        
+        _isReportsFetched = true;
+      }
+    } catch (e) {
+      console.error('Failed to load reports cache from localStorage:', e);
+    }
+  }
+
   if (!forceRefresh && _isReportsFetched && (now - _reportsFetchedAt) < REPORTS_TTL_MS) {
     // キャッシュ有効: 残金フィルタの再描画とローカルサマリのみ更新 (T 変動を即反映)
     renderCandidatesFromCache();
@@ -698,13 +738,25 @@ async function loadMorningReports(forceRefresh = false) {
       _fetchJSON('backtest_synthetic.json'),
       _fetchJSON('candidate_brief.json'),
     ]);
-    // Phase 6 T0-3 Stage A: 買い注文時の AI 推奨値 lookup 用に window へキャッシュ
+    
+    // window へのキャッシュ
     window._synthData = synth;
     window._pickupData = pickup;
     window._watchlistData = watch;
     window._macroData = macro;  // Phase A-2: マクロ警告 + AI ペルソナ切替で参照
     window._backtestData = backtest;
     window._briefData = brief;  // 井村流候補のキャッシュ
+    
+    // localStorage へ永続化キャッシュとして保存
+    try {
+      localStorage.setItem('tj_reports_cache', JSON.stringify({
+        macro, pickup, earn, themes, watch, synth, backtest, brief,
+        fetchedAt: now
+      }));
+    } catch (e) {
+      console.warn('Failed to save reports cache to localStorage:', e);
+    }
+
     renderMacro(macro);
     renderPickup(pickup);
     renderDISummary(synth);
@@ -724,7 +776,9 @@ async function loadMorningReports(forceRefresh = false) {
     _reportsFetchedAt = now;
   } catch (e) {
     console.error('loadMorningReports failed:', e);
-    document.querySelectorAll('.mr-gen').forEach(e => e.textContent = '(取得失敗)');
+    if (!_isReportsFetched) {
+      document.querySelectorAll('.mr-gen').forEach(e => e.textContent = '(取得失敗)');
+    }
   }
 }
 
@@ -1423,8 +1477,7 @@ function _renderDICard(s, highlight) {
   const vColor = verdictColorMap[verdict] || 'var(--t3)';
   const tierColor = (s.tier === 'S' || s.tier === 'A') ? 'var(--green)' : 'var(--yellow)';
   const bg = highlight ? 'rgba(16,185,129,.05)' : 'var(--s1)';
-  const reason = (deb.trader_reasoning || '').slice(0, 100);
-  const reasonOverflow = (deb.trader_reasoning || '').length > 100;
+  const reason = deb.trader_reasoning || '';
   const sourceTag = s.extraction_source === 'fins_summary'
     ? '<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 5px;border-radius:4px;margin-left:6px">📊数値のみ</span>'
     : '';
@@ -1440,7 +1493,7 @@ function _renderDICard(s, highlight) {
     + '<span style="font-size:16px;color:' + vColor + ';font-weight:700;min-width:18px;text-align:center">' + _escape(verdict) + '</span>'
     + '</div>'
     + '</div>'
-    + (reason ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">' + _escape(reason) + (reasonOverflow ? '…' : '') + '</div>' : '')
+    + (reason ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px;white-space:pre-wrap;">' + _escape(reason) + '</div>' : '')
     + '</div>';
 }
 
@@ -1545,27 +1598,49 @@ function _renderBriefCard(s) {
   const linkUrl = b.link || 'https://kabutan.jp/stock/?code=' + code4;
   const pegVal = s.metrics && s.metrics.peg != null ? s.metrics.peg : '—';
   const headerHtml = 
-    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">' +
       '<a href="' + linkUrl + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:block;min-width:0;flex:1;">' +
-        '<span style="font-size:14px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' +
+        '<span style="font-size:15px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' +
           _escape(s.name) +
         '</span>' +
-        '<span style="font-size:10px;color:var(--t3);margin-left:6px;">(' + code4 + ') ↗</span>' +
+        '<span style="font-size:11px;color:var(--t3);margin-left:6px;">(' + code4 + ') ↗</span>' +
       '</a>' +
-      '<div style="font-size:10px;color:var(--t3);text-align:right;">PEG ' + pegVal + '</div>' +
+      '<div style="font-size:11px;color:var(--t3);text-align:right;">PEG ' + pegVal + '</div>' +
     '</div>';
 
-  // 3. 各項目の表示文言
+  // 「／」で区切られた長い文章をスマホ向けに読みやすい改行・箇条書きにするヘルパ
+  function formatImuraBrief(text) {
+    if (!text) return '';
+    return text.split('／').map(item => {
+      const trimmed = item.trim();
+      if (!trimmed) return '';
+      return '<div style="margin-bottom:4px;padding-left:12px;text-indent:-12px;line-height:1.5;">・' + _escape(trimmed) + '</div>';
+    }).join('');
+  }
+
+  // 3. 各項目の表示文言 (スマホ向けタイトル明記と箇条書き背景化)
   const asOfShortStr = b.as_of_short ? ' <span style="font-size:9px;color:var(--t3);font-weight:normal;">(空売残は ' + b.as_of_short + ' 時点)</span>' : '';
   
-  const valueHtml = b.value ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:6px;"><span style="color:var(--purple);font-weight:700;margin-right:4px;">💰割安/質:</span>' + _escape(b.value) + '</div>' : '';
+  const valueHtml = b.value ? 
+    '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:10px;">' +
+      '<div style="color:var(--purple);font-weight:700;margin-bottom:4px;">💰 割安・クオリティ（質）</div>' +
+      '<div style="background:var(--s2);padding:8px 12px;border-radius:8px;border-left:3.5px solid var(--purple);">' + formatImuraBrief(b.value) + '</div>' +
+    '</div>' : '';
   
-  const earningsHtml = b.earnings ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:6px;"><span style="color:var(--green);font-weight:700;margin-right:4px;">📊業績:</span>' + _escape(b.earnings) + '</div>' : '';
+  const earningsHtml = b.earnings ? 
+    '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:10px;">' +
+      '<div style="color:var(--green);font-weight:700;margin-bottom:4px;">📊 業績・会社予想</div>' +
+      '<div style="background:var(--s2);padding:8px 12px;border-radius:8px;border-left:3.5px solid var(--green);">' + formatImuraBrief(b.earnings) + '</div>' +
+    '</div>' : '';
   
-  const demandHtml = b.demand_supply ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:6px;"><span style="color:var(--yellow);font-weight:700;margin-right:4px;">🔄需給:</span>' + _escape(b.demand_supply) + asOfShortStr + '</div>' : '';
+  const demandHtml = b.demand_supply ? 
+    '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:10px;">' +
+      '<div style="color:var(--yellow);font-weight:700;margin-bottom:4px;">🔄 需給・信用残' + asOfShortStr + '</div>' +
+      '<div style="background:var(--s2);padding:8px 12px;border-radius:8px;border-left:3.5px solid var(--yellow);">' + formatImuraBrief(b.demand_supply) + '</div>' +
+    '</div>' : '';
 
   const oneLinerHtml = b.one_liner ? 
-    '<div style="font-size:11px;font-weight:700;color:var(--text);line-height:1.5;background:var(--s2);border-radius:6px;padding:6px 8px;margin-top:8px;border-left:3px solid var(--acc);">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text);line-height:1.5;background:var(--s2);border-radius:8px;padding:8px 12px;margin-top:12px;border-left:4px solid var(--acc);">' +
       '→ ' + _escape(b.one_liner) +
     '</div>' : '';
 
@@ -1573,7 +1648,7 @@ function _renderBriefCard(s) {
   const metrics = s.metrics || {};
   const ds = s.demand_supply || {};
   const metricsDetail = 
-    '<details style="margin-top:8px;border-top:1.5px dashed var(--border);padding-top:6px;">' +
+    '<details style="margin-top:10px;border-top:1.5px dashed var(--border);padding-top:8px;">' +
       '<summary style="font-size:10px;color:var(--t3);cursor:pointer;user-select:none;padding:2px 0;">📊 生数値・生需給 (参考データ)</summary>' +
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px;font-size:10px;color:var(--t2);">' +
         '<div style="background:var(--s2);border-radius:4px;padding:4px;text-align:center;">' +
@@ -1603,7 +1678,7 @@ function _renderBriefCard(s) {
       '</div>' +
     '</details>';
 
-  return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;box-shadow:var(--shadow-sm);position:relative;">' +
+  return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:var(--shadow-sm);position:relative;">' +
       guardianHtml +
       headerHtml +
       valueHtml +
