@@ -1750,15 +1750,14 @@ function renderForwardHumanCompare(d) {
   }
 
   const label = d.label || '人間紙トレ vs 機械baseline 比較';
-  const status = d.summary && d.summary.status ? d.summary.status : '状態確認中';
-  const verdict = d.summary ? d.summary.verdict : '保留';
-  
+  // ⚠️ forward_human_compare.json は verdict/status/human/baseline_avg_rr/delta_vs_baseline が
+  //    **トップレベル** (forward_results.json と違い summary ラッパー無し)。
+  const status = d.status || '状態確認中';
+  const verdict = d.verdict || '保留';
+
   let n = 0;
-  if (d.summary) {
-    if (d.summary.human && d.summary.human.n != null) n = d.summary.human.n;
-    else if (d.summary.trade_lens && d.summary.trade_lens.n != null) n = d.summary.trade_lens.n;
-    else if (d.summary.n != null) n = d.summary.n;
-  }
+  if (d.human && d.human.n != null) n = d.human.n;
+  else if (d.n_trades != null) n = d.n_trades;
   const progressPercent = Math.min(100, Math.round((n / 30) * 100));
 
   let contentHtml = '';
@@ -1778,16 +1777,15 @@ function renderForwardHumanCompare(d) {
         _escape(status) +
       '</div>';
   } else {
-    const human = d.summary.human || {};
-    const baseline = d.summary.baseline || {};
-    
+    // human={n,avg_rr_after_friction,win_rate} / baseline_avg_rr=数値(R) / delta_vs_baseline=数値(R)
+    // 機械baseline は R のみ提供 (勝率は無い)。delta は backend 計算値をそのまま使う。
+    const human = d.human || {};
+    const baselineRR = d.baseline_avg_rr;
+
     const hWin = human.win_rate != null ? (human.win_rate * 100).toFixed(0) + '%' : '—';
-    const bWin = baseline.win_rate != null ? (baseline.win_rate * 100).toFixed(0) + '%' : '—';
     const hRR = human.avg_rr_after_friction != null ? human.avg_rr_after_friction.toFixed(3) + 'R' : '—';
-    const bRR = baseline.avg_rr_after_friction != null ? baseline.avg_rr_after_friction.toFixed(3) + 'R' : '—';
-    const delta = (human.avg_rr_after_friction != null && baseline.avg_rr_after_friction != null)
-      ? (human.avg_rr_after_friction - baseline.avg_rr_after_friction).toFixed(3) + 'R'
-      : '—';
+    const bRR = baselineRR != null ? baselineRR.toFixed(3) + 'R' : '—';
+    const delta = d.delta_vs_baseline != null ? (d.delta_vs_baseline >= 0 ? '+' : '') + d.delta_vs_baseline.toFixed(3) + 'R' : '—';
 
     contentHtml =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">' +
@@ -1796,13 +1794,14 @@ function renderForwardHumanCompare(d) {
           '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--purple);">' + hWin + ' / ' + hRR + '</div>' +
         '</div>' +
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
-          '<div style="color:var(--t3);font-size:9px;">機械 (勝率 / 平均R)</div>' +
-          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--t2);">' + bWin + ' / ' + bRR + '</div>' +
+          '<div style="color:var(--t3);font-size:9px;">機械baseline (平均R)</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--t2);">' + bRR + '</div>' +
         '</div>' +
       '</div>' +
       '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--acc);">' +
-        _escape(status) + ' (差 ' + delta + ')' +
-      '</div>';
+        _escape(status) + ' (人間 − 機械 差 ' + delta + ')' +
+      '</div>' +
+      '<div style="font-size:9px;color:var(--t3);text-align:center;">※ 売買推奨ではありません。人間判断がエッジを足すかの検証です。</div>';
   }
 
   el.innerHTML =
