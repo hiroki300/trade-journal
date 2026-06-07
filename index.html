@@ -240,7 +240,14 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div id="ddisummary" style="margin-bottom:14px">読み込み中…</div>
 
   <div class="sec-lbl">🔎 井村流 候補 <span id="candBriefCount"></span></div>
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">※ 需給（信用残・空売残）は週次更新のため、数日程度のタイムラグがあります。</div>
   <div id="dcandbriefs" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">📊 forward検証 (機械baseline・検証中)</div>
+  <div id="dforwardresults" style="margin-bottom:14px">読み込み中…</div>
+
+  <div class="sec-lbl">👥 forward人間比較 (検証中)</div>
+  <div id="dforwardhumancompare" style="margin-bottom:14px">読み込み中…</div>
 
   <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
   <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:8px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
@@ -483,6 +490,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </div>
 
 <script>
+// LINE Botの公式アカウントID（例: '@xxxx'。候補カードから決算要約をリクエストする際に使用）
+const LINE_BOT_ID = '';
+
 // APIキー（localStorageから）
 let GK = localStorage.getItem('tj_gk') || '';
 let CK = localStorage.getItem('tj_ck') || '';
@@ -717,7 +727,7 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, pickup, earn, themes, watch, synth, backtest, brief, fetchedAt } = cached;
+        const { macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, fetchedAt } = cached;
         _reportsFetchedAt = fetchedAt || 0;
         
         window._synthData = synth;
@@ -726,6 +736,8 @@ async function loadMorningReports(forceRefresh = false) {
         window._macroData = macro;
         window._backtestData = backtest;
         window._briefData = brief;
+        window._forwardData = forward;
+        window._forwardHumanData = forwardHuman;
         
         renderMacro(macro);
         renderPickup(pickup);
@@ -734,6 +746,8 @@ async function loadMorningReports(forceRefresh = false) {
         renderThemes(themes);
         renderCandidates(watch, pickup);
         renderCandidateBrief(brief);
+        renderForwardResults(forward);
+        renderForwardHumanCompare(forwardHuman);
         renderDriftSummary();
         renderTaxAfterSummary();
         renderTagPerformance();
@@ -755,6 +769,8 @@ async function loadMorningReports(forceRefresh = false) {
     // キャッシュ有効: 残金フィルタの再描画とローカルサマリのみ更新 (T 変動を即反映)
     renderCandidatesFromCache();
     renderCandidateBriefFromCache(); // 井村流候補キャッシュ描画
+    renderForwardResultsFromCache();
+    renderForwardHumanCompareFromCache();
     renderDriftSummary();
     renderTaxAfterSummary();
     renderTagPerformance();  // Phase D-1
@@ -763,7 +779,7 @@ async function loadMorningReports(forceRefresh = false) {
     return;
   }
   try {
-    const [macro, pickup, earn, themes, watch, synth, backtest, brief] = await Promise.all([
+    const [macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman] = await Promise.all([
       _fetchJSON('macro_state.json'),
       _fetchJSON('pickup_stocks.json'),
       _fetchJSON('earnings_calendar.json'),
@@ -772,6 +788,8 @@ async function loadMorningReports(forceRefresh = false) {
       _fetchJSON('deep_insight_synth.json'),
       _fetchJSON('backtest_synthetic.json'),
       _fetchJSON('candidate_brief.json'),
+      _fetchJSON('forward_results.json'),
+      _fetchJSON('forward_human_compare.json'),
     ]);
     
     // window へのキャッシュ
@@ -781,11 +799,13 @@ async function loadMorningReports(forceRefresh = false) {
     window._macroData = macro;  // Phase A-2: マクロ警告 + AI ペルソナ切替で参照
     window._backtestData = backtest;
     window._briefData = brief;  // 井村流候補のキャッシュ
+    window._forwardData = forward;
+    window._forwardHumanData = forwardHuman;
     
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, pickup, earn, themes, watch, synth, backtest, brief,
+        macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman,
         fetchedAt: now
       }));
     } catch (e) {
@@ -799,6 +819,8 @@ async function loadMorningReports(forceRefresh = false) {
     renderThemes(themes);
     renderCandidates(watch, pickup);
     renderCandidateBrief(brief); // 井村流候補の描画
+    renderForwardResults(forward);
+    renderForwardHumanCompare(forwardHuman);
     renderDriftSummary();           // T0-3 Stage A: 執行癖セクション
     renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
     renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
@@ -1619,6 +1641,186 @@ function renderCandidateBriefFromCache() {
   }
 }
 
+// ============================================================
+//  「📊 forward検証（機械baseline）」セクション (forward_results.json)
+// ============================================================
+function renderForwardResults(d) {
+  const el = document.getElementById('dforwardresults');
+  if (!el) return;
+
+  if (!d) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">forward検証 準備中（検証開始をお待ちください）</div>';
+    return;
+  }
+
+  const label = d.label || '検証中・エッジ未確定 (機械baseline=人間が超えるべきバー)';
+  const status = d.summary && d.summary.status ? d.summary.status : '状態確認中';
+  const verdict = d.summary ? d.summary.verdict : '保留';
+  const tradeLens = (d.summary && d.summary.trade_lens) || {};
+  const n = tradeLens.n || 0;
+
+  const progressPercent = Math.min(100, Math.round((n / 30) * 100));
+
+  let contentHtml = '';
+
+  if (verdict === '保留') {
+    contentHtml = 
+      '<div style="margin-bottom:10px;">' +
+        '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px;">' +
+          '<span>成熟トレード進捗 (目標30件以上)</span>' +
+          '<span>' + n + ' / 30 件 (' + progressPercent + '%)</span>' +
+        '</div>' +
+        '<div style="background:var(--s2);border-radius:6px;height:8px;width:100%;overflow:hidden;border:1px solid var(--border);">' +
+          '<div style="background:var(--acc);height:100%;width:' + progressPercent + '%;transition:width .3s;"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;border-left:3px solid var(--border);">' +
+        _escape(status) +
+      '</div>';
+  } else {
+    const academic = (d.summary && d.summary.academic_market_adj) || {};
+    const adj20 = academic["20"] ? (academic["20"].mean_market_adj * 100).toFixed(1) : null;
+    const avgRR = tradeLens.avg_rr_after_friction != null ? tradeLens.avg_rr_after_friction.toFixed(3) : '—';
+    const winRate = tradeLens.win_rate != null ? (tradeLens.win_rate * 100).toFixed(0) : '—';
+
+    let driftHtml = '';
+    if (adj20 !== null) {
+      const sign = parseFloat(adj20) >= 0 ? '+' : '';
+      driftHtml = 
+        '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
+          '<div style="color:var(--t3);font-size:9px;">市場調整ドリフト</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--acc);">' + sign + adj20 + '%</div>' +
+          '<div style="color:var(--t3);font-size:8px;">20営業日 (主)</div>' +
+        '</div>';
+    } else {
+      driftHtml = 
+        '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
+          '<div style="color:var(--t3);font-size:9px;">市場調整ドリフト</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;">—</div>' +
+          '<div style="color:var(--t3);font-size:8px;">20営業日 (主)</div>' +
+        '</div>';
+    }
+
+    contentHtml =
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">' +
+        driftHtml +
+        '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
+          '<div style="color:var(--t3);font-size:9px;">平均R (摩擦後)</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--purple);">' + avgRR + 'R</div>' +
+          '<div style="color:var(--t3);font-size:8px;">(1R=損切り1回分)</div>' +
+        '</div>' +
+        '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
+          '<div style="color:var(--t3);font-size:9px;">勝率 (摩擦後)</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--green);">' + winRate + '%</div>' +
+          '<div style="color:var(--t3);font-size:8px;">( doctrine 決済 )</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--acc);">' +
+        _escape(status) +
+      '</div>' +
+      '<div style="font-size:9px;color:var(--t3);text-align:center;">※ 本データは売買推奨ではありません。人間が超えるべき機械ベースラインとしての参照値です。</div>';
+  }
+
+  el.innerHTML =
+    '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;box-shadow:var(--shadow-sm);">' +
+      '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:4px;">' +
+        '<span>📊</span>' +
+        '<span>' + _escape(label) + '</span>' +
+      '</div>' +
+      contentHtml +
+    '</div>';
+}
+
+function renderForwardResultsFromCache() {
+  if (window._forwardData) {
+    renderForwardResults(window._forwardData);
+  }
+}
+
+// ============================================================
+//  「👥 forward人間比較」セクション (forward_human_compare.json)
+// ============================================================
+function renderForwardHumanCompare(d) {
+  const el = document.getElementById('dforwardhumancompare');
+  if (!el) return;
+
+  if (!d) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">forward人間比較 準備中（人間データ蓄積をお待ちください）</div>';
+    return;
+  }
+
+  const label = d.label || '人間紙トレ vs 機械baseline 比較';
+  const status = d.summary && d.summary.status ? d.summary.status : '状態確認中';
+  const verdict = d.summary ? d.summary.verdict : '保留';
+  
+  let n = 0;
+  if (d.summary) {
+    if (d.summary.human && d.summary.human.n != null) n = d.summary.human.n;
+    else if (d.summary.trade_lens && d.summary.trade_lens.n != null) n = d.summary.trade_lens.n;
+    else if (d.summary.n != null) n = d.summary.n;
+  }
+  const progressPercent = Math.min(100, Math.round((n / 30) * 100));
+
+  let contentHtml = '';
+
+  if (verdict === '保留') {
+    contentHtml = 
+      '<div style="margin-bottom:10px;">' +
+        '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px;">' +
+          '<span>人間トレード進捗 (目標30件以上)</span>' +
+          '<span>' + n + ' / 30 件 (' + progressPercent + '%)</span>' +
+        '</div>' +
+        '<div style="background:var(--s2);border-radius:6px;height:8px;width:100%;overflow:hidden;border:1px solid var(--border);">' +
+          '<div style="background:var(--purple);opacity:0.8;height:100%;width:' + progressPercent + '%;transition:width .3s;"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;border-left:3px solid var(--border);">' +
+        _escape(status) +
+      '</div>';
+  } else {
+    const human = d.summary.human || {};
+    const baseline = d.summary.baseline || {};
+    
+    const hWin = human.win_rate != null ? (human.win_rate * 100).toFixed(0) + '%' : '—';
+    const bWin = baseline.win_rate != null ? (baseline.win_rate * 100).toFixed(0) + '%' : '—';
+    const hRR = human.avg_rr_after_friction != null ? human.avg_rr_after_friction.toFixed(3) + 'R' : '—';
+    const bRR = baseline.avg_rr_after_friction != null ? baseline.avg_rr_after_friction.toFixed(3) + 'R' : '—';
+    const delta = (human.avg_rr_after_friction != null && baseline.avg_rr_after_friction != null)
+      ? (human.avg_rr_after_friction - baseline.avg_rr_after_friction).toFixed(3) + 'R'
+      : '—';
+
+    contentHtml =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">' +
+        '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
+          '<div style="color:var(--t3);font-size:9px;">人間 (勝率 / 平均R)</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--purple);">' + hWin + ' / ' + hRR + '</div>' +
+        '</div>' +
+        '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
+          '<div style="color:var(--t3);font-size:9px;">機械 (勝率 / 平均R)</div>' +
+          '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--t2);">' + bWin + ' / ' + bRR + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--acc);">' +
+        _escape(status) + ' (差 ' + delta + ')' +
+      '</div>';
+  }
+
+  el.innerHTML =
+    '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;box-shadow:var(--shadow-sm);">' +
+      '<div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:4px;">' +
+        '<span>👥</span>' +
+        '<span>' + _escape(label) + '</span>' +
+      '</div>' +
+      contentHtml +
+    '</div>';
+}
+
+function renderForwardHumanCompareFromCache() {
+  if (window._forwardHumanData) {
+    renderForwardHumanCompare(window._forwardHumanData);
+  }
+}
+
 function _renderBriefCard(s) {
   const b = s.brief || {};
   const hasGuardian = !!b.guardian;
@@ -1629,19 +1831,25 @@ function _renderBriefCard(s) {
     guardianHtml = '<div style="background:rgba(239,68,68,.15);color:var(--red);font-size:11px;font-weight:700;padding:8px 10px;border-bottom:1px solid var(--border);margin:-12px -12px 10px -12px;border-top-left-radius:9px;border-top-right-radius:9px;line-height:1.4;">' + _escape(b.guardian) + '</div>';
   }
 
-  // 2. ヘッダー (銘柄名 + コード。タップで株探へ)
+  // 2. ヘッダー (銘柄名 + コード。タップで株探へ。さらに公式LINE決算要約ディープリンク)
   const code4 = s.ticker || (s.code ? s.code.slice(0, 4) : '');
   const linkUrl = b.link || 'https://kabutan.jp/stock/?code=' + code4;
+  const lineLinkUrl = LINE_BOT_ID
+    ? 'https://line.me/R/oaMessage/' + LINE_BOT_ID + '/?%e6%b1%ba%e7%ae%97%20' + code4
+    : 'https://line.me/R/share?text=%e6%b1%ba%e7%ae%97%20' + code4;
   const pegVal = s.metrics && s.metrics.peg != null ? s.metrics.peg : '—';
   const headerHtml = 
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">' +
-      '<a href="' + linkUrl + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:block;min-width:0;flex:1;">' +
-        '<span style="font-size:15px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' +
-          _escape(s.name) +
-        '</span>' +
-        '<span style="font-size:11px;color:var(--t3);margin-left:6px;">(' + code4 + ') ↗</span>' +
-      '</a>' +
-      '<div style="font-size:11px;color:var(--t3);text-align:right;">PEG ' + pegVal + '</div>' +
+      '<div style="min-width:0;flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px 0;">' +
+        '<a href="' + linkUrl + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:inline-block;min-width:0;max-width:100%;">' +
+          '<span style="font-size:15px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' +
+            _escape(s.name) +
+          '</span>' +
+          '<span style="font-size:11px;color:var(--t3);margin-left:6px;margin-right:8px;">(' + code4 + ') ↗</span>' +
+        '</a>' +
+        '<a href="' + lineLinkUrl + '" target="_blank" rel="noopener" style="display:inline-block;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:6px;padding:2px 8px;font-size:10px;color:#10b981;text-decoration:none;font-weight:700;line-height:1.2;white-space:nowrap;">📄決算要約</a>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--t3);text-align:right;white-space:nowrap;margin-left:6px;">PEG ' + pegVal + '</div>' +
     '</div>';
 
   // 「／」で区切られた長い文章をスマホ向けに読みやすい改行・箇条書きにするヘルパ
