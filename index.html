@@ -484,11 +484,14 @@ select.fi{appearance:none;-webkit-appearance:none;}
       </div>
       <input type="file" id="importDataInput" accept="application/json" style="display:none" onchange="importAllData(event)">
     </div>
-    <!-- forward検証: 人間紙トレ書き出し (human_paper_trades.json) -->
+    <!-- forward検証: 人間紙トレ連携 (human_paper_trades.json) -->
     <div class="key-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-      <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">👥 forward検証用 紙トレ書き出し</div>
-      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">決済済の取引を human_paper_trades.json で出力 → stock-checker に置くと「人間 vs 機械baseline」を採点します。決済済（買→売）のみ対象。</div>
-      <button onclick="exportHumanPaperTrades()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer">📤 human_paper_trades.json を出力</button>
+      <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">👥 forward検証用 紙トレ連携</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">決済済(買→売)の取引を「人間 vs 機械baseline」として採点。①手動=ファイル出力、②自動=trade-journal-data へ直接 publish（手置き不要・次の日曜に採点）。</div>
+      <button onclick="exportHumanPaperTrades()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer;margin-bottom:8px">📤 ① ファイルに出力</button>
+      <input id="hptGhPat" type="password" autocomplete="off" placeholder="GitHub PAT（保存済みなら空欄でOK）" style="width:100%;box-sizing:border-box;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:7px;margin-bottom:6px">
+      <button onclick="publishHumanPaperTrades()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">☁️ ② 公開して自動連携 (publish)</button>
+      <div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4">※PATはこの端末のブラウザにのみ保存。fine-grained・trade-journal-data の Contents (Read and write) 権限のみ推奨。</div>
     </div>
     <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
     <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
@@ -2840,16 +2843,12 @@ function exportAllData() {
   toast(statusStr);
 }
 
-// forward検証用: 決済済の取引を human_paper_trades.json (backend forward_tracker 契約) で出力。
-// 既存 FIFO マッチャ matchRoundTrips を再利用 (buy→sell ペア)。R 計算は backend が行う=ここは記録のみ。
+// forward検証用: 決済済の取引を human_paper_trades.json (backend forward_tracker 契約) に写像。
+// 既存 FIFO マッチャ matchRoundTrips を再利用 (buy→sell ペア)。R 計算は backend=ここは記録のみ。
 // 規律: 決済済 round-trip のみ。負けトレードを後から消さない (pre-register)。
-function exportHumanPaperTrades() {
+function _buildHumanPaperTradesPayload() {
   const rounds = matchRoundTrips(T);  // {code,type,buy_price,sell_price,shares,buy_date,sell_date}
-  if (!rounds.length) {
-    alert('決済済みの取引がありません。\n買い→売りが揃った取引が 1 件以上必要です（保有中は対象外）。');
-    return;
-  }
-  // J-Quants 5桁コード化 (4桁→末尾0、130A→130A0)。backend は code を採点に使わないがラベル一貫性のため。
+  // J-Quants 5桁コード化 (4桁→末尾0、130A→130A0)。
   const code5 = (cd) => {
     const s = String(cd || '').trim().toUpperCase();
     return (s.length === 4 && /^[0-9]/.test(s)) ? s + '0' : s;
@@ -2862,11 +2861,20 @@ function exportHumanPaperTrades() {
     exit_price: r.sell_price,
     note: (r.type === 'margin' ? '信用' : '現物') + (r.shares ? ' ' + r.shares + '株' : ''),
   }));
-  const payload = {
+  return {
     _generated_at: new Date().toISOString(),
     _note: '人間紙トレ記録 (journal export)。forward_tracker が機械baseline と比較。決済済 round-trip のみ・R計算は backend。',
     trades: trades,
   };
+}
+
+// ① 手動: ファイルに出力 (stock-checker か trade-journal-data に置く)
+function exportHumanPaperTrades() {
+  const payload = _buildHumanPaperTradesPayload();
+  if (!payload.trades.length) {
+    alert('決済済みの取引がありません。\n買い→売りが揃った取引が 1 件以上必要です（保有中は対象外）。');
+    return;
+  }
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2876,7 +2884,49 @@ function exportHumanPaperTrades() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('📤 human_paper_trades.json (' + trades.length + '件) を出力しました');
+  toast('📤 human_paper_trades.json (' + payload.trades.length + '件) を出力しました');
+}
+
+// UTF-8 安全な base64 (GitHub Contents API 用、日本語 note を含むため)
+function _utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+// ② 自動: trade-journal-data に直接 publish → forward_score が公開版を自動取得 (手置き不要)。
+//    PAT はこの端末のブラウザ(localStorage)にのみ保存。fine-grained・当該repo Contents 権限のみ推奨。
+async function publishHumanPaperTrades() {
+  const patEl = document.getElementById('hptGhPat');
+  const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
+  if (!pat) { alert('GitHub PAT を入力してください\n(fine-grained / trade-journal-data: Contents = Read and write)。'); return; }
+  const payload = _buildHumanPaperTradesPayload();
+  if (!payload.trades.length) { alert('決済済みの取引がありません（保有中は対象外）。'); return; }
+  localStorage.setItem('tj_ghpat', pat);  // 次回は空欄のまま再公開可
+  const apiUrl = 'https://api.github.com/repos/hiroki300/trade-journal-data/contents/human_paper_trades.json';
+  const headers = { 'Authorization': 'Bearer ' + pat, 'Accept': 'application/vnd.github+json' };
+  try {
+    let sha;
+    const getR = await fetch(apiUrl + '?ref=main', { headers });
+    if (getR.status === 200) { sha = (await getR.json()).sha; }  // 更新時は sha 必須
+    const putR = await fetch(apiUrl, {
+      method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: '📤 human_paper_trades update (' + payload.trades.length + '件) [skip ci]',
+        content: _utf8ToBase64(JSON.stringify(payload, null, 2)),
+        sha: sha, branch: 'main',
+      }),
+    });
+    if (putR.status === 200 || putR.status === 201) {
+      toast('☁️ 公開しました (' + payload.trades.length + '件)。次の日曜 forward_score が採点します');
+    } else {
+      const e = await putR.text();
+      alert('公開失敗 (HTTP ' + putR.status + ')。PATの権限/対象リポを確認してください。\n' + e.slice(0, 200));
+    }
+  } catch (err) {
+    alert('公開エラー: ' + (err && err.message ? err.message : err));
+  }
 }
 
 function importAllData(event) {
