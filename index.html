@@ -1695,7 +1695,9 @@ function renderForwardResults(d) {
       '</div>';
   } else {
     const academic = (d.summary && d.summary.academic_market_adj) || {};
-    const adj20 = academic["20"] ? (academic["20"].mean_market_adj * 100).toFixed(1) : null;
+    // BUG-2: mean_market_adj=null を 0.0% にしない (null*100===0 になるため明示ガード)。null は「—」表示へ。
+    const a20 = academic["20"];
+    const adj20 = (a20 && a20.mean_market_adj != null) ? (a20.mean_market_adj * 100).toFixed(1) : null;
     const avgRR = tradeLens.avg_rr_after_friction != null ? tradeLens.avg_rr_after_friction.toFixed(3) : '—';
     const winRate = tradeLens.win_rate != null ? (tradeLens.win_rate * 100).toFixed(0) : '—';
 
@@ -2926,8 +2928,16 @@ async function publishHumanPaperTrades() {
   const headers = { 'Authorization': 'Bearer ' + pat, 'Accept': 'application/vnd.github+json' };
   try {
     let sha;
-    const getR = await fetch(apiUrl + '?ref=main', { headers });
-    if (getR.status === 200) { sha = (await getR.json()).sha; }  // 更新時は sha 必須
+    // BUG-1: sha 取得は no-store (キャッシュ由来の古い sha を避ける)。200=既存(sha必須)/
+    //        404=新規(sha不要)/それ以外=一過性失敗の可能性 → sha 欠落のまま PUT すると既存ファイルが
+    //        422 で失敗するので、ここで中断し冪等リトライを促す。
+    const getR = await fetch(apiUrl + '?ref=main', { headers, cache: 'no-store' });
+    if (getR.status === 200) {
+      sha = (await getR.json()).sha;
+    } else if (getR.status !== 404) {
+      alert('公開中断: 既存ファイルの確認に失敗 (HTTP ' + getR.status + ')。時間をおいて再実行してください。');
+      return;
+    }
     const putR = await fetch(apiUrl, {
       method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
