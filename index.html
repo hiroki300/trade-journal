@@ -491,7 +491,8 @@ select.fi{appearance:none;-webkit-appearance:none;}
       <button onclick="exportHumanPaperTrades()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer;margin-bottom:8px">📤 ① ファイルに出力</button>
       <input id="hptGhPat" type="password" autocomplete="off" placeholder="GitHub PAT（保存済みなら空欄でOK）" style="width:100%;box-sizing:border-box;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:7px;margin-bottom:6px">
       <button onclick="publishHumanPaperTrades()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">☁️ ② 公開して自動連携 (publish)</button>
-      <div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4">※PATはこの端末のブラウザにのみ保存。fine-grained・trade-journal-data の Contents (Read and write) 権限のみ推奨。</div>
+      <button onclick="clearGhPat()" style="width:100%;background:none;border:1px solid var(--border);border-radius:7px;color:var(--t3);font-size:10px;font-weight:600;padding:6px;cursor:pointer;margin-top:6px">🗑 保存したPATをこの端末から消去</button>
+      <div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4">※PATは<b>平文(暗号化なし)</b>でこの端末のブラウザ(localStorage)に保存されます。<b>fine-grained・trade-journal-data の Contents (Read and write) のみ</b>／<b>有効期限は短め(30〜90日)を推奨</b>。共用端末では使わず、使い終えたら上の「消去」を。</div>
     </div>
     <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
     <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
@@ -1417,6 +1418,12 @@ function _escape(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// 公開JSON由来のURLを href に挿入する前のサニタイズ (SEC: javascript:/data: 等を弾く)。
+// http(s) のみ許可し、非該当は fallback。属性内挿入時はさらに _escape で囲むこと。
+function _safeUrl(u, fallback) {
+  return (typeof u === 'string' && /^https?:\/\//i.test(u.trim())) ? u.trim() : fallback;
+}
+
 function renderMacro(d) {
   const el = document.getElementById('dmacro');
   if (!d) { el.textContent = '取得できませんでした'; return; }
@@ -1447,8 +1454,8 @@ function renderPickup(d) {
     const skip = s.skip_recommendation ? ' (skip推奨)' : '';
     return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">' +
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">' +
-      '<div><span style="font-size:16px">' + s.level_label + '</span> <span style="font-size:14px;font-weight:700">' + _escape(s.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + s.code + '</span>' + sourceTag + warningBadge + '</div>' +
-      '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--acc)">tier ' + _escape(s.tier) + '</div><div style="font-size:10px;color:var(--t3)">EQ ' + s.entry_quality + skip + '</div></div>' +
+      '<div><span style="font-size:16px">' + _escape(s.level_label) + '</span> <span style="font-size:14px;font-weight:700">' + _escape(s.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(s.code) + '</span>' + sourceTag + warningBadge + '</div>' +
+      '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--acc)">tier ' + _escape(s.tier) + '</div><div style="font-size:10px;color:var(--t3)">EQ ' + _escape(s.entry_quality) + skip + '</div></div>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px">' +
       '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">価格</div><div style="font-size:11px;font-family:monospace;font-weight:700">' + Math.round(s.price).toLocaleString() + '</div></div>' +
@@ -1579,8 +1586,8 @@ function renderEarnings(d) {
     html += upcoming.map(e => {
       const confColor = confColorMap[e.estimation_confidence] || 'var(--t3)';
       return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
-        '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + e.code + ' / rank ' + e.rank + '</span></div>' +
-        '<div style="text-align:right"><div style="font-size:11px;font-family:monospace">' + e.estimated_disclosure_date + ' <span style="color:' + confColor + '">●</span></div><div style="font-size:9px;color:var(--t3)">あと ' + e.days_until_estimated + ' 日 (' + e.estimation_confidence + ')</div></div>' +
+        '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(e.code) + ' / rank ' + _escape(e.rank) + '</span></div>' +
+        '<div style="text-align:right"><div style="font-size:11px;font-family:monospace">' + _escape(e.estimated_disclosure_date) + ' <span style="color:' + confColor + '">●</span></div><div style="font-size:9px;color:var(--t3)">あと ' + _escape(e.days_until_estimated) + ' 日 (' + _escape(e.estimation_confidence) + ')</div></div>' +
         '</div>';
     }).join('');
   }
@@ -1588,8 +1595,8 @@ function renderEarnings(d) {
     html += '<div style="font-size:10px;color:var(--t3);margin:8px 0 4px">◀ 過去 3 日に決算済 (' + recent.length + '件)</div>';
     html += recent.map(e =>
       '<div style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
-      '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + e.code + ' / rank ' + e.rank + '</span></div>' +
-      '<div style="text-align:right"><div style="font-size:11px;font-family:monospace;color:var(--t3)">' + e.disclosure_date + '</div><div style="font-size:9px;color:var(--t3)">' + e.days_ago + ' 日前</div></div>' +
+      '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(e.code) + ' / rank ' + _escape(e.rank) + '</span></div>' +
+      '<div style="text-align:right"><div style="font-size:11px;font-family:monospace;color:var(--t3)">' + _escape(e.disclosure_date) + '</div><div style="font-size:9px;color:var(--t3)">' + _escape(e.days_ago) + ' 日前</div></div>' +
       '</div>'
     ).join('');
   }
@@ -1606,8 +1613,8 @@ function renderThemes(d) {
     const stocks = (t.top_stocks || []).slice(0, 3).map(s => s.code + ' ' + (s.name || '').slice(0, 12)).join(' / ');
     return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
-      '<div><span style="font-size:13px;font-weight:700;color:var(--acc)">#' + t.rank + ' ' + _escape(t.name) + '</span></div>' +
-      '<div style="font-size:10px;color:var(--t3);font-family:monospace">score ' + t.score + ' / ' + t.stock_count + '銘柄</div>' +
+      '<div><span style="font-size:13px;font-weight:700;color:var(--acc)">#' + _escape(t.rank) + ' ' + _escape(t.name) + '</span></div>' +
+      '<div style="font-size:10px;color:var(--t3);font-family:monospace">score ' + _escape(t.score) + ' / ' + _escape(t.stock_count) + '銘柄</div>' +
       '</div>' +
       '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">' + _escape(stocks) + '</div>' +
       (t.news_summary ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">📰 ' + _escape(t.news_summary) + '</div>' : '') +
@@ -1841,23 +1848,24 @@ function _renderBriefCard(s) {
 
   // 2. ヘッダー (銘柄名 + コード。タップで株探へ。さらに公式LINE決算要約ディープリンク)
   const code4 = s.ticker || (s.code ? s.code.slice(0, 4) : '');
-  const linkUrl = b.link || 'https://kabutan.jp/stock/?code=' + code4;
+  const code4Enc = encodeURIComponent(code4);
+  const linkUrl = _safeUrl(b.link, 'https://kabutan.jp/stock/?code=' + code4Enc);  // 公開JSON由来URLをサニタイズ
   const lineLinkUrl = LINE_BOT_ID
-    ? 'https://line.me/R/oaMessage/' + LINE_BOT_ID + '/?%e6%b1%ba%e7%ae%97%20' + code4
-    : 'https://line.me/R/share?text=%e6%b1%ba%e7%ae%97%20' + code4;
+    ? 'https://line.me/R/oaMessage/' + LINE_BOT_ID + '/?%e6%b1%ba%e7%ae%97%20' + code4Enc
+    : 'https://line.me/R/share?text=%e6%b1%ba%e7%ae%97%20' + code4Enc;
   const pegVal = s.metrics && s.metrics.peg != null ? s.metrics.peg : '—';
   const headerHtml = 
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">' +
       '<div style="min-width:0;flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px 0;">' +
-        '<a href="' + linkUrl + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:inline-block;min-width:0;max-width:100%;">' +
+        '<a href="' + _escape(linkUrl) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:inline-block;min-width:0;max-width:100%;">' +
           '<span style="font-size:15px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' +
             _escape(s.name) +
           '</span>' +
-          '<span style="font-size:11px;color:var(--t3);margin-left:6px;margin-right:8px;">(' + code4 + ') ↗</span>' +
+          '<span style="font-size:11px;color:var(--t3);margin-left:6px;margin-right:8px;">(' + _escape(code4) + ') ↗</span>' +
         '</a>' +
-        '<a href="' + lineLinkUrl + '" target="_blank" rel="noopener" style="display:inline-block;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:6px;padding:2px 8px;font-size:10px;color:#10b981;text-decoration:none;font-weight:700;line-height:1.2;white-space:nowrap;">📄決算要約</a>' +
+        '<a href="' + _escape(lineLinkUrl) + '" target="_blank" rel="noopener" style="display:inline-block;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:6px;padding:2px 8px;font-size:10px;color:#10b981;text-decoration:none;font-weight:700;line-height:1.2;white-space:nowrap;">📄決算要約</a>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--t3);text-align:right;white-space:nowrap;margin-left:6px;">PEG ' + pegVal + '</div>' +
+      '<div style="font-size:11px;color:var(--t3);text-align:right;white-space:nowrap;margin-left:6px;">PEG ' + _escape(pegVal) + '</div>' +
     '</div>';
 
   // 「／」で区切られた長い文章をスマホ向けに読みやすい改行・箇条書きにするヘルパ
@@ -1871,7 +1879,7 @@ function _renderBriefCard(s) {
   }
 
   // 3. 各項目の表示文言 (スマホ向けタイトル明記と箇条書き背景化)
-  const asOfShortStr = b.as_of_short ? ' <span style="font-size:9px;color:var(--t3);font-weight:normal;">(空売残は ' + b.as_of_short + ' 時点)</span>' : '';
+  const asOfShortStr = b.as_of_short ? ' <span style="font-size:9px;color:var(--t3);font-weight:normal;">(空売残は ' + _escape(b.as_of_short) + ' 時点)</span>' : '';
   
   const valueHtml = b.value ? 
     '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:10px;">' +
@@ -2895,8 +2903,18 @@ function _utf8ToBase64(str) {
   return btoa(bin);
 }
 
+// 保存済み PAT をこの端末から消去 (SEC-1: 平文 localStorage の手動クリア手段)。
+function clearGhPat() {
+  const had = !!localStorage.getItem('tj_ghpat');
+  localStorage.removeItem('tj_ghpat');
+  const el = document.getElementById('hptGhPat');
+  if (el) el.value = '';
+  alert(had ? '保存していた GitHub PAT をこの端末から消去しました。'
+            : '保存された PAT はありませんでした (入力欄もクリア済み)。');
+}
+
 // ② 自動: trade-journal-data に直接 publish → forward_score が公開版を自動取得 (手置き不要)。
-//    PAT はこの端末のブラウザ(localStorage)にのみ保存。fine-grained・当該repo Contents 権限のみ推奨。
+//    PAT はこの端末のブラウザ(localStorage)に平文で保存。fine-grained・当該repo Contents 権限のみ・短期expiry推奨。
 async function publishHumanPaperTrades() {
   const patEl = document.getElementById('hptGhPat');
   const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
