@@ -1660,6 +1660,20 @@ function renderCandidateBriefFromCache() {
 // ============================================================
 //  「📊 forward検証（機械baseline）」セクション (forward_results.json)
 // ============================================================
+// P0 新スキーマ (2026-06-10 pre-register 改革) 対応ヘルパ。契約: HANDOFF_forward_display.md
+function _fwdCI(ci) {
+  // ci95={lo,hi} → 'CI95 lo〜hi'。欠損は null (表示しない)。点推定はノイズ下=必ず±CI併記の規律
+  return (ci && ci.lo != null && ci.hi != null)
+    ? 'CI95 ' + ci.lo.toFixed(2) + '〜' + ci.hi.toFixed(2) : null;
+}
+
+function _fwdVerdictColor(v) {
+  v = String(v || '');
+  if (v.indexOf('継続') === 0) return 'var(--green)';
+  if (v.indexOf('撤退') === 0) return 'var(--red)';
+  return 'var(--t3)';  // 保留系
+}
+
 function renderForwardResults(d) {
   const el = document.getElementById('dforwardresults');
   if (!el) return;
@@ -1669,22 +1683,26 @@ function renderForwardResults(d) {
     return;
   }
 
+  const summary = d.summary || {};
   const label = d.label || '検証中・エッジ未確定 (機械baseline=人間が超えるべきバー)';
-  const status = d.summary && d.summary.status ? d.summary.status : '状態確認中';
-  const verdict = d.summary ? d.summary.verdict : '保留';
-  const tradeLens = (d.summary && d.summary.trade_lens) || {};
-  const n = tradeLens.n || 0;
-
-  const progressPercent = Math.min(100, Math.round((n / 30) * 100));
+  const status = summary.status || '状態確認中';
+  const verdict = String(summary.verdict || '保留');
+  // P0 新スキーマ: 主数値は整合レンズ (単一決済R)。旧スキーマ (consistency_lens 無し) は
+  // trade_lens に fallback (6/14 の再生成までは旧データが公開されている)。
+  const lens = summary.consistency_lens || summary.trade_lens || {};
+  const isSingleExit = !!summary.consistency_lens;
+  const minTrades = (summary.preregister && summary.preregister.min_trades) || 30;
+  const n = lens.n || 0;
+  const progressPercent = Math.min(100, Math.round((n / minTrades) * 100));
 
   let contentHtml = '';
 
-  if (verdict === '保留') {
-    contentHtml = 
+  if (verdict.indexOf('保留') === 0) {
+    contentHtml =
       '<div style="margin-bottom:10px;">' +
         '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px;">' +
-          '<span>成熟トレード進捗 (目標30件以上)</span>' +
-          '<span>' + n + ' / 30 件 (' + progressPercent + '%)</span>' +
+          '<span>成熟トレード進捗 (目標' + minTrades + '件以上' + (isSingleExit ? '・単一決済' : '') + ')</span>' +
+          '<span>' + n + ' / ' + minTrades + ' 件 (' + progressPercent + '%)</span>' +
         '</div>' +
         '<div style="background:var(--s2);border-radius:6px;height:8px;width:100%;overflow:hidden;border:1px solid var(--border);">' +
           '<div style="background:var(--acc);height:100%;width:' + progressPercent + '%;transition:width .3s;"></div>' +
@@ -1694,49 +1712,58 @@ function renderForwardResults(d) {
         _escape(status) +
       '</div>';
   } else {
-    const academic = (d.summary && d.summary.academic_market_adj) || {};
+    const academic = summary.academic_market_adj || {};
     // BUG-2: mean_market_adj=null を 0.0% にしない (null*100===0 になるため明示ガード)。null は「—」表示へ。
     const a20 = academic["20"];
     const adj20 = (a20 && a20.mean_market_adj != null) ? (a20.mean_market_adj * 100).toFixed(1) : null;
-    const avgRR = tradeLens.avg_rr_after_friction != null ? tradeLens.avg_rr_after_friction.toFixed(3) : '—';
-    const winRate = tradeLens.win_rate != null ? (tradeLens.win_rate * 100).toFixed(0) : '—';
+    const avgRR = lens.avg_rr_after_friction != null ? lens.avg_rr_after_friction.toFixed(3) : '—';
+    const winRate = lens.win_rate != null ? (lens.win_rate * 100).toFixed(0) : '—';
+    const ci = _fwdCI(lens.ci95);
 
     let driftHtml = '';
     if (adj20 !== null) {
       const sign = parseFloat(adj20) >= 0 ? '+' : '';
-      driftHtml = 
+      driftHtml =
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
           '<div style="color:var(--t3);font-size:9px;">市場調整ドリフト</div>' +
           '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--acc);">' + sign + adj20 + '%</div>' +
-          '<div style="color:var(--t3);font-size:8px;">20営業日 (主)</div>' +
+          '<div style="color:var(--t3);font-size:8px;">20営業日 (文脈)</div>' +
         '</div>';
     } else {
-      driftHtml = 
+      driftHtml =
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
           '<div style="color:var(--t3);font-size:9px;">市場調整ドリフト</div>' +
           '<div style="font-size:13px;font-family:monospace;font-weight:700;">—</div>' +
-          '<div style="color:var(--t3);font-size:8px;">20営業日 (主)</div>' +
+          '<div style="color:var(--t3);font-size:8px;">20営業日 (文脈)</div>' +
         '</div>';
     }
 
+    // 参考: 旧 scale-out 混成R (主が整合レンズのときだけ小さく併記)
+    const tl = summary.trade_lens;
+    const refLine = (isSingleExit && tl && tl.avg_rr_after_friction != null)
+      ? '<div style="font-size:9px;color:var(--t3);text-align:center;margin-bottom:6px;">参考: scale-out混成R ' + tl.avg_rr_after_friction.toFixed(3) + 'R (主は単一決済)</div>'
+      : '';
+
     contentHtml =
-      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:' + (ci ? '4px' : '10px') + ';">' +
         driftHtml +
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
-          '<div style="color:var(--t3);font-size:9px;">平均R (摩擦後)</div>' +
+          '<div style="color:var(--t3);font-size:9px;">平均R (摩擦後' + (isSingleExit ? '・単一決済' : '') + ')</div>' +
           '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--purple);">' + avgRR + 'R</div>' +
           '<div style="color:var(--t3);font-size:8px;">(1R=損切り1回分)</div>' +
         '</div>' +
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
           '<div style="color:var(--t3);font-size:9px;">勝率 (摩擦後)</div>' +
           '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--green);">' + winRate + '%</div>' +
-          '<div style="color:var(--t3);font-size:8px;">( doctrine 決済 )</div>' +
+          '<div style="color:var(--t3);font-size:8px;">(' + (isSingleExit ? '単一決済' : 'doctrine 決済') + ')</div>' +
         '</div>' +
       '</div>' +
+      (ci ? '<div style="font-size:9px;color:var(--t3);text-align:center;margin-bottom:6px;">平均R ' + _escape(ci) + ' (95%区間・点推定はノイズ下)</div>' : '') +
+      refLine +
       '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--acc);">' +
         _escape(status) +
       '</div>' +
-      '<div style="font-size:9px;color:var(--t3);text-align:center;">※ 本データは売買推奨ではありません。人間が超えるべき機械ベースラインとしての参照値です。</div>';
+      '<div style="font-size:9px;color:var(--t3);text-align:center;">※ 本データは売買推奨ではありません。人間が超えるべき機械ベースラインとしての参照値です (方向性の参考・厳密検定ではない)。</div>';
   }
 
   el.innerHTML =
@@ -1768,58 +1795,111 @@ function renderForwardHumanCompare(d) {
   }
 
   const label = d.label || '人間紙トレ vs 機械baseline 比較';
-  // ⚠️ forward_human_compare.json は verdict/status/human/baseline_avg_rr/delta_vs_baseline が
-  //    **トップレベル** (forward_results.json と違い summary ラッパー無し)。
+  // ⚠️ forward_human_compare.json は verdict/status/human/paired/direct がトップレベル
+  //    (forward_results.json と違い summary ラッパー無し)。契約: HANDOFF_forward_display.md。
+  //    verdict は6状態 (保留系3種 + 撤退 + 継続2種) — 保留系は startsWith('保留') で判定。
   const status = d.status || '状態確認中';
-  const verdict = d.verdict || '保留';
-
-  let n = 0;
-  if (d.human && d.human.n != null) n = d.human.n;
-  else if (d.n_trades != null) n = d.n_trades;
-  const progressPercent = Math.min(100, Math.round((n / 30) * 100));
+  const verdict = String(d.verdict || '保留');
+  const human = d.human || {};
+  const paired = d.paired || null;
+  const minTrades = (d.preregister && d.preregister.min_trades) || 30;
 
   let contentHtml = '';
 
-  if (verdict === '保留') {
-    contentHtml = 
-      '<div style="margin-bottom:10px;">' +
-        '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px;">' +
-          '<span>人間トレード進捗 (目標30件以上)</span>' +
-          '<span>' + n + ' / 30 件 (' + progressPercent + '%)</span>' +
-        '</div>' +
-        '<div style="background:var(--s2);border-radius:6px;height:8px;width:100%;overflow:hidden;border:1px solid var(--border);">' +
-          '<div style="background:var(--purple);opacity:0.8;height:100%;width:' + progressPercent + '%;transition:width .3s;"></div>' +
-        '</div>' +
-      '</div>' +
+  if (verdict.indexOf('保留') === 0) {
+    // 保留3種でバーの意味を変える: 通常保留=人間N / ペア化成熟待ち=主ゲートのペア数 / baseline未確定=バー無し
+    let barHtml = '';
+    if (verdict === '保留:ペア化成熟待ち' && paired) {
+      const np = paired.n_paired || 0;
+      const pp = Math.min(100, Math.round((np / minTrades) * 100));
+      barHtml =
+        '<div style="margin-bottom:10px;">' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px;">' +
+            '<span>ペア成熟進捗 (主ゲート・同週baseline対)</span>' +
+            '<span>' + np + ' / ' + minTrades + ' 対 (' + pp + '%)</span>' +
+          '</div>' +
+          '<div style="background:var(--s2);border-radius:6px;height:8px;width:100%;overflow:hidden;border:1px solid var(--border);">' +
+            '<div style="background:var(--purple);opacity:0.8;height:100%;width:' + pp + '%;transition:width .3s;"></div>' +
+          '</div>' +
+        '</div>';
+    } else if (verdict !== '保留:baseline未確定') {
+      const n = human.n != null ? human.n : (d.n_trades != null ? d.n_trades : 0);
+      const progressPercent = Math.min(100, Math.round((n / minTrades) * 100));
+      barHtml =
+        '<div style="margin-bottom:10px;">' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px;">' +
+            '<span>人間トレード進捗 (目標' + minTrades + '件以上)</span>' +
+            '<span>' + n + ' / ' + minTrades + ' 件 (' + progressPercent + '%)</span>' +
+          '</div>' +
+          '<div style="background:var(--s2);border-radius:6px;height:8px;width:100%;overflow:hidden;border:1px solid var(--border);">' +
+            '<div style="background:var(--purple);opacity:0.8;height:100%;width:' + progressPercent + '%;transition:width .3s;"></div>' +
+          '</div>' +
+        '</div>';
+    }
+    contentHtml = barHtml +
       '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;border-left:3px solid var(--border);">' +
         _escape(status) +
       '</div>';
   } else {
-    // human={n,avg_rr_after_friction,win_rate} / baseline_avg_rr=数値(R) / delta_vs_baseline=数値(R)
-    // 機械baseline は R のみ提供 (勝率は無い)。delta は backend 計算値をそのまま使う。
-    const human = d.human || {};
+    // 判定確定 (継続/撤退)。主 = paired.mean_excess_rr (同週baseline差引の超過R)、
+    // 副 = 人間 vs baseline の独立比較。delta は direct 配下優先 (旧トップレベル alias は互換)。
     const baselineRR = d.baseline_avg_rr;
-
     const hWin = human.win_rate != null ? (human.win_rate * 100).toFixed(0) + '%' : '—';
     const hRR = human.avg_rr_after_friction != null ? human.avg_rr_after_friction.toFixed(3) + 'R' : '—';
+    const hCI = _fwdCI(human.ci95);
     const bRR = baselineRR != null ? baselineRR.toFixed(3) + 'R' : '—';
-    const delta = d.delta_vs_baseline != null ? (d.delta_vs_baseline >= 0 ? '+' : '') + d.delta_vs_baseline.toFixed(3) + 'R' : '—';
+    const deltaVal = (d.direct && d.direct.delta_vs_baseline != null)
+      ? d.direct.delta_vs_baseline
+      : (d.delta_vs_baseline != null ? d.delta_vs_baseline : null);
+    const delta = deltaVal != null ? (deltaVal >= 0 ? '+' : '') + deltaVal.toFixed(3) + 'R' : '—';
+
+    // 主ゲートの超過R (paired が無い = direct fallback 判定のときは出さない)
+    let mainHtml = '';
+    if (paired && paired.mean_excess_rr != null) {
+      const ex = paired.mean_excess_rr;
+      const exStr = (ex >= 0 ? '+' : '') + ex.toFixed(3) + 'R';
+      const exCI = _fwdCI(paired.ci95);
+      const unm = paired.n_unmatched ? ' / 対象外 ' + paired.n_unmatched + '件' : '';
+      mainHtml =
+        '<div style="background:var(--s2);border-radius:6px;padding:8px;text-align:center;margin-bottom:6px;">' +
+          '<div style="color:var(--t3);font-size:9px;">人間の超過R (同週baseline差引・主ゲート)</div>' +
+          '<div style="font-size:16px;font-family:monospace;font-weight:700;color:' + (ex > 0 ? 'var(--green)' : 'var(--red)') + ';">' + exStr + '</div>' +
+          '<div style="color:var(--t3);font-size:8px;">' + (exCI ? _escape(exCI) : '') + ' (' + (paired.n_paired || 0) + '対' + unm + ')</div>' +
+        '</div>';
+    }
+
+    // verdict バッジ + 二段バー (最低限+0.05R / 拡大+0.3R) の達成状況
+    const sr = (d.preregister && d.preregister.success_rr != null) ? d.preregister.success_rr : 0.05;
+    const er = (d.preregister && d.preregister.expansion_rr != null) ? d.preregister.expansion_rr : 0.3;
+    const chip = function (txt, color) {
+      return '<span style="font-size:9px;border:1px solid var(--border);border-radius:10px;padding:2px 7px;color:' + color + ';font-weight:700;">' + _escape(txt) + '</span>';
+    };
+    const badges =
+      '<div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin-bottom:8px;">' +
+        chip(verdict, _fwdVerdictColor(verdict)) +
+        chip((d.meets_criterion ? '✓' : '✗') + ' 最低限+' + sr + 'R', d.meets_criterion ? 'var(--green)' : 'var(--t3)') +
+        chip((d.meets_expansion ? '✓' : '✗') + ' 拡大+' + er + 'R (暫定)', d.meets_expansion ? 'var(--green)' : 'var(--t3)') +
+      '</div>';
 
     contentHtml =
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">' +
+      mainHtml +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">' +
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
           '<div style="color:var(--t3);font-size:9px;">人間 (勝率 / 平均R)</div>' +
           '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--purple);">' + hWin + ' / ' + hRR + '</div>' +
+          (hCI ? '<div style="color:var(--t3);font-size:8px;">' + _escape(hCI) + '</div>' : '') +
         '</div>' +
         '<div style="background:var(--s2);border-radius:6px;padding:6px;text-align:center;">' +
           '<div style="color:var(--t3);font-size:9px;">機械baseline (平均R)</div>' +
           '<div style="font-size:13px;font-family:monospace;font-weight:700;color:var(--t2);">' + bRR + '</div>' +
+          '<div style="color:var(--t3);font-size:8px;">単一決済・参照値</div>' +
         '</div>' +
       '</div>' +
+      badges +
       '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);padding:8px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--acc);">' +
-        _escape(status) + ' (人間 − 機械 差 ' + delta + ')' +
+        _escape(status) + ' (人間 − 機械 差 ' + delta + ' / 参考)' +
       '</div>' +
-      '<div style="font-size:9px;color:var(--t3);text-align:center;">※ 売買推奨ではありません。人間判断がエッジを足すかの検証です。</div>';
+      '<div style="font-size:9px;color:var(--t3);text-align:center;">※ 売買推奨ではありません。人間判断がエッジを足すかの検証です (方向性の参考・±CI併記)。</div>';
   }
 
   el.innerHTML =
