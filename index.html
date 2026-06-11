@@ -487,7 +487,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <!-- forward検証: 人間紙トレ連携 (human_paper_trades.json) -->
     <div class="key-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">👥 forward検証用 紙トレ連携</div>
-      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">決済済(買→売)の取引を「人間 vs 機械baseline」として採点。①手動=ファイル出力、②自動=trade-journal-data へ直接 publish（手置き不要・次の日曜に採点）。</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">取引(決済済+未決済)・見送り記録・👀ウォッチを「人間 vs 機械baseline」連携用に同期。①手動=ファイル出力、②自動=trade-journal-data へ直接 publish（手置き不要・日曜採点/平日指値ウォッチに反映）。</div>
       <button onclick="exportHumanPaperTrades()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer;margin-bottom:8px">📤 ① ファイルに出力</button>
       <input id="hptGhPat" type="password" autocomplete="off" placeholder="GitHub PAT（保存済みなら空欄でOK）" style="width:100%;box-sizing:border-box;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:7px;margin-bottom:6px">
       <button onclick="publishHumanPaperTrades()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">☁️ ② 公開して自動連携 (publish)</button>
@@ -1257,7 +1257,9 @@ function matchRoundTrips(trades, opensOut) {
     const key = cd + ':' + tp;
     if (a === 'buy') {
       if (!open_buys[key]) open_buys[key] = [];
-      open_buys[key].push({ shares_remaining: sh, price: p, date: dt, cd: cd, tp: tp });
+      // tags/memo はエントリー理由の構造化記録 (P5)。export 経由で半年後の自己分析に使う
+      open_buys[key].push({ shares_remaining: sh, price: p, date: dt, cd: cd, tp: tp,
+                            tags: t.tags || [], memo: t.memo || '' });
     } else if (a === 'sell') {
       let remaining = sh;
       const lots = open_buys[key] || [];
@@ -1272,6 +1274,8 @@ function matchRoundTrips(trades, opensOut) {
             shares: matched,
             buy_date: lot.date,
             sell_date: dt,
+            buy_tags: lot.tags || [],
+            buy_memo: lot.memo || '',
           });
           lot.shares_remaining -= matched;
           remaining -= matched;
@@ -1657,7 +1661,14 @@ function renderCandidateBrief(d) {
   }
 
   const cardsHtml = d.candidates.map(s => _renderBriefCard(s)).join('');
-  el.innerHTML = noteHtml + cardsHtml;
+  // P5: 見送りワンタップ — 候補を見た上での「今週はやらない」も記録 (質>件数・習慣維持)
+  const skipBtnHtml =
+    '<div style="text-align:center;margin-top:10px;">' +
+      '<button onclick="recordSkipWeek()" style="background:none;border:1px dashed var(--border);border-radius:8px;color:var(--t3);font-size:11px;font-weight:600;padding:8px 14px;cursor:pointer;">' +
+        '🙅 今週は見送り（記録だけ残す）' +
+      '</button>' +
+    '</div>';
+  el.innerHTML = noteHtml + cardsHtml + skipBtnHtml;
 }
 
 function renderCandidateBriefFromCache() {
@@ -1956,7 +1967,18 @@ function _renderBriefCard(s) {
         '</a>' +
         '<a href="' + _escape(lineLinkUrl) + '" target="_blank" rel="noopener" style="display:inline-block;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:6px;padding:2px 8px;font-size:10px;color:#10b981;text-decoration:none;font-weight:700;line-height:1.2;white-space:nowrap;">📄決算要約</a>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--t3);text-align:right;white-space:nowrap;margin-left:6px;">PEG ' + _escape(pegVal) + '</div>' +
+      '<div style="text-align:right;white-space:nowrap;margin-left:6px;">' +
+        '<div style="font-size:11px;color:var(--t3);">PEG ' + _escape(pegVal) + '</div>' +
+        (function () {
+          // P2: 👀 ウォッチ toggle (公開JSON由来の code は英数字のみに sanitize して onclick へ)
+          const codeId = String(s.code || '').replace(/[^0-9A-Za-z]/g, '');
+          if (!codeId) return '';
+          const on = isShortlisted(codeId);
+          return '<button id="slbtn_' + codeId + '" onclick="toggleShortlist(\'' + codeId + '\')" ' +
+            'style="margin-top:4px;background:none;border:1px solid ' + (on ? 'var(--green)' : 'var(--border)') + ';border-radius:6px;color:' + (on ? 'var(--green)' : 'var(--t3)') + ';font-size:10px;font-weight:700;padding:3px 8px;cursor:pointer;">' +
+            (on ? '✅ ウォッチ中' : '👀 ウォッチ') + '</button>';
+        })() +
+      '</div>' +
     '</div>';
 
   // 「／」で区切られた長い文章をスマホ向けに読みやすい改行・箇条書きにするヘルパ
@@ -2947,6 +2969,61 @@ function exportAllData() {
 // R 計算は backend=ここは記録のみ。規律: 負けトレードを後から消さない (pre-register)。
 // 未決済も exit null で含める — backend 契約上 exit null=採点対象外 (immature) だが、
 // 「今週エントリーを記録した」事実が paper_reminder から見える (偽リマインド防止)。
+// P5: エントリー理由 (手法/感情タグ + メモ) を note に同梱 — 半年後の判定時に
+// 「自分のどの判断軸が効いたか」を published データだけで分解できるようにする。
+function _noteReasonSuffix(tags, memo) {
+  const t = (tags && tags.length) ? ' ' + tags.map(x => '#' + String(x)).join(' ') : '';
+  const m = memo ? '｜' + String(memo).slice(0, 60) : '';
+  return t + m;
+}
+
+// P5: 見送り記録 (質>件数 — 見送りも記録して習慣を維持。R対象外の別カウント)
+function getSkips() {
+  try { return JSON.parse(localStorage.getItem('tj_skips') || '[]'); } catch (e) { return []; }
+}
+
+function recordSkipWeek() {
+  const reason = prompt('今週は見送り — 理由 (任意・空欄OK)\n例: 条件に合う候補なし / 地合いが悪い / 多忙', '');
+  if (reason === null) return;  // キャンセル
+  const skips = getSkips();
+  skips.push({ date: new Date().toISOString().slice(0, 10), reason: reason.trim() || null });
+  localStorage.setItem('tj_skips', JSON.stringify(skips));
+  toast('🙅 見送りを記録しました (☁️公開で連携・週次リマインドも止まります)');
+}
+
+// P2: 👀 ショートリスト — 候補カードから「平日に指値ウォッチしてほしい銘柄」を選ぶ。
+// ☁️公開で shortlist.json として publish され、limit_watch (平日12:30/15:30) の監視対象になる。
+// 選定ではなく人間のウォッチ意思表示 (doctrine: 最終判断は人間)。
+function getShortlist() {
+  try { return JSON.parse(localStorage.getItem('tj_shortlist') || '[]'); } catch (e) { return []; }
+}
+
+function isShortlisted(code) {
+  return getShortlist().some(x => x.code === code);
+}
+
+function toggleShortlist(code) {
+  const cands = (window._briefData && window._briefData.candidates) || [];
+  const found = cands.find(c => c && c.code === code);
+  const name = (found && found.name) || code;
+  let sl = getShortlist();
+  if (sl.some(x => x.code === code)) {
+    sl = sl.filter(x => x.code !== code);
+    toast('解除: ' + name + ' をウォッチから外しました');
+  } else {
+    sl.push({ code: code, name: name });
+    toast('👀 ' + name + ' をウォッチに追加 (☁️公開で平日指値ウォッチ対象に)');
+  }
+  localStorage.setItem('tj_shortlist', JSON.stringify(sl));
+  const btn = document.getElementById('slbtn_' + code);
+  if (btn) {
+    const on = isShortlisted(code);
+    btn.textContent = on ? '✅ ウォッチ中' : '👀 ウォッチ';
+    btn.style.color = on ? 'var(--green)' : 'var(--t3)';
+    btn.style.borderColor = on ? 'var(--green)' : 'var(--border)';
+  }
+}
+
 function _buildHumanPaperTradesPayload() {
   const opens = [];
   const rounds = matchRoundTrips(T, opens);  // {code,type,buy_price,sell_price,shares,buy_date,sell_date}
@@ -2961,19 +3038,22 @@ function _buildHumanPaperTradesPayload() {
     entry_price: r.buy_price,
     exit_date: r.sell_date || null,
     exit_price: r.sell_price,
-    note: (r.type === 'margin' ? '信用' : '現物') + (r.shares ? ' ' + r.shares + '株' : ''),
+    note: (r.type === 'margin' ? '信用' : '現物') + (r.shares ? ' ' + r.shares + '株' : '')
+      + _noteReasonSuffix(r.buy_tags, r.buy_memo),
   })).concat(opens.map(o => ({
     code: code5(o.cd),
     entry_date: o.date || null,
     entry_price: o.price,
     exit_date: null,
     exit_price: null,
-    note: (o.tp === 'margin' ? '信用' : '現物') + (o.shares_remaining ? ' ' + o.shares_remaining + '株' : '') + ' 未決済',
+    note: (o.tp === 'margin' ? '信用' : '現物') + (o.shares_remaining ? ' ' + o.shares_remaining + '株' : '') + ' 未決済'
+      + _noteReasonSuffix(o.tags, o.memo),
   })));
   return {
     _generated_at: new Date().toISOString(),
-    _note: '人間紙トレ記録 (journal export)。forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。',
+    _note: '人間紙トレ記録 (journal export)。forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。skips=見送り週の記録 (R対象外・習慣維持)。',
     trades: trades,
+    skips: getSkips(),
   };
 }
 
@@ -3014,43 +3094,68 @@ function clearGhPat() {
             : '保存された PAT はありませんでした (入力欄もクリア済み)。');
 }
 
+// GitHub Contents API への 1 ファイル PUT (sha 取得 → PUT)。publish 系で共用。
+// BUG-1: sha 取得は no-store (キャッシュ由来の古い sha を避ける)。200=既存(sha必須)/
+//        404=新規(sha不要)/それ以外=一過性失敗の可能性 → sha 欠落のまま PUT すると既存ファイルが
+//        422 で失敗するので、中断して冪等リトライを促す。
+async function _ghPutJson(pat, filename, obj, message) {
+  const apiUrl = 'https://api.github.com/repos/hiroki300/trade-journal-data/contents/' + filename;
+  const headers = { 'Authorization': 'Bearer ' + pat, 'Accept': 'application/vnd.github+json' };
+  let sha;
+  const getR = await fetch(apiUrl + '?ref=main', { headers, cache: 'no-store' });
+  if (getR.status === 200) {
+    sha = (await getR.json()).sha;
+  } else if (getR.status !== 404) {
+    return { ok: false, status: getR.status, transient: true };
+  }
+  const putR = await fetch(apiUrl, {
+    method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: message,
+      content: _utf8ToBase64(JSON.stringify(obj, null, 2)),
+      sha: sha, branch: 'main',
+    }),
+  });
+  if (putR.status === 200 || putR.status === 201) return { ok: true, status: putR.status };
+  let detail = '';
+  try { detail = (await putR.text()).slice(0, 200); } catch (e) {}
+  return { ok: false, status: putR.status, detail: detail };
+}
+
 // ② 自動: trade-journal-data に直接 publish → forward_score が公開版を自動取得 (手置き不要)。
 //    PAT はこの端末のブラウザ(localStorage)に平文で保存。fine-grained・当該repo Contents 権限のみ・短期expiry推奨。
+//    P2/P5: 紙トレ (trades+skips) に加えて 👀ショートリスト (shortlist.json=平日 limit_watch の
+//    監視対象) も同じボタンで publish する (1ボタンで同期完結)。
 async function publishHumanPaperTrades() {
   const patEl = document.getElementById('hptGhPat');
   const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
   if (!pat) { alert('GitHub PAT を入力してください\n(fine-grained / trade-journal-data: Contents = Read and write)。'); return; }
   const payload = _buildHumanPaperTradesPayload();
-  if (!payload.trades.length) { alert('決済済みの取引がありません（保有中は対象外）。'); return; }
+  const hasShortlist = localStorage.getItem('tj_shortlist') !== null;
+  if (!payload.trades.length && !payload.skips.length && !hasShortlist) {
+    alert('公開するものがありません（取引・見送り記録・👀ウォッチのいずれも未登録）。'); return;
+  }
   localStorage.setItem('tj_ghpat', pat);  // 次回は空欄のまま再公開可
-  const apiUrl = 'https://api.github.com/repos/hiroki300/trade-journal-data/contents/human_paper_trades.json';
-  const headers = { 'Authorization': 'Bearer ' + pat, 'Accept': 'application/vnd.github+json' };
   try {
-    let sha;
-    // BUG-1: sha 取得は no-store (キャッシュ由来の古い sha を避ける)。200=既存(sha必須)/
-    //        404=新規(sha不要)/それ以外=一過性失敗の可能性 → sha 欠落のまま PUT すると既存ファイルが
-    //        422 で失敗するので、ここで中断し冪等リトライを促す。
-    const getR = await fetch(apiUrl + '?ref=main', { headers, cache: 'no-store' });
-    if (getR.status === 200) {
-      sha = (await getR.json()).sha;
-    } else if (getR.status !== 404) {
-      alert('公開中断: 既存ファイルの確認に失敗 (HTTP ' + getR.status + ')。時間をおいて再実行してください。');
+    const r1 = await _ghPutJson(pat, 'human_paper_trades.json', payload,
+      '📤 human_paper_trades update (' + payload.trades.length + '件+見送り' + payload.skips.length + ') [skip ci]');
+    if (!r1.ok) {
+      alert(r1.transient
+        ? '公開中断: 既存ファイルの確認に失敗 (HTTP ' + r1.status + ')。時間をおいて再実行してください。'
+        : '公開失敗 (HTTP ' + r1.status + ')。PATの権限/対象リポを確認してください。\n' + (r1.detail || ''));
       return;
     }
-    const putR = await fetch(apiUrl, {
-      method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: '📤 human_paper_trades update (' + payload.trades.length + '件) [skip ci]',
-        content: _utf8ToBase64(JSON.stringify(payload, null, 2)),
-        sha: sha, branch: 'main',
-      }),
-    });
-    if (putR.status === 200 || putR.status === 201) {
-      toast('☁️ 公開しました (' + payload.trades.length + '件)。次の日曜 forward_score が採点します');
-    } else {
-      const e = await putR.text();
-      alert('公開失敗 (HTTP ' + putR.status + ')。PATの権限/対象リポを確認してください。\n' + e.slice(0, 200));
+    let slMsg = '';
+    if (hasShortlist) {
+      const sl = getShortlist();
+      const r2 = await _ghPutJson(pat, 'shortlist.json', {
+        updated_at: new Date().toISOString(),
+        _note: '👀 平日 limit_watch の監視対象 (PWA 候補カードから選択)。選定ではなく人間のウォッチ意思表示。',
+        codes: sl,
+      }, '👀 shortlist update (' + sl.length + '銘柄) [skip ci]');
+      slMsg = r2.ok ? ' / 👀' + sl.length + '銘柄' : ' / ⚠️ウォッチ公開は失敗 (再実行を)';
     }
+    toast('☁️ 公開しました (' + payload.trades.length + '件+見送り' + payload.skips.length + slMsg + ')。次の日曜 forward_score が採点します');
   } catch (err) {
     alert('公開エラー: ' + (err && err.message ? err.message : err));
   }
@@ -3451,7 +3556,7 @@ function doTrade() {
     else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, execution_meta:exec_meta, yutai});
     sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, execution_meta:exec_meta, yutai}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, memo, execution_meta:exec_meta, yutai}); sv(KT,T);
     const driftHint = exec_meta && exec_meta.drift_entry_pct != null
       ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
       : '';
