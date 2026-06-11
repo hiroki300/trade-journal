@@ -1244,10 +1244,12 @@ function computeNetPnl(buy_price, sell_price, shares, tax_rate) {
   return { gross_pnl, buy_amount, sell_amount, fee_total, tax, net_pnl: gross_pnl - fee_total - tax };
 }
 
-function matchRoundTrips(trades) {
+function matchRoundTrips(trades, opensOut) {
   // FIFO で買い/売りをペアリング (部分売却対応)
   // code+type をキーにすることで現物と信用を独立してペアリング
-  const open_buys = {};  // "cd:type" → [{shares_remaining, price, date}]
+  // opensOut: 配列を渡すと未決済の残建玉 {cd,tp,price,date,shares_remaining} を push して返す
+  // (省略可・既存呼び出しは無影響。human_paper_trades export が未決済も記録するために使用)
+  const open_buys = {};  // "cd:type" → [{shares_remaining, price, date, cd, tp}]
   const rounds = [];
   for (const t of trades) {
     const cd = t.cd, a = t.a, sh = parseInt(t.sh || 0), p = parseFloat(t.p || 0), dt = t.dt || '';
@@ -1255,7 +1257,7 @@ function matchRoundTrips(trades) {
     const key = cd + ':' + tp;
     if (a === 'buy') {
       if (!open_buys[key]) open_buys[key] = [];
-      open_buys[key].push({ shares_remaining: sh, price: p, date: dt });
+      open_buys[key].push({ shares_remaining: sh, price: p, date: dt, cd: cd, tp: tp });
     } else if (a === 'sell') {
       let remaining = sh;
       const lots = open_buys[key] || [];
@@ -1277,6 +1279,13 @@ function matchRoundTrips(trades) {
         if (lot.shares_remaining <= 0) lots.shift();
       }
       if (lots.length === 0) delete open_buys[key];
+    }
+  }
+  if (Array.isArray(opensOut)) {
+    for (const key in open_buys) {
+      for (const lot of open_buys[key]) {
+        if (lot.shares_remaining > 0) opensOut.push(lot);
+      }
     }
   }
   return rounds;
@@ -2933,11 +2942,14 @@ function exportAllData() {
   toast(statusStr);
 }
 
-// forward検証用: 決済済の取引を human_paper_trades.json (backend forward_tracker 契約) に写像。
-// 既存 FIFO マッチャ matchRoundTrips を再利用 (buy→sell ペア)。R 計算は backend=ここは記録のみ。
-// 規律: 決済済 round-trip のみ。負けトレードを後から消さない (pre-register)。
+// forward検証用: 取引を human_paper_trades.json (backend forward_tracker 契約) に写像。
+// 既存 FIFO マッチャ matchRoundTrips を再利用 (buy→sell ペア + 未決済の残建玉)。
+// R 計算は backend=ここは記録のみ。規律: 負けトレードを後から消さない (pre-register)。
+// 未決済も exit null で含める — backend 契約上 exit null=採点対象外 (immature) だが、
+// 「今週エントリーを記録した」事実が paper_reminder から見える (偽リマインド防止)。
 function _buildHumanPaperTradesPayload() {
-  const rounds = matchRoundTrips(T);  // {code,type,buy_price,sell_price,shares,buy_date,sell_date}
+  const opens = [];
+  const rounds = matchRoundTrips(T, opens);  // {code,type,buy_price,sell_price,shares,buy_date,sell_date}
   // J-Quants 5桁コード化 (4桁→末尾0、130A→130A0)。
   const code5 = (cd) => {
     const s = String(cd || '').trim().toUpperCase();
@@ -2950,10 +2962,17 @@ function _buildHumanPaperTradesPayload() {
     exit_date: r.sell_date || null,
     exit_price: r.sell_price,
     note: (r.type === 'margin' ? '信用' : '現物') + (r.shares ? ' ' + r.shares + '株' : ''),
-  }));
+  })).concat(opens.map(o => ({
+    code: code5(o.cd),
+    entry_date: o.date || null,
+    entry_price: o.price,
+    exit_date: null,
+    exit_price: null,
+    note: (o.tp === 'margin' ? '信用' : '現物') + (o.shares_remaining ? ' ' + o.shares_remaining + '株' : '') + ' 未決済',
+  })));
   return {
     _generated_at: new Date().toISOString(),
-    _note: '人間紙トレ記録 (journal export)。forward_tracker が機械baseline と比較。決済済 round-trip のみ・R計算は backend。',
+    _note: '人間紙トレ記録 (journal export)。forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。',
     trades: trades,
   };
 }
