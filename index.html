@@ -229,6 +229,22 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </div>
 
 <div class="page" id="page-discover">
+  <div class="sec-lbl">🔎 気になる銘柄を調べる</div>
+  <div style="font-size:11px;color:var(--t3);margin:0 4px 6px;line-height:1.4">任意の銘柄のチャートと「調べる材料」。<b>買いシグナルではありません</b>（最終判断は一次情報で）。</div>
+  <div style="display:flex;gap:6px;margin-bottom:6px">
+    <input class="fi" id="exCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:90px;flex:none;margin-bottom:0">
+    <input class="fi" id="exName" type="text" placeholder="銘柄名 (任意・AI精度UP)" style="flex:1;margin-bottom:0">
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+    <button onclick="examineChart()" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;padding:9px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート</button>
+    <button onclick="examineAI()" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;padding:9px;cursor:pointer;box-shadow:var(--shadow)">🧠 AI定性メモ</button>
+  </div>
+  <div id="exLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
+  <div id="exChartWrap" style="display:none;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>
+  <div id="exAI" style="display:none;margin-bottom:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text)"></div>
+  <div style="font-size:10px;color:var(--t3);margin:0 4px 14px;line-height:1.4">※ 需給（出来高・信用倍率）は売買予測に使えないと自前バックテストで確認済み（2026-06-13）。事実は📊株探で確認し、判断は決算・IR等の一次情報で。</div>
+  <div style="border-top:1px solid var(--border);margin-bottom:12px"></div>
+
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span class="mr-gen" style="opacity:.6"></span>
     <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
   </div>
@@ -3796,6 +3812,68 @@ async function askAISodanForCandidate(code4, name) {
   }
 }
 
+// ============================================================
+//  🔎 気になる銘柄を調べる (任意銘柄・client-side・需給は事実表示)
+//  チャート=TradingView / AI=定性メモ(調べる材料・売買助言しない) / 需給=株探リンク
+// ============================================================
+function _exParseCode() {
+  let c = (document.getElementById('exCode').value || '').trim().split('.')[0].replace(/[^0-9A-Za-z]/g, '');
+  if (c.length === 5 && c.endsWith('0')) c = c.slice(0, 4);   // J-Quants 5桁 → 4桁
+  return c.slice(0, 4);
+}
+function _exLinks(code4) {
+  const el = document.getElementById('exLinks');
+  if (!el) return;
+  const mk = (href, label) => '<a href="' + href + '" target="_blank" rel="noopener noreferrer" ' +
+    'style="flex:1;min-width:92px;text-align:center;background:var(--s2);border:1px solid var(--border);' +
+    'border-radius:6px;padding:6px;font-size:11px;color:var(--text);text-decoration:none">' + label + '</a>';
+  el.innerHTML =
+    mk('https://kabutan.jp/stock/?code=' + code4, '📊 株探(需給/信用)') +
+    mk('https://www.buffett-code.com/company/' + code4, '📈 決算/業績') +
+    mk('https://kabutan.jp/stock/news?code=' + code4, '📰 ニュース');
+}
+function examineChart() {
+  const code4 = _exParseCode();
+  if (!/^[0-9A-Za-z]{4}$/.test(code4)) { toast('⚠️ 4桁の証券コードを入れてください'); return; }
+  _exLinks(code4);
+  const wrap = document.getElementById('exChartWrap');
+  wrap.style.display = 'block';
+  wrap.innerHTML = '<div id="exchart-' + code4 + '"></div>';   // toggleChart の描画先
+  toggleChart(code4, 'exchart-');
+}
+async function examineAI() {
+  const code4 = _exParseCode();
+  if (!/^[0-9A-Za-z]{4}$/.test(code4)) { toast('⚠️ 4桁の証券コードを入れてください'); return; }
+  const name = (document.getElementById('exName').value || '').trim() || code4;
+  _exLinks(code4);
+  const panel = document.getElementById('exAI');
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:6px">' +
+    '<div class="spin"></div><span>🧠 事業内容と一次情報の見どころを調べています… (約10〜15秒)</span></div>';
+  const prompt = buildPersonaPrefix() +
+    'あなたは投資の「調査」アシスタントです。売買の助言はしません。Google検索で「' + name + ' 事業内容」「' + name + ' 直近 決算」「' + name + ' 最新 ニュース」を調べ、最新情報をもとに【自分で判断するための材料】を整理してください。\n\n' +
+    '厳守する制約:\n' +
+    '1. 売買推奨を書かない（「買うべき/見送るべき」「推奨買値」等は禁止）。最終判断は人間が一次情報で行う。\n' +
+    '2. 需給（出来高・信用倍率・空売り）を「買い手優位」等の予測材料にしない。事実のみ述べ、解釈は人間に委ねる（自前の10年バックテストで需給に売買予測力なしと確認済み）。\n' +
+    '3. 数値を創作しない。検索で裏が取れない数値は「未確認」と書く。\n' +
+    '4. HTMLタグは使わず、マークダウン（**太字**）と箇条書きで読みやすく。\n\n' +
+    '【対象】' + code4 + ' ' + name + '\n\n' +
+    '【出力構成】\n' +
+    '### ■ どんな会社か\n（主力事業・強み・テーマ性を平易に）\n\n' +
+    '### ■ 直近の決算と次回決算予定\n（前年比の業績、次回決算発表日と決算ギャップへの注意。数値は出典の取れる範囲で）\n\n' +
+    '### ■ チャートで自分が確認すべき点\n（移動平均線との位置、直近高値・安値、出来高の変化など「どこを見るか」。方向の予測はしない）\n\n' +
+    '### ■ 一次情報で確認すべきこと\n（決算短信・IR・適時開示のどこを読むか、主なリスク要因）\n\n' +
+    '### ■ この銘柄を見るときの注意点\n（決算またぎ・流動性・テーマの賞味期限など、事実ベースの注意）';
+  try {
+    const res = await callGemini(prompt, null, null, 5000);
+    panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">🧠 AI定性メモ (' + name + ')</div>' +
+      '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">調べるための材料です。買い／売りの助言ではありません。</div>' +
+      '<div class="ai-sodan-content" style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
+      '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'exAI\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
+  } catch (e) {
+    panel.innerHTML = '<div style="color:var(--red);padding:10px">⚠️ 取得エラー: ' + e.message + '（AI設定で Gemini キーを確認してください）</div>';
+  }
+}
 async function askAISodanForHolding(cd, nm) {
   const panel = document.getElementById('ai-' + cd);
   if (!panel) return;
