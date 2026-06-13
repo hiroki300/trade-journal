@@ -314,13 +314,14 @@ select.fi{appearance:none;-webkit-appearance:none;}
     </div>
     <div class="frow" style="margin-top:8px">
       <div><label class="fl">株数</label><input class="fi" id="tsh" type="number" inputmode="numeric" placeholder="100" style="margin-bottom:0"></div>
-      <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0"></div>
+      <div><label class="fl">約定価格（円）</label><input class="fi" id="tp" type="number" inputmode="decimal" placeholder="2850" style="margin-bottom:0" oninput="suggestStop()"></div>
     </div>
     <div id="buyEx" style="margin-top:8px">
       <div class="frow">
         <div><label class="fl">損切りライン</label><input class="fi" id="tsl" type="number" inputmode="decimal" placeholder="2420" style="margin-bottom:0"></div>
         <div><label class="fl">利確目標</label><input class="fi" id="ttgt" type="number" inputmode="decimal" placeholder="4130" style="margin-bottom:0"></div>
       </div>
+      <div id="stopHint" style="margin-top:6px"></div>
       <div class="frow" style="margin-top:8px">
       <div><label class="fl">買付日</label><input class="fi" id="tdt" type="date" style="margin-bottom:0"></div>
       <div><label class="fl">取引区分</label>
@@ -3511,6 +3512,32 @@ async function doChat() {
 }
 
 // 売買記録
+// 損切り目安: 約定価格から doctrine の -8%(推奨)/-5%/-3% を提示。
+// タップで損切り＋利確(2R=損切り幅の2倍上)を自動入力。予測ではなくリスク管理の規律補助。
+function suggestStop() {
+  const p = parseFloat(document.getElementById('tp').value);
+  const el = document.getElementById('stopHint');
+  if (!el) return;
+  if (!p || p <= 0) { el.innerHTML = ''; return; }
+  const chips = [[8, '推奨'], [5, ''], [3, '']].map(function(o) {
+    const pc = o[0], sl = Math.round(p * (1 - pc / 100) * 10) / 10;
+    const tgt = Math.round((p + 2 * (p - sl)) * 10) / 10;  // RR 1:2
+    return '<button type="button" onclick="applyStop(' + sl + ',' + tgt + ')" ' +
+      'style="flex:1;background:var(--s2);border:1px solid var(--border);border-radius:6px;' +
+      'padding:6px 4px;font-size:11px;color:var(--text);cursor:pointer;line-height:1.35">' +
+      '<b>-' + pc + '%</b>' + (o[1] ? ' ' + o[1] : '') +
+      '<br><span style="font-family:var(--mono);font-size:12px">' + sl.toLocaleString() + '円</span></button>';
+  }).join('');
+  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:3px">' +
+    '🛡️ 損切り目安（タップで損切り＋利確を自動入力・利確は2R）</div>' +
+    '<div style="display:flex;gap:5px">' + chips + '</div>';
+}
+function applyStop(sl, tgt) {
+  document.getElementById('tsl').value = sl;
+  const tgtEl = document.getElementById('ttgt');
+  if (!tgtEl.value) tgtEl.value = tgt;
+  toast('🛡️ 損切り ' + sl.toLocaleString() + '円 / 利確 ' + tgt.toLocaleString() + '円');
+}
 function onAct() {
   const b = document.getElementById('ta').value === 'buy';
   document.getElementById('buyEx').style.display = b ? '' : 'none';
