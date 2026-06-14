@@ -2234,7 +2234,7 @@ function _renderCandidateCard(s, pickupMap, cat) {
 
   // ヘッダー (銘柄名・コード・rank・各種フラグ)
   const flags = [];
-  if (s.squeeze_candidate) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🚀 踏み上げ候補</span>');
+  if (s.squeeze_candidate) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--t2);font-size:9px;padding:2px 6px;border-radius:4px">🚀 売残増+出来高</span>');
   if (s.vol_ratio && s.vol_ratio >= 2.0) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">🔥🔥 出来高×' + s.vol_ratio + '</span>');
   else if (s.vol_ratio && s.vol_ratio >= 1.5) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🔥 出来高×' + s.vol_ratio + '</span>');
   if (pickup) flags.push('<span style="background:rgba(59,130,246,.15);color:var(--acc);font-size:9px;padding:2px 6px;border-radius:4px">' + pickup.label + ' tier ' + pickup.tier + '</span>');
@@ -2267,11 +2267,11 @@ function _renderCandidateCard(s, pickupMap, cat) {
       '</div>';
   }).join('');
 
-  // 需給バッジ (mr_trend, short_balance 等)
+  // 需給バッジ = 事実表示 (検証Dで売買予測力なしと確認 → 改善/悪化の予測語は付けない)
   const supplyTags = [];
   if (s.mr_trend_pct != null) {
-    if (s.mr_trend_pct <= -15) supplyTags.push('<span style="font-size:9px;color:var(--green)">✨信用改善 ' + s.mr_trend_pct + '%</span>');
-    else if (s.mr_trend_pct >= 25) supplyTags.push('<span style="font-size:9px;color:var(--red)">⚠️信用悪化 +' + s.mr_trend_pct + '%</span>');
+    if (s.mr_trend_pct <= -15) supplyTags.push('<span style="font-size:9px;color:var(--t2)">✨信用倍率低下 ' + s.mr_trend_pct + '%</span>');
+    else if (s.mr_trend_pct >= 25) supplyTags.push('<span style="font-size:9px;color:var(--t2)">⚠️信用倍率上昇 +' + s.mr_trend_pct + '%</span>');
   }
   if (s.short_balance_pct != null && s.short_balance_pct >= 1.0) {
     supplyTags.push('<span style="font-size:9px;color:var(--yellow)">📊空売残 ' + s.short_balance_pct + '%</span>');
@@ -2725,7 +2725,7 @@ async function analyzeHolding(cd) {
 
   const prompt =
     buildPersonaPrefix() +
-    '⚠️ 重要: あなたの役割は、保有銘柄について、本日の最新値動き（チャート）と直近の需給（信用倍率・空売り残高）、および企業の決算発表などの状況から「いま売るべきか、継続か、買い増しか」の執行判断を下すことです。\n' +
+    '⚠️ 重要: あなたの役割は、保有銘柄について、本日の値動き（チャート）と決算発表などの状況をもとに、doctrine の出口規律（-8%損切り / +2R利確 / 時間切れ撤退）に照らした「継続 / 利確 / 損切り」の目安を整理することです。需給（信用倍率・空売り残高）は事実として参照してよいが売買予測の根拠にはしない（自前の10年検証で需給に予測力なしと確認済み）。ナンピン（買い増し）は短期回転では損失拡大なので勧めない。売買は断言せず、最終判断は人間が一次情報で行う前提です。\n' +
     '回答にはHTMLタグ（<h3>, <ul>, <li>, <br>など）を絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用してください。\n' +
     '必ず Google 検索を実行して「' + h.nm + ' 株価 本日」「' + h.nm + ' 直近 決算」などで **当日 (' + ymdJST() + ') の場中の最新の値動き・決算状況** を取得して判断してください。\n\n' +
     '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) に基づき、前置きなしで以下の項目のみ簡潔に答えてください。結論ファーストで回答してください。\n\n' +
