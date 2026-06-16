@@ -240,7 +240,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <button onclick="examineAI()" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;padding:9px;cursor:pointer;box-shadow:var(--shadow)">🧠 AI定性メモ</button>
   </div>
   <div id="exLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
-  <div id="exChartWrap" style="display:none;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>
   <div id="exAI" style="display:none;margin-bottom:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text)"></div>
   <div style="font-size:10px;color:var(--t3);margin:0 4px 14px;line-height:1.4">※ 需給（出来高・信用倍率）は売買予測に使えないと自前バックテストで確認済み（2026-06-13）。事実は📊株探で確認し、判断は決算・IR等の一次情報で。</div>
   <div style="border-top:1px solid var(--border);margin-bottom:12px"></div>
@@ -741,10 +740,11 @@ async function _fetchJSON(name) {
   } catch { return null; }
 }
 
-// 朝会レポートの TTL キャッシュ (タブ切替時に毎回 GitHub raw を叩かないため)
+// 朝会レポートの「当日」キャッシュ。朝に1回取得したら、その日は再取得せず即表示
+// (タブ切替・PWA 再起動でも GitHub raw を叩かない)。日付が変わったら翌朝1回だけ取得。
+// 日中の更新 (限値ウォッチ 12:30/15:30 等) を取りに行きたいときは「🔄 再取得」で強制更新。
 let _isReportsFetched = false;
-let _reportsFetchedAt = 0;
-const REPORTS_TTL_MS = 12 * 60 * 60 * 1000;  // 12時間でTTL切れ (朝夕2回更新の想定)
+let _reportsCacheDate = '';   // この値が TODAY と一致する間は再取得しない
 
 async function loadMorningReports(forceRefresh = false) {
   const now = Date.now();
@@ -754,8 +754,8 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, fetchedAt } = cached;
-        _reportsFetchedAt = fetchedAt || 0;
+        const { macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, date } = cached;
+        _reportsCacheDate = date || '';
         
         window._synthData = synth;
         window._pickupData = pickup;
@@ -792,8 +792,8 @@ async function loadMorningReports(forceRefresh = false) {
     }
   }
 
-  if (!forceRefresh && _isReportsFetched && (now - _reportsFetchedAt) < REPORTS_TTL_MS) {
-    // キャッシュ有効: 残金フィルタの再描画とローカルサマリのみ更新 (T 変動を即反映)
+  if (!forceRefresh && _isReportsFetched && _reportsCacheDate === TODAY) {
+    // 当日キャッシュ有効: ネットを叩かず、残金フィルタの再描画とローカルサマリのみ更新
     renderCandidatesFromCache();
     renderCandidateBriefFromCache(); // 井村流候補キャッシュ描画
     renderForwardResultsFromCache();
@@ -833,7 +833,7 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
         macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman,
-        fetchedAt: now
+        fetchedAt: now, date: TODAY
       }));
     } catch (e) {
       console.warn('Failed to save reports cache to localStorage:', e);
@@ -857,7 +857,7 @@ async function loadMorningReports(forceRefresh = false) {
     const genStr = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
     document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
     _isReportsFetched = true;
-    _reportsFetchedAt = now;
+    _reportsCacheDate = TODAY;
   } catch (e) {
     console.error('loadMorningReports failed:', e);
     if (!_isReportsFetched) {
@@ -2300,67 +2300,21 @@ function _renderCandidateCard(s, pickupMap, cat) {
 }
 
 // ============================================================
-//  Phase 4.2: TradingView チャート表示 (iframe widget)
+//  チャート: 確実に正しい日本株チャートを開く
+//  ※ TradingView 無料埋め込みは東証(TSE)株のデータを表示できず Apple(既定銘柄)に
+//    化けてしまうため、ローソク足+出来高+需給+信用が確実に出る kabutan を新タブで開く。
+//    (アプリ内表示にしたい場合は J-Quants バックエンド経由の描画を別途追加可能)
+//  prefix 引数は旧 in-app 展開との呼び出し互換のため残置 (未使用)。
 // ============================================================
 function toggleChart(code4, prefix) {
-  // prefix 引数 (省略時は 'chart-') で保有 (chart-hold-) と候補 (chart-) の DOM 衝突を回避
-  prefix = prefix || 'chart-';
-  const el = document.getElementById(prefix + code4);
-  if (!el) return;
-  if (el.style.display === 'block') {
-    el.style.display = 'none';
-    el.innerHTML = '';   // unload widget to save resources
-    return;
-  }
-  // 安全に文字列にキャストし、トリムと小数点以下を除去（数値型・実数型対策）
   let strCode = String(code4).trim().split('.')[0];
-  // J-Quants の 5 桁コード (例: "30480", "213A0") → 末尾の "0" を除去して TradingView 用 4 桁に
+  // J-Quants 5桁コード (例 "30480"/"213A0") → 末尾"0"除去で4桁に
   let symbol = (strCode.length === 5 && strCode.endsWith('0')) ? strCode.slice(0, 4) : strCode;
-
-  // 4桁の英数字（例: 7203 や 247A）であるかチェック
-  const isValidSymbol = /^[0-9a-zA-Z]{4}$/.test(symbol);
-  if (!isValidSymbol) {
-    el.style.display = 'block';
-    el.innerHTML = '<div style="background:var(--s2);padding:10px;font-size:11px;color:var(--red);text-align:center">⚠️ 4桁の有効な証券コードが確認できないため、チャートを表示できません。</div>';
+  if (!/^[0-9a-zA-Z]{4}$/.test(symbol)) {
+    toast('⚠️ 4桁の有効な証券コードが確認できないため、チャートを開けません');
     return;
   }
-
-  el.style.display = 'block';
-  // ヘッダー (×ボタン) は innerHTML で OK
-  el.innerHTML =
-    '<div style="background:var(--s2);padding:6px 10px;font-size:11px;color:var(--t2);display:flex;justify-content:space-between;align-items:center">' +
-    '<span>📈 TradingView ' + symbol + ' (日足)</span>' +
-    '<button onclick="toggleChart(\'' + code4 + '\',\'' + prefix + '\')" style="background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer">×</button>' +
-    '</div>';
-
-  // ウィジェットコンテナは DOM API で生成 (script を実行させるため必須)
-  const container = document.createElement('div');
-  container.className = 'tradingview-widget-container';
-  container.style.height = '350px';
-  const widgetDiv = document.createElement('div');
-  widgetDiv.className = 'tradingview-widget-container__widget';
-  widgetDiv.style.height = '100%';
-  container.appendChild(widgetDiv);
-
-  const script = document.createElement('script');
-  script.type = 'text/javascript';
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.async = true;
-  script.text = JSON.stringify({
-    symbol: 'TSE:' + symbol,
-    interval: 'D',
-    timezone: 'Asia/Tokyo',
-    theme: 'light',
-    style: '1',
-    locale: 'ja',
-    width: '100%',
-    height: 350,
-    hide_side_toolbar: true,
-    allow_symbol_change: false,
-    save_image: false
-  });
-  container.appendChild(script);
-  el.appendChild(container);
+  window.open('https://kabutan.jp/stock/chart?code=' + symbol, '_blank', 'noopener');
 }
 
 async function analyzeCandidate(code4) {
@@ -3837,10 +3791,7 @@ function examineChart() {
   const code4 = _exParseCode();
   if (!/^[0-9A-Za-z]{4}$/.test(code4)) { toast('⚠️ 4桁の証券コードを入れてください'); return; }
   _exLinks(code4);
-  const wrap = document.getElementById('exChartWrap');
-  wrap.style.display = 'block';
-  wrap.innerHTML = '<div id="exchart-' + code4 + '"></div>';   // toggleChart の描画先
-  toggleChart(code4, 'exchart-');
+  toggleChart(code4);   // kabutan のチャートを新タブで開く (正しい日本株チャートが確実に出る)
 }
 async function examineAI() {
   const code4 = _exParseCode();
