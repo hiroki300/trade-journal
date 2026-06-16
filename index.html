@@ -230,18 +230,19 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
 <div class="page" id="page-discover">
   <div class="sec-lbl">🔎 気になる銘柄を調べる</div>
-  <div style="font-size:11px;color:var(--t3);margin:0 4px 6px;line-height:1.4">任意の銘柄のチャートと「調べる材料」。<b>買いシグナルではありません</b>（最終判断は一次情報で）。</div>
+  <div style="font-size:11px;color:var(--t3);margin:0 4px 6px;line-height:1.4">「チャートの今の形」を文章で確認してから、株探/みんかぶで実際のチャートを開けます。<b>買いシグナルではありません</b>（最終判断は一次情報で）。</div>
   <div style="display:flex;gap:6px;margin-bottom:6px">
     <input class="fi" id="exCode" type="text" inputmode="numeric" placeholder="コード" maxlength="5" style="width:90px;flex:none;margin-bottom:0">
     <input class="fi" id="exName" type="text" placeholder="銘柄名 (任意・AI精度UP)" style="flex:1;margin-bottom:0">
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
-    <button onclick="examineChart()" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;padding:9px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート</button>
+    <button onclick="examineChartAnalysis()" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;padding:9px;cursor:pointer;box-shadow:var(--shadow)">📊 チャート分析</button>
     <button onclick="examineAI()" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:13px;font-weight:700;padding:9px;cursor:pointer;box-shadow:var(--shadow)">🧠 AI定性メモ</button>
   </div>
   <div id="exLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
+  <div id="exChart" style="display:none;margin-bottom:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text)"></div>
   <div id="exAI" style="display:none;margin-bottom:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text)"></div>
-  <div style="font-size:10px;color:var(--t3);margin:0 4px 14px;line-height:1.4">※ 需給（出来高・信用倍率）は売買予測に使えないと自前バックテストで確認済み（2026-06-13）。事実は📊株探で確認し、判断は決算・IR等の一次情報で。</div>
+  <div style="font-size:10px;color:var(--t3);margin:0 4px 14px;line-height:1.4">※ チャート分析は「今の形」の説明です。ゴールデンクロス等のシグナルは自前の10年検証で予測力が確認できていないため、売買判断ではなく形の把握に使い、最終判断は決算・IR等の一次情報で。</div>
   <div style="border-top:1px solid var(--border);margin-bottom:12px"></div>
 
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span class="mr-gen" style="opacity:.6"></span>
@@ -3784,14 +3785,51 @@ function _exLinks(code4) {
     'border-radius:6px;padding:6px;font-size:11px;color:var(--text);text-decoration:none">' + label + '</a>';
   el.innerHTML =
     mk('https://kabutan.jp/stock/?code=' + code4, '📊 株探(需給/信用)') +
-    mk('https://www.buffett-code.com/company/' + code4, '📈 決算/業績') +
+    mk('https://minkabu.jp/stock/' + code4, '📈 みんかぶ(チャート)') +
+    mk('https://www.buffett-code.com/company/' + code4, '🧾 決算/業績') +
     mk('https://kabutan.jp/stock/news?code=' + code4, '📰 ニュース');
 }
-function examineChart() {
+// 📊 チャート分析: いまのチャートの「形」(トレンド/移動平均/ゴールデンクロス/出来高/支持抵抗)
+// を AI が事実として要約 → 納得したら株探/みんかぶで実チャートを開くボタンを提示。
+// シグナルは予測ではない (検証Dで予測力なし) ことを明記し、売買助言はしない。
+async function examineChartAnalysis() {
   const code4 = _exParseCode();
   if (!/^[0-9A-Za-z]{4}$/.test(code4)) { toast('⚠️ 4桁の証券コードを入れてください'); return; }
+  const name = (document.getElementById('exName').value || '').trim() || code4;
   _exLinks(code4);
-  toggleChart(code4);   // kabutan のチャートを新タブで開く (正しい日本株チャートが確実に出る)
+  const panel = document.getElementById('exChart');
+  const chartBtns =
+    '<div style="font-size:11px;color:var(--t3);margin:10px 0 5px">納得したらチャートを開く ↓</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+    '<a href="https://kabutan.jp/stock/chart?code=' + code4 + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;text-align:center;text-decoration:none">📈 株探で見る</a>' +
+    '<a href="https://minkabu.jp/stock/' + code4 + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;text-align:center;text-decoration:none">📊 みんかぶで見る</a>' +
+    '</div>';
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:6px">' +
+    '<div class="spin"></div><span>📊 チャートの形（トレンド・移動平均・出来高）を調べています… (約10〜15秒)</span></div>';
+  const prompt = buildPersonaPrefix() +
+    'あなたはチャートの「形」を説明する調査アシスタントです。売買の助言はしません。Google検索で「' + name + ' 株価 チャート テクニカル」「' + name + ' 移動平均 ゴールデンクロス デッドクロス」「' + name + ' 株価 トレンド 出来高」などを調べ、いまのチャートの形を事実として簡潔に説明してください。\n\n' +
+    '【含める観点】(分かる範囲で・数値は出典の取れる範囲で)\n' +
+    '- トレンド: 上昇/下降/横ばい、25日移動平均線との位置関係\n' +
+    '- 移動平均: 直近で5日線と25日線のゴールデンクロス/デッドクロスが出ているか\n' +
+    '- 支持線/抵抗線: 上値メド・下値メドのおおよその価格\n' +
+    '- 出来高: 増えているか/減っているか\n\n' +
+    '【厳守】\n' +
+    '1. 「買い/売り/買うべき/狙い目」等の売買助言・予測は書かない。形の説明だけ。\n' +
+    '2. ゴールデンクロス等は「そういう形が出ている」という事実として書き、「だから上がる/下がる」とは書かない（こうしたシグナルは自前の10年検証で予測力が確認できていないため）。\n' +
+    '3. 数値を創作しない。確認できないものは「未確認」と書く。\n' +
+    '4. HTMLタグ禁止。マークダウン（**太字**）と箇条書きで5〜8行程度に簡潔に。\n\n' +
+    '【対象】' + code4 + ' ' + name;
+  try {
+    const res = await callGemini(prompt, null, null, 4000);
+    panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">📊 チャートの状態 (' + name + ')</div>' +
+      '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">「今の形」の説明です。シグナルは予測ではありません（最終判断は一次情報で）。</div>' +
+      '<div style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
+      chartBtns +
+      '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'exChart\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
+  } catch (e) {
+    panel.innerHTML = '<div style="color:var(--red);padding:10px 6px">⚠️ AI分析の取得に失敗しました: ' + e.message + '（AI設定で Gemini キーを確認）</div>' + chartBtns;
+  }
 }
 async function examineAI() {
   const code4 = _exParseCode();
