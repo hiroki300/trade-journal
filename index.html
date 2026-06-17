@@ -3461,8 +3461,10 @@ async function doChat() {
 
   try {
     const pf = pfS(); // 安全化されたポートフォリオ取得
-    const gemSys = buildPersonaPrefix() + 'Google検索を用いて対象企業の【事業内容】や【直近の決算結果】などの最新情報を確認しながら回答してください。回答にはHTMLタグ（<h3>, <ul>, <li>, <br>など）を絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用してください。現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\nポートフォリオ: ' + pf;
-    const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\n回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウンのみを使用してください。率直・具体的にアドバイスしてください。';
+    // 検証D準拠の方針: 需給/テクニカルは事実扱い・予測断定に使わない (会話の有用性は維持)。
+    const disc = '\n【方針】需給・テクニカル指標(信用倍率・出来高・移動平均・ゴールデンクロス等)は「事実」として扱い、「だから上がる/下がる」という断定的な予測の根拠にはしないでください(自前の10年検証で売買予測力が確認できていないため)。買い/売りの最終判断は人間が一次情報で行います。テーマ・地合い・事業内容の調査や、リスク管理(損切り・ロット)の助言は歓迎します。';
+    const gemSys = buildPersonaPrefix() + 'Google検索を用いて対象企業の【事業内容】や【直近の決算結果】などの最新情報を確認しながら回答してください。回答にはHTMLタグ（<h3>, <ul>, <li>, <br>など）を絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用してください。現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\nポートフォリオ: ' + pf + disc;
+    const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\n回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウンのみを使用してください。率直・具体的にアドバイスしてください。' + disc;
 
     if (chatMode==='g') {
       gemHist.push({role:'user',parts:[{text:sendTxt}]});
