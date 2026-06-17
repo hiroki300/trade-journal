@@ -2998,34 +2998,44 @@ function toggleShortlist(code) {
 }
 
 function _buildHumanPaperTradesPayload() {
-  const opens = [];
-  const rounds = matchRoundTrips(T, opens);  // {code,type,buy_price,sell_price,shares,buy_date,sell_date}
+  const rounds = matchRoundTrips(T);  // 決済済み round-trips (R履歴用)。未決済は H から作る
   // J-Quants 5桁コード化 (4桁→末尾0、130A→130A0)。
   const code5 = (cd) => {
     const s = String(cd || '').trim().toUpperCase();
     return (s.length === 4 && /^[0-9]/.test(s)) ? s + '0' : s;
   };
-  const trades = rounds.map(r => ({
+  // 決済済み: 異常データ (価格<=0 / 取得・決済日欠落 / 決済日<取得日) を除外して
+  // R計測の汚染を防ぐ (過去の入力ミス: 価格0・年が2014・決済が取得より前 等)。
+  const closed = rounds.filter(r =>
+    r.buy_price > 0 && r.sell_price > 0 &&
+    r.buy_date && r.sell_date && r.sell_date >= r.buy_date
+  ).map(r => ({
     code: code5(r.code),
-    entry_date: r.buy_date || null,
+    entry_date: r.buy_date,
     entry_price: r.buy_price,
-    exit_date: r.sell_date || null,
+    exit_date: r.sell_date,
     exit_price: r.sell_price,
     note: (r.type === 'margin' ? '信用' : '現物') + (r.shares ? ' ' + r.shares + '株' : '')
       + _noteReasonSuffix(r.buy_tags, r.buy_memo),
-  })).concat(opens.map(o => ({
-    code: code5(o.cd),
-    entry_date: o.date || null,
-    entry_price: o.price,
+  }));
+  // 未決済 = 現在の保有 (H タブ) = ユーザーが実際に持っている建玉そのもの。
+  // 取引ログの FIFO 残差ではなく H を使うことで、売却済み/入力ミスの「幽霊建玉」を排除。
+  // (優待目的=AI分析対象外 と 取得単価不明/0 は除外)
+  const open = (Array.isArray(H) ? H : []).filter(h =>
+    h && h.cd && h.bp > 0 && !h.yutai
+  ).map(h => ({
+    code: code5(h.cd),
+    entry_date: h.dt || null,
+    entry_price: h.bp,
     exit_date: null,
     exit_price: null,
-    note: (o.tp === 'margin' ? '信用' : '現物') + (o.shares_remaining ? ' ' + o.shares_remaining + '株' : '') + ' 未決済'
-      + _noteReasonSuffix(o.tags, o.memo),
-  })));
+    note: ((h.type === 'margin') ? '信用' : '現物') + (h.sh ? ' ' + h.sh + '株' : '') + ' 未決済'
+      + _noteReasonSuffix(h.tags, h.memo),
+  }));
   return {
     _generated_at: new Date().toISOString(),
-    _note: '人間紙トレ記録 (journal export)。forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。skips=見送り週の記録 (R対象外・習慣維持)。',
-    trades: trades,
+    _note: '人間紙トレ記録 (journal export)。決済済=取引ログ FIFO(異常値除外)、未決済=保有タブ。forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。skips=見送り週の記録 (R対象外・習慣維持)。',
+    trades: closed.concat(open),
     skips: getSkips(),
   };
 }
