@@ -255,6 +255,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="sec-lbl">📋 Deep Insight 全候補 (tier 別)</div>
   <div id="ddisummary" style="margin-bottom:14px">読み込み中…</div>
 
+  <div class="sec-lbl">📉 押し目×決算 <span id="pullbackCount"></span></div>
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">「60日高値から浅く押した ＋ 上昇基調は維持 ＋ 直近決算が増収増益」を満たす銘柄の機械抽出です。<b>買いシグナルではありません</b>（エッジ未検証・最終判断は決算短信等の一次情報で）。</div>
+  <div id="dpullback" style="margin-bottom:14px">読み込み中…</div>
+
   <div class="sec-lbl">🔎 井村流 候補 <span id="candBriefCount"></span></div>
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">※ 需給（信用残・空売残）は週次更新のため、数日程度のタイムラグがあります。</div>
   <div id="dcandbriefs" style="margin-bottom:14px">読み込み中…</div>
@@ -755,9 +759,9 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, date } = cached;
+        const { macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, pullback, date } = cached;
         _reportsCacheDate = date || '';
-        
+
         window._synthData = synth;
         window._pickupData = pickup;
         window._watchlistData = watch;
@@ -766,13 +770,15 @@ async function loadMorningReports(forceRefresh = false) {
         window._briefData = brief;
         window._forwardData = forward;
         window._forwardHumanData = forwardHuman;
-        
+        window._pullbackData = pullback;
+
         renderMacro(macro);
         renderPickup(pickup);
         renderDISummary(synth);
         renderEarnings(earn);
         renderThemes(themes);
         renderCandidates(watch, pickup);
+        renderPullback(pullback);
         renderCandidateBrief(brief);
         renderForwardResults(forward);
         renderForwardHumanCompare(forwardHuman);
@@ -796,6 +802,7 @@ async function loadMorningReports(forceRefresh = false) {
   if (!forceRefresh && _isReportsFetched && _reportsCacheDate === TODAY) {
     // 当日キャッシュ有効: ネットを叩かず、残金フィルタの再描画とローカルサマリのみ更新
     renderCandidatesFromCache();
+    renderPullbackFromCache();       // 押し目×決算 キャッシュ描画
     renderCandidateBriefFromCache(); // 井村流候補キャッシュ描画
     renderForwardResultsFromCache();
     renderForwardHumanCompareFromCache();
@@ -807,7 +814,7 @@ async function loadMorningReports(forceRefresh = false) {
     return;
   }
   try {
-    const [macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman] = await Promise.all([
+    const [macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, pullback] = await Promise.all([
       _fetchJSON('macro_state.json'),
       _fetchJSON('pickup_stocks.json'),
       _fetchJSON('earnings_calendar.json'),
@@ -818,8 +825,9 @@ async function loadMorningReports(forceRefresh = false) {
       _fetchJSON('candidate_brief.json'),
       _fetchJSON('forward_results.json'),
       _fetchJSON('forward_human_compare.json'),
+      _fetchJSON('pullback_candidates.json'),
     ]);
-    
+
     // window へのキャッシュ
     window._synthData = synth;
     window._pickupData = pickup;
@@ -829,11 +837,12 @@ async function loadMorningReports(forceRefresh = false) {
     window._briefData = brief;  // 井村流候補のキャッシュ
     window._forwardData = forward;
     window._forwardHumanData = forwardHuman;
-    
+    window._pullbackData = pullback;  // 押し目×決算レーンのキャッシュ
+
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman,
+        macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, pullback,
         fetchedAt: now, date: TODAY
       }));
     } catch (e) {
@@ -846,6 +855,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderEarnings(earn);
     renderThemes(themes);
     renderCandidates(watch, pickup);
+    renderPullback(pullback);    // 押し目×決算レーンの描画
     renderCandidateBrief(brief); // 井村流候補の描画
     renderForwardResults(forward);
     renderForwardHumanCompare(forwardHuman);
@@ -1651,6 +1661,113 @@ function renderThemes(d) {
       (t.news_summary ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">📰 ' + _escape(t.news_summary) + '</div>' : '') +
       '</div>';
   }).join('');
+}
+
+// ============================================================
+//  「📉 押し目×決算」セクション (pullback_candidates.json 表示用)
+// ============================================================
+//  バックエンド pullback_screener.py が平日 20:00 JST に生成する独立レーン。
+//  「60日高値から浅く押した ∧ 上昇基調維持 ∧ 直近決算が増収増益」の機械抽出。
+//  ⚠️ エッジ未検証。買いシグナルとして表示しない (売買推奨の動詞を出さない)。
+// ============================================================
+function renderPullback(d) {
+  const el = document.getElementById('dpullback');
+  const countEl = document.getElementById('pullbackCount');
+  if (!el) return;
+
+  if (!d) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">候補データ準備中</div>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
+  if (countEl) {
+    countEl.textContent = d.candidate_count != null ? '(' + d.candidate_count + '件)' : '';
+  }
+
+  const asOf = d.as_of_date ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📅 ' + _escape(d.as_of_date) + ' の終値時点 / 母集団 ' + _escape(String(d.universe_size || '—')) + '銘柄 → 押し目 ' + _escape(String(d.pullback_passed || 0)) + '銘柄 → 決算通過 ' + _escape(String(d.candidate_count || 0)) + '銘柄</div>' : '';
+
+  if (!d.candidates || d.candidates.length === 0) {
+    el.innerHTML = asOf + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">今日は条件に合う銘柄がありませんでした（条件を緩めない設計です）。</div>';
+    return;
+  }
+
+  el.innerHTML = asOf + d.candidates.map(c => _renderPullbackCard(c)).join('');
+}
+
+function renderPullbackFromCache() {
+  if (window._pullbackData) renderPullback(window._pullbackData);
+}
+
+function _renderPullbackCard(c) {
+  const b = c.brief || {};
+  const code4 = c.ticker || (c.code ? c.code.slice(0, 4) : '');
+  const code4Enc = encodeURIComponent(code4);
+  const linkUrl = _safeUrl(b.link, 'https://kabutan.jp/stock/?code=' + code4Enc);
+  const lineLinkUrl = LINE_BOT_ID
+    ? 'https://line.me/R/oaMessage/' + LINE_BOT_ID + '/?%e6%b1%ba%e7%ae%97%20' + code4Enc
+    : 'https://line.me/R/share?text=%e6%b1%ba%e7%ae%97%20' + code4Enc;
+
+  const p = c.pullback || {};
+  const dd = p.drawdown_60d_pct;
+
+  // ヘッダー: 銘柄名 / 決算要約ディープリンク / 押し目の深さ / 👀ウォッチ
+  const headerHtml =
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
+      '<div style="min-width:0;flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px 0;">' +
+        '<a href="' + _escape(linkUrl) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;display:inline-block;min-width:0;max-width:100%;">' +
+          '<span style="font-size:15px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' + _escape(c.name || '') + '</span>' +
+          '<span style="font-size:11px;color:var(--t3);margin-left:6px;margin-right:8px;">(' + _escape(code4) + ') ↗</span>' +
+        '</a>' +
+        '<a href="' + _escape(lineLinkUrl) + '" target="_blank" rel="noopener" style="display:inline-block;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:6px;padding:2px 8px;font-size:10px;color:#10b981;text-decoration:none;font-weight:700;line-height:1.2;white-space:nowrap;">📄決算要約</a>' +
+      '</div>' +
+      '<div style="text-align:right;white-space:nowrap;margin-left:6px;">' +
+        (dd != null ? '<div style="font-size:13px;font-weight:700;color:var(--red);">-' + _escape(String(dd)) + '%</div><div style="font-size:9px;color:var(--t3);">60日高値比</div>' : '') +
+        (function () {
+          const codeId = String(c.code || '').replace(/[^0-9A-Za-z]/g, '');
+          if (!codeId) return '';
+          const on = isShortlisted(codeId);
+          return '<button id="slbtn_' + codeId + '" onclick="toggleShortlist(\'' + codeId + '\')" ' +
+            'style="margin-top:4px;background:none;border:1px solid ' + (on ? 'var(--green)' : 'var(--border)') + ';border-radius:6px;color:' + (on ? 'var(--green)' : 'var(--t3)') + ';font-size:10px;font-weight:700;padding:3px 8px;cursor:pointer;">' +
+            (on ? '✅ ウォッチ中' : '👀 ウォッチ') + '</button>';
+        })() +
+      '</div>' +
+    '</div>';
+
+  // 「／」区切りの長文をスマホ向けに箇条書きへ (井村流カードと同じ読み味)
+  function rows(text) {
+    if (!text) return '';
+    return String(text).split('／').filter(s => s.trim()).map(s =>
+      '<div style="display:flex;gap:6px;line-height:1.55;"><span style="color:var(--t3);flex:none;">•</span><span>' + _escape(s.trim()) + '</span></div>'
+    ).join('');
+  }
+
+  function block(icon, label, text, color) {
+    if (!text) return '';
+    return '<div style="margin-bottom:8px;">' +
+      '<div style="font-size:10px;font-weight:700;color:' + color + ';margin-bottom:3px;">' + icon + ' ' + label + '</div>' +
+      '<div style="font-size:12px;color:var(--t2);">' + rows(text) + '</div>' +
+    '</div>';
+  }
+
+  const streakHtml = (c.streak && c.streak >= 2)
+    ? '<span style="font-size:10px;color:var(--t3);margin-left:6px;">🔁' + _escape(String(c.streak)) + '日連続</span>' : '';
+
+  const earnDateHtml = c.next_earnings
+    ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;">📅 次回決算 ' + _escape(String(c.next_earnings)) + '</div>' : '';
+
+  const sizeHtml = b.size
+    ? '<div style="background:var(--s2);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);line-height:1.5;">🧮 ' + _escape(b.size) + '</div>' : '';
+
+  return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;box-shadow:var(--shadow)">' +
+    headerHtml +
+    block('📉', '押し目の状況', b.pullback, 'var(--acc)') +
+    block('📊', '直近決算', b.earnings, '#10b981') +
+    block('💰', '参考指標', b.valuation, 'var(--t3)') +
+    earnDateHtml +
+    sizeHtml +
+    '<div style="font-size:11px;color:var(--t3);border-top:1px dashed var(--border);padding-top:6px;line-height:1.5;">' + _escape(b.one_liner || '') + streakHtml + '</div>' +
+  '</div>';
 }
 
 // ============================================================
