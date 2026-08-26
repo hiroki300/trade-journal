@@ -59,6 +59,7 @@ nav{display:flex;background:var(--s1);border-bottom:1px solid var(--border);flex
 .tab.on{color:var(--acc);border-bottom-color:var(--acc);background:var(--acc-soft);}
 .pages{flex:1;overflow:hidden;position:relative;min-height:0;}
 .page{position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 72px;display:none;}
+.page.on{display:block;}
 .page::-webkit-scrollbar{width:2px;}.page::-webkit-scrollbar-thumb{background:var(--border);}
 .cash-row{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:12px;box-shadow:var(--shadow);}
 .cash-row label{font-size:11px;color:var(--t3);white-space:nowrap;}
@@ -110,7 +111,8 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .ai-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;letter-spacing:.04em;}
 .pill-g{background:rgba(66,133,244,.15);color:var(--gem);}
 .pill-c{background:rgba(217,119,6,.15);color:var(--cld);}
-#page-watchchat{padding:0;display:flex;flex-direction:column;}
+#page-watchchat{padding:0;}
+.page.on#page-watchchat{display:flex;flex-direction:column;}
 .watch-section{padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--s1);box-shadow:var(--shadow);}
 .cscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 8px;min-height:0;}
 .cmsg{display:flex;gap:7px;margin-bottom:8px;align-items:flex-start;}
@@ -221,11 +223,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="sec-lbl">🌍 マクロ判定</div>
   <div id="dmacro" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--t2)">読み込み中…</div>
 
-  <div class="sec-lbl">📅 決算カレンダー (推定 ±3日)</div>
-  <div id="dearnings" style="margin-bottom:14px">読み込み中…</div>
-
-  <div class="sec-lbl">📊 動意テーマ (週次)</div>
-  <div id="dthemes" style="margin-bottom:14px">読み込み中…</div>
 </div>
 
 <div class="page" id="page-discover">
@@ -249,17 +246,11 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
   </div>
 
-  <div class="sec-lbl">🔥 ピックアップ銘柄</div>
-  <div id="dpickup" style="margin-bottom:14px">読み込み中…</div>
-
-  <div class="sec-lbl">📋 Deep Insight 全候補 (tier 別)</div>
-  <div id="ddisummary" style="margin-bottom:14px">読み込み中…</div>
-
-  <div class="sec-lbl">📉 押し目×決算 <span id="pullbackCount"></span></div>
+  <div class="sec-lbl">🔥 ピックアップ <span id="pullbackCount"></span></div>
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">「60日高値から浅く押した ＋ 上昇基調は維持 ＋ 直近決算が増収増益」を満たす銘柄の機械抽出です。<b>買いシグナルではありません</b>（エッジ未検証・最終判断は決算短信等の一次情報で）。</div>
   <div id="dpullback" style="margin-bottom:14px">読み込み中…</div>
 
-  <div class="sec-lbl">🔎 井村流 候補 <span id="candBriefCount"></span></div>
+  <div class="sec-lbl">🔎 別の観点: 割安成長 (井村流) <span id="candBriefCount"></span></div>
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">※ 需給（信用残・空売残）は週次更新のため、数日程度のタイムラグがあります。</div>
   <div id="dcandbriefs" style="margin-bottom:14px">読み込み中…</div>
 
@@ -290,8 +281,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="sec-lbl">🎯 AI 判定別の的中率 (Phase D-4)</div>
   <div id="daiacc" style="margin-bottom:14px">読み込み中…</div>
 
-  <div class="sec-lbl">📊 AI バックテスト成績 (全推奨・仮想)</div>
-  <div id="dbacktest" style="margin-bottom:14px">読み込み中…</div>
 </div>
 
 <div class="page" id="page-trade">
@@ -680,10 +669,11 @@ function rDash() {
     if (slHit.length > 0)  actions.push({icon:'🚨', label:'損切り検討', items: slHit, color:'var(--red)'});
     if (tgtHit.length > 0) actions.push({icon:'🎯', label:'利確検討', items: tgtHit, color:'var(--green)'});
     if (slNear.length > 0) actions.push({icon:'⚠️', label:'損切り接近', items: slNear, color:'var(--yellow)'});
-    const pickup = window._pickupData;
-    if (pickup && Array.isArray(pickup.stocks) && pickup.stocks.length > 0) {
-      const top = pickup.stocks.filter(s => s.tier === 'S' || s.tier === 'A')[0];
-      if (top) actions.push({icon:'💡', label:'新規買い候補', items:[{nm:top.name, cd:top.code}], color:'var(--purple)'});
+    const pb = window._pullbackData;
+    if (pb && Array.isArray(pb.candidates) && pb.candidates.length > 0) {
+      const top = pb.candidates[0];   // 押し目の深い順にソート済み
+      actions.push({icon:'💡', label:'押し目候補 (' + (pb.as_of_date || '') + ')',
+                    items:[{nm:top.name, cd:top.ticker}], color:'var(--purple)'});
     }
     if (actions.length > 0) {
       alertHtml += '<div style="background:linear-gradient(135deg,var(--acc-soft),var(--purple-soft));border:1px solid var(--acc);border-radius:12px;padding:12px;margin-bottom:14px;box-shadow:var(--shadow)">' +
@@ -759,26 +749,19 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, pullback, date } = cached;
+        const { macro, watch, brief, forward, forwardHuman, pullback, date } = cached;
         _reportsCacheDate = date || '';
 
-        window._synthData = synth;
-        window._pickupData = pickup;
         window._watchlistData = watch;
         window._macroData = macro;
-        window._backtestData = backtest;
         window._briefData = brief;
         window._forwardData = forward;
         window._forwardHumanData = forwardHuman;
         window._pullbackData = pullback;
 
         renderMacro(macro);
-        renderPickup(pickup);
-        renderDISummary(synth);
-        renderEarnings(earn);
-        renderThemes(themes);
-        renderCandidates(watch, pickup);
         renderPullback(pullback);
+        renderCandidates(watch);
         renderCandidateBrief(brief);
         renderForwardResults(forward);
         renderForwardHumanCompare(forwardHuman);
@@ -786,9 +769,8 @@ async function loadMorningReports(forceRefresh = false) {
         renderTaxAfterSummary();
         renderTagPerformance();
         renderAIAccuracy();
-        renderCounterfactualAccuracy();
         
-        const gen = (pickup && pickup.generated_at) || '';
+        const gen = (pullback && pullback.generated_at) || '';
         const genStr = gen ? '(キャッシュ ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
         document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
         
@@ -810,18 +792,12 @@ async function loadMorningReports(forceRefresh = false) {
     renderTaxAfterSummary();
     renderTagPerformance();  // Phase D-1
     renderAIAccuracy();      // Phase D-4
-    renderCounterfactualAccuracy(); // バックテスト成績
     return;
   }
   try {
-    const [macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, pullback] = await Promise.all([
+    const [macro, watch, brief, forward, forwardHuman, pullback] = await Promise.all([
       _fetchJSON('macro_state.json'),
-      _fetchJSON('pickup_stocks.json'),
-      _fetchJSON('earnings_calendar.json'),
-      _fetchJSON('industry_report.json'),
       _fetchJSON('limit_watchlist.json'),
-      _fetchJSON('deep_insight_synth.json'),
-      _fetchJSON('backtest_synthetic.json'),
       _fetchJSON('candidate_brief.json'),
       _fetchJSON('forward_results.json'),
       _fetchJSON('forward_human_compare.json'),
@@ -829,11 +805,8 @@ async function loadMorningReports(forceRefresh = false) {
     ]);
 
     // window へのキャッシュ
-    window._synthData = synth;
-    window._pickupData = pickup;
     window._watchlistData = watch;
     window._macroData = macro;  // Phase A-2: マクロ警告 + AI ペルソナ切替で参照
-    window._backtestData = backtest;
     window._briefData = brief;  // 井村流候補のキャッシュ
     window._forwardData = forward;
     window._forwardHumanData = forwardHuman;
@@ -842,7 +815,7 @@ async function loadMorningReports(forceRefresh = false) {
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, pickup, earn, themes, watch, synth, backtest, brief, forward, forwardHuman, pullback,
+        macro, watch, brief, forward, forwardHuman, pullback,
         fetchedAt: now, date: TODAY
       }));
     } catch (e) {
@@ -850,12 +823,8 @@ async function loadMorningReports(forceRefresh = false) {
     }
 
     renderMacro(macro);
-    renderPickup(pickup);
-    renderDISummary(synth);
-    renderEarnings(earn);
-    renderThemes(themes);
-    renderCandidates(watch, pickup);
-    renderPullback(pullback);    // 押し目×決算レーンの描画
+    renderPullback(pullback);    // ピックアップ (押し目×決算) — 主レーン
+    renderCandidates(watch);
     renderCandidateBrief(brief); // 井村流候補の描画
     renderForwardResults(forward);
     renderForwardHumanCompare(forwardHuman);
@@ -863,8 +832,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
     renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
     renderAIAccuracy();             // Phase D-4: AI 判定別の的中率
-    renderCounterfactualAccuracy();  // バックテスト成績
-    const gen = (pickup && pickup.generated_at) || '';
+    const gen = (pullback && pullback.generated_at) || '';
     const genStr = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
     document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
     _isReportsFetched = true;
@@ -891,38 +859,26 @@ async function loadMorningReports(forceRefresh = false) {
 //   - AI 合議: 「貴方の癖」セクションを prompt 末尾に自動注入
 
 function lookupAIRecommendationByCode(cd) {
-  // cd は 4 桁、synth/pickup は code5 (= cd + '0')
+  // cd は 4 桁、公開 JSON は code5 (= cd + '0')
+  // 2026-08-25: deep_insight_synth(5/31) と pickup_stocks(6/01) は 3 ヶ月止まっており、
+  // ここを通ると execution_meta に古い推奨価格が入り「執行癖」「AI的中率」が壊れ、
+  // さらに AI プロンプトへ再注入されていた。LIVE な 2 ソースのみに限定する。
   const code5 = (cd.length === 4 ? cd + '0' : cd);
-  const synth = window._synthData;
-  if (synth && Array.isArray(synth.stocks)) {
-    const found = synth.stocks.find(s => s.code === code5 || s.code4 === cd);
-    if (found && found.debate) {
-      return {
-        ai_recommended_entry: found.debate.trader_recommended_entry,
-        ai_recommended_stop: found.debate.trader_stop_loss,
-        ai_recommended_target: found.debate.trader_target,
-        verdict_at_entry: found.debate.trader_verdict,
-        tier_at_entry: found.tier,
-        extraction_source: found.extraction_source || 'tdnet_pdf',
-        source: 'deep_insight_synth',
-        momentum_pass: found.momentum_pass ?? null
-      };
-    }
-  }
-  // フォールバック: pickup_stocks (tier S/A のみだが synth に無い場合)
-  const pickup = window._pickupData;
-  if (pickup && Array.isArray(pickup.stocks)) {
-    const found = pickup.stocks.find(p => p.code === code5);
+  const pb = window._pullbackData;
+  if (pb && Array.isArray(pb.candidates)) {
+    const found = pb.candidates.find(c => c.code === code5 || c.ticker === cd);
     if (found) {
+      const size = found.size_if_entered || {};
       return {
-        ai_recommended_entry: found.price,
-        ai_recommended_stop: found.stop_loss,
-        ai_recommended_target: found.target,
+        ai_recommended_entry: found.price ?? null,
+        ai_recommended_stop: size.stop_price ?? null,
+        ai_recommended_target: null,
         verdict_at_entry: null,
-        tier_at_entry: found.tier,
-        extraction_source: found.extraction_source || 'tdnet_pdf',
-        source: 'pickup_stocks',
-        momentum_pass: found.momentum_pass ?? null
+        tier_at_entry: null,
+        extraction_source: 'pullback_candidates',
+        source: 'pullback_candidates',
+        as_of: found.as_of || pb.as_of_date || null,
+        momentum_pass: null
       };
     }
   }
@@ -1132,79 +1088,6 @@ function renderAIAccuracy() {
     renderGroup('tier 別 (Deep Insight)', a.byTier, s => s.n) +
     renderGroup('モメンタム別 (momentum_pass)', a.byMomentum, s => s.n) +
     '<div style="font-size:9px;color:var(--t3);margin-top:6px">※ Deep Insight Agent のコスト対効果検証。n≥3 で集計</div>' +
-    '</div>';
-}
-
-function renderCounterfactualAccuracy() {
-  const el = document.getElementById('dbacktest');
-  if (!el) return;
-  const b = window._backtestData;
-  if (!b) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI バックテスト成績: 準備中 (データ生成待ち)</div>';
-    return;
-  }
-
-  const overall = b.byVerdict && b.byVerdict["-"];
-  let overallHtml = '';
-  if (overall) {
-    const wr = Math.round(overall.win_pct || 0);
-    const wrColor = wr >= 50 ? 'var(--green)' : (wr >= 35 ? 'var(--yellow)' : 'var(--red)');
-    const avgRr = overall.avg_rr != null ? overall.avg_rr.toFixed(2) : '-';
-    const sharpe = overall.sharpe != null ? overall.sharpe.toFixed(2) : '-';
-    const maxDd = overall.max_dd != null ? Math.round(overall.max_dd).toLocaleString() + '%' : '-';
-    const avgPnl = overall.avg_pnl_pct != null ? (overall.avg_pnl_pct >= 0 ? '+' : '') + overall.avg_pnl_pct.toFixed(2) + '%' : '-';
-
-    overallHtml = '<div style="background:var(--s2);border-radius:8px;padding:8px 10px;margin-bottom:10px;border-left:3px solid ' + wrColor + '">' +
-      '<div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:4px">📈 全推奨の仮想成績サマリ</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:11px;line-height:1.6">' +
-      '<div>仮想勝率: <span style="color:' + wrColor + ';font-weight:700">' + wr + '%</span></div>' +
-      '<div>平均利益率: <span style="font-weight:600">' + avgPnl + '</span></div>' +
-      '<div>平均RR: <span style="font-weight:600">' + avgRr + '</span></div>' +
-      '<div>シャープレシオ: <span style="font-weight:600">' + sharpe + '</span></div>' +
-      '<div style="grid-column:span 2">最大ドローダウン: <span style="font-weight:600;color:var(--red)">' + maxDd + '</span></div>' +
-      '</div>' +
-      '</div>';
-  }
-
-  let matchRateHtml = '';
-  if (b.n_recommendations && b.n_entered) {
-    const pct = (b.n_entered / b.n_recommendations * 100).toFixed(1);
-    matchRateHtml = '<div style="font-size:10px;color:var(--t2);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">' +
-      '📢 推薦 ' + b.n_recommendations + ' 件中 ' + b.n_entered + ' 件がエントリー成立 <span style="color:var(--t3)">(' + pct + '% 約定)</span>' +
-      '</div>';
-  }
-
-  const fmt = stats => {
-    const wr = Math.round(stats.win_pct || 0);
-    const wrColor = wr >= 50 ? 'var(--green)' : (wr >= 35 ? 'var(--yellow)' : 'var(--red)');
-    const avgRr = stats.avg_rr != null ? stats.avg_rr.toFixed(2) : '-';
-    return '<span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:var(--t2);font-weight:600">平均RR ' + avgRr + '</span>';
-  };
-
-  const PLACEHOLDER_KEYS = new Set(['-', 'unknown', '']);
-  const renderGroup = (title, obj) => {
-    const entries = Object.entries(obj).filter(([k]) => !PLACEHOLDER_KEYS.has(k));
-    if (entries.length === 0) return '';
-    return '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--t2);font-weight:700;margin-bottom:4px">' + title + '</div>' +
-      entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px dashed var(--border);font-size:11px">' +
-        '<span style="color:var(--text);font-weight:600">' + _escape(k) + '</span>' +
-        '<span>' + fmt(s) + '</span>' +
-        '</div>').join('') +
-      '</div>';
-  };
-
-  el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
-    '<div style="font-size:10px;color:var(--t3);margin-bottom:8px">期間: ' + b.sample_period.from + ' 〜 ' + b.sample_period.to + '</div>' +
-    overallHtml +
-    matchRateHtml +
-    renderGroup('AI判定別', b.byVerdict || {}) +
-    renderGroup('Tier別', b.byTier || {}) +
-    renderGroup('マクロレジーム別', b.byRegime || {}) +
-    renderGroup('モメンタム別', b.byMomentum || {}) +
-    renderGroup('出来高比（vol_ratio）別', b.byVolRatio || {}) +
-    '<div style="font-size:9px;color:var(--t3);margin-top:8px;border-top:1px solid var(--border);padding-top:6px;line-height:1.4">' +
-    '※ 全推奨をルール通りに自動発注したと仮定したシミュレーション結果。' +
-    '</div>' +
     '</div>';
 }
 
@@ -1477,190 +1360,6 @@ function renderMacro(d) {
     '<span style="font-size:10px;color:var(--t3)">日経HV ' + _escape(d.hv_20d == null ? '-' : d.hv_20d) + '% / MA25乖離 ' + _escape(d.ma25_dev == null ? '-' : d.ma25_dev) + '%</span>' +
     '</div>' +
     '<div style="font-size:11px;color:var(--t2);line-height:1.5">' + _escape(d.summary || '') + '</div>';
-}
-
-function renderPickup(d) {
-  const el = document.getElementById('dpickup');
-  if (!d || !d.stocks || d.stocks.length === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">ピックアップ対象なし (次回月曜 05:00 JST に更新)</div>';
-    return;
-  }
-  const html = d.stocks.map(s => {
-    const sourceTag = s.extraction_source === 'fins_summary'
-      ? '<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px">📊数値のみ</span>'
-      : '';
-    const warningBadge = s.warning_flag
-      ? '<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px">⚠️ 警戒</span>'
-      : '';
-    const skip = s.skip_recommendation ? ' (skip推奨)' : '';
-    return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">' +
-      '<div><span style="font-size:16px">' + _escape(s.level_label) + '</span> <span style="font-size:14px;font-weight:700">' + _escape(s.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(s.code) + '</span>' + sourceTag + warningBadge + '</div>' +
-      '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--acc)">tier ' + _escape(s.tier) + '</div><div style="font-size:10px;color:var(--t3)">EQ ' + _escape(s.entry_quality) + skip + '</div></div>' +
-      '</div>' +
-      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px">' +
-      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">価格</div><div style="font-size:11px;font-family:monospace;font-weight:700">' + Math.round(s.price).toLocaleString() + '</div></div>' +
-      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">損切</div><div style="font-size:11px;font-family:monospace;color:var(--red)">' + Math.round(s.stop_loss).toLocaleString() + '</div></div>' +
-      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">目標</div><div style="font-size:11px;font-family:monospace;color:var(--green)">' + Math.round(s.target).toLocaleString() + '</div></div>' +
-      '<div style="background:var(--s2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--t3)">出来高比</div><div style="font-size:11px;font-family:monospace;font-weight:700">×' + s.vol_ratio + '</div></div>' +
-      '</div>' +
-      (s.synthesis_notes ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);border-radius:6px;padding:8px;margin-top:4px">' + _escape(s.synthesis_notes) + '</div>' : '') +
-      (s.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(s.warning_reason) + '</div>' : '') +
-      '</div>';
-  }).join('');
-  // バックエンド JSON スキーマ変動耐性: execution_summary が欠落しても TypeError で落ちないように
-  const es = d.execution_summary || {};
-  el.innerHTML = '<div style="font-size:10px;color:var(--t3);margin-bottom:6px">priority ' + (es.priority_count ?? '-') + ' / attention ' + (es.attention_count ?? '-') + ' / watch ' + (es.watch_count ?? '-') + '</div>' + html;
-}
-
-// ============================================================
-//  Deep Insight 全候補サマリ (案 A: tier=A/S 候補 / tier=B/C 警戒・参考)
-// ============================================================
-//
-// pickup_stocks.json は既に tier=S/A だけにフィルタされて公開されるため、
-// tier=B/C 評価された銘柄が PWA で全く見えない (= 透明性に欠ける) 問題があった。
-// 本セクションは deep_insight_synth.json から **全 20 銘柄** を取得し、
-// tier 別 + verdict 別に表示することで「なぜ今日は候補が無いか」を可視化する。
-//
-// 配色:
-//   tier=S/A (本日の候補): 緑強調、常時展開
-//   tier=B/C (警戒・参考): 黄、折り畳み (details/summary)
-//   verdict=◎/○ : 緑   △ : 黄   ×/failed : 赤
-function renderDISummary(d) {
-  const el = document.getElementById('ddisummary');
-  if (!d || !Array.isArray(d.stocks) || d.stocks.length === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">Deep Insight データなし (次回月曜 05:00 JST に更新)</div>';
-    return;
-  }
-  const stocks = d.stocks;
-  // tier 分類 (S/A: 候補 / B/C: 警戒)
-  const candidates = stocks.filter(s => s.tier === 'S' || s.tier === 'A');
-  const watching   = stocks.filter(s => s.tier === 'B' || s.tier === 'C');
-  // verdict 集計 (◎/○/△/× + failed/None)
-  const vc = {};
-  for (const s of stocks) {
-    const v = (s.debate && s.debate.trader_verdict) || '—';
-    vc[v] = (vc[v] || 0) + 1;
-  }
-  const vcText = ['◎','○','△','×','failed','—']
-    .filter(v => vc[v])
-    .map(v => v + ':' + vc[v])
-    .join(' / ');
-
-  let html = '<div style="font-size:10px;color:var(--t3);margin-bottom:8px">'
-    + '完走 ' + stocks.length + ' 件 / verdict: ' + _escape(vcText)
-    + '</div>';
-
-  // 本日の候補 (tier S/A) — 常時展開
-  html += '<div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:6px">🎯 本日の候補 (tier S/A): ' + candidates.length + ' 件</div>';
-  if (candidates.length === 0) {
-    html += '<div style="background:rgba(239,68,68,.05);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--t2);line-height:1.5">'
-      + 'tier S/A 該当なし。全候補が tier B/C 評価のため、<strong>本日は買いシグナルなし</strong>。<br>'
-      + '<span style="color:var(--t3);font-size:10px">下の「警戒・参考」を展開すると、却下理由が確認できる。</span>'
-      + '</div>';
-  } else {
-    html += candidates.map(s => _renderDICard(s, true)).join('');
-  }
-
-  // 警戒・参考 (tier B/C) — 折り畳み
-  if (watching.length > 0) {
-    html += '<details style="margin-top:8px">'
-      + '<summary style="font-size:11px;color:var(--yellow);font-weight:700;cursor:pointer;padding:8px 12px;background:var(--s1);border:1px solid var(--border);border-radius:10px;list-style:none">'
-      + '⚠️ 警戒・参考 (tier B/C): ' + watching.length + ' 件 — タップで却下理由を展開'
-      + '</summary>'
-      + '<div style="margin-top:6px">'
-      + watching.map(s => _renderDICard(s, false)).join('')
-      + '</div>'
-      + '</details>';
-  }
-
-  el.innerHTML = html;
-}
-
-function _renderDICard(s, highlight) {
-  const deb = s.debate || {};
-  const verdict = deb.trader_verdict || '—';
-  const verdictColorMap = {
-    '◎': 'var(--green)',
-    '○': 'var(--green)',
-    '△': 'var(--yellow)',
-    '×': 'var(--red)',
-    'failed': 'var(--red)',
-    '—': 'var(--t3)',
-  };
-  const vColor = verdictColorMap[verdict] || 'var(--t3)';
-  const tierColor = (s.tier === 'S' || s.tier === 'A') ? 'var(--green)' : 'var(--yellow)';
-  const bg = highlight ? 'rgba(16,185,129,.05)' : 'var(--s1)';
-  const reason = deb.trader_reasoning || '';
-  const sourceTag = s.extraction_source === 'fins_summary'
-    ? '<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 5px;border-radius:4px;margin-left:6px">📊数値のみ</span>'
-    : '';
-  return '<div style="background:' + bg + ';border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-    + '<div style="min-width:0;flex:1">'
-    + '<span style="font-size:13px;font-weight:700">' + _escape(s.name || '?') + '</span>'
-    + '<span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(s.code) + '</span>'
-    + sourceTag
-    + '</div>'
-    + '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">'
-    + '<span style="font-size:10px;background:rgba(59,130,246,.15);color:' + tierColor + ';padding:2px 6px;border-radius:4px;font-weight:700">tier ' + _escape(s.tier) + '</span>'
-    + '<span style="font-size:16px;color:' + vColor + ';font-weight:700;min-width:18px;text-align:center">' + _escape(verdict) + '</span>'
-    + '</div>'
-    + '</div>'
-    + (reason ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px;white-space:pre-wrap;">' + _escape(reason) + '</div>' : '')
-    + '</div>';
-}
-
-function renderEarnings(d) {
-  const el = document.getElementById('dearnings');
-  if (!d) { el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">取得できませんでした</div>'; return; }
-  const upcoming = d.upcoming_7d || [];
-  const recent = d.recent_3d || [];
-  if (upcoming.length === 0 && recent.length === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">直近の決算なし</div>';
-    return;
-  }
-  const confColorMap = {high:'var(--green)', medium:'var(--yellow)', low:'var(--t3)'};
-  let html = '';
-  if (upcoming.length) {
-    html += '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">▶ 今後 7 日以内 (' + upcoming.length + '件)</div>';
-    html += upcoming.map(e => {
-      const confColor = confColorMap[e.estimation_confidence] || 'var(--t3)';
-      return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
-        '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(e.code) + ' / rank ' + _escape(e.rank) + '</span></div>' +
-        '<div style="text-align:right"><div style="font-size:11px;font-family:monospace">' + _escape(e.estimated_disclosure_date) + ' <span style="color:' + confColor + '">●</span></div><div style="font-size:9px;color:var(--t3)">あと ' + _escape(e.days_until_estimated) + ' 日 (' + _escape(e.estimation_confidence) + ')</div></div>' +
-        '</div>';
-    }).join('');
-  }
-  if (recent.length) {
-    html += '<div style="font-size:10px;color:var(--t3);margin:8px 0 4px">◀ 過去 3 日に決算済 (' + recent.length + '件)</div>';
-    html += recent.map(e =>
-      '<div style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
-      '<div><span style="font-size:12px;font-weight:700">' + _escape(e.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px">' + _escape(e.code) + ' / rank ' + _escape(e.rank) + '</span></div>' +
-      '<div style="text-align:right"><div style="font-size:11px;font-family:monospace;color:var(--t3)">' + _escape(e.disclosure_date) + '</div><div style="font-size:9px;color:var(--t3)">' + _escape(e.days_ago) + ' 日前</div></div>' +
-      '</div>'
-    ).join('');
-  }
-  el.innerHTML = html;
-}
-
-function renderThemes(d) {
-  const el = document.getElementById('dthemes');
-  if (!d || !d.top_themes || d.top_themes.length === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">テーマレポート準備中</div>';
-    return;
-  }
-  el.innerHTML = d.top_themes.map(t => {
-    const stocks = (t.top_stocks || []).slice(0, 3).map(s => s.code + ' ' + (s.name || '').slice(0, 12)).join(' / ');
-    return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
-      '<div><span style="font-size:13px;font-weight:700;color:var(--acc)">#' + _escape(t.rank) + ' ' + _escape(t.name) + '</span></div>' +
-      '<div style="font-size:10px;color:var(--t3);font-family:monospace">score ' + _escape(t.score) + ' / ' + _escape(t.stock_count) + '銘柄</div>' +
-      '</div>' +
-      '<div style="font-size:10px;color:var(--t3);margin-bottom:4px">' + _escape(stocks) + '</div>' +
-      (t.news_summary ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-top:4px">📰 ' + _escape(t.news_summary) + '</div>' : '') +
-      '</div>';
-  }).join('');
 }
 
 // ============================================================
@@ -2292,24 +1991,9 @@ function _classifyCandidate(stock) {
   return 'watch';
 }
 
-function _pickupLevelLabel(pickupMap, code5) {
-  // pickup_stocks.json は code5 (5桁) で持っている。limit_watchlist は 4 桁。
-  const p = pickupMap[code5];
-  if (!p) return null;
-  return {
-    label: p.level_label,
-    level: p.level,
-    notes: p.synthesis_notes || '',
-    warning_reason: p.warning_reason || '',
-    warning_flag: p.warning_flag,
-    tier: p.tier,
-    extraction_source: p.extraction_source,
-  };
-}
-
-function renderCandidates(watchlist, pickup) {
+function renderCandidates(watchlist) {
   // Phase 4.2: フィルタトグル再描画用にデータをキャッシュ
-  window._candidatesCache = {watchlist, pickup};
+  window._candidatesCache = {watchlist};
   // 残金表示を更新
   const cashAmt = document.getElementById('cashFilterAmount');
   if (cashAmt) cashAmt.textContent = (cash || 0).toLocaleString();
@@ -2324,7 +2008,6 @@ function renderCandidatesFromCache() {
   if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
     watchlist = watchlist.watchlist;
   }
-  const pickup = cache.pickup;
   const el = document.getElementById('dcandidates');
   if (!Array.isArray(watchlist) || watchlist.length === 0) {
     el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">買い候補なし (limit_watchlist 未公開 or 空)</div>';
@@ -2353,12 +2036,6 @@ function renderCandidatesFromCache() {
     }
   }
 
-  // pickup_stocks をマップ化 (code5 → entry)。pickup は最新の Sonnet 分析
-  const pickupMap = {};
-  if (pickup && pickup.stocks) {
-    for (const p of pickup.stocks) pickupMap[p.code] = p;
-  }
-
   // 分類
   const notified = [];
   const approaching = [];
@@ -2381,24 +2058,21 @@ function renderCandidatesFromCache() {
   let html = '';
   if (notified.length) {
     html += '<div style="font-size:11px;color:var(--red);font-weight:700;margin-bottom:6px">🚨 LINE 通知済 (' + notified.length + ' 件)</div>';
-    html += notified.map(s => _renderCandidateCard(s, pickupMap, 'notified')).join('');
+    html += notified.map(s => _renderCandidateCard(s, 'notified')).join('');
   }
   if (approaching.length) {
     html += '<div style="font-size:11px;color:var(--yellow);font-weight:700;margin:10px 0 6px">🎯 指値接近 (' + approaching.length + ' 件)</div>';
-    html += approaching.map(s => _renderCandidateCard(s, pickupMap, 'approaching')).join('');
+    html += approaching.map(s => _renderCandidateCard(s, 'approaching')).join('');
   }
   if (watching.length) {
     html += '<div style="font-size:11px;color:var(--t3);font-weight:700;margin:10px 0 6px">💎 待機 (' + watching.length + ' 件、深いディスカウント)</div>';
-    html += watching.map(s => _renderCandidateCard(s, pickupMap, 'watch')).join('');
+    html += watching.map(s => _renderCandidateCard(s, 'watch')).join('');
   }
   el.innerHTML = html;
 }
 
-function _renderCandidateCard(s, pickupMap, cat) {
-  // limit_watchlist の code は 4 桁。pickup_stocks は 5 桁 (末尾 0)。
+function _renderCandidateCard(s, cat) {
   const code4 = s.code;
-  const code5 = code4 + '0';
-  const pickup = _pickupLevelLabel(pickupMap, code5);
   const cardId = 'aic-' + code4;
 
   const catColor = {notified:'var(--red)', approaching:'var(--yellow)', watch:'var(--t3)'}[cat];
@@ -2408,8 +2082,6 @@ function _renderCandidateCard(s, pickupMap, cat) {
   if (s.squeeze_candidate) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--t2);font-size:9px;padding:2px 6px;border-radius:4px">🚀 売残増+出来高</span>');
   if (s.vol_ratio && s.vol_ratio >= 2.0) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">🔥🔥 出来高×' + s.vol_ratio + '</span>');
   else if (s.vol_ratio && s.vol_ratio >= 1.5) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🔥 出来高×' + s.vol_ratio + '</span>');
-  if (pickup) flags.push('<span style="background:rgba(59,130,246,.15);color:var(--acc);font-size:9px;padding:2px 6px;border-radius:4px">' + pickup.label + ' tier ' + pickup.tier + '</span>');
-  if (pickup && pickup.extraction_source === 'fins_summary') flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">📊 数値のみ</span>');
   // モメンタム合格バッジ
   if (s.momentum_pass === true) flags.push('<span style="background:rgba(16,185,129,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:4px">📈 モメンタム合格</span>');
   else if (s.momentum_pass === false) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">📉 モメンタム不適合</span>');
@@ -2457,8 +2129,6 @@ function _renderCandidateCard(s, pickupMap, cat) {
     (supplyTags.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">' + supplyTags.join('') + '</div>' : '') +
     '<div style="font-size:10px;color:var(--t3);margin-bottom:3px">指値候補 (現値からの割引%):</div>' +
     levelsRow +
-    (pickup && pickup.notes ? '<div style="font-size:11px;color:var(--t2);line-height:1.5;background:var(--s2);border-radius:6px;padding:8px;margin-top:6px">🧠 ' + _escape(pickup.notes) + '</div>' : '') +
-    (pickup && pickup.warning_reason ? '<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ' + _escape(pickup.warning_reason) + '</div>' : '') +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">' +
     '<button onclick="toggleChart(\'' + code4 + '\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート</button>' +
     '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">🤝 AI合議</button>' +
@@ -2507,18 +2177,16 @@ async function analyzeCandidate(code4) {
   panel.style.display = 'block';
   panel.textContent = '🤝 GeminiとClaudeが合議中...';
 
-  const [watchlist, pickup] = await Promise.all([
-    _fetchJSON('limit_watchlist.json'),
-    _fetchJSON('pickup_stocks.json'),
-  ]);
-  const s = (watchlist || []).find(w => w.code === code4);
+  let watchlist = await _fetchJSON('limit_watchlist.json');
+  // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
+  if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
+    watchlist = watchlist.watchlist;
+  }
+  const s = (Array.isArray(watchlist) ? watchlist : []).find(w => w.code === code4);
   if (!s) {
     panel.textContent = '⚠️ 銘柄データが取得できませんでした (limit_watchlist 更新待ち?)';
     return;
   }
-  const pickupEntry = pickup && pickup.stocks
-    ? pickup.stocks.find(p => p.code === code4 + '0')
-    : null;
 
   // プロンプト構築 (短期回転戦略 -8%/RR2 を明示)
   const levelsTxt = (s.levels || []).map(l =>
@@ -2540,7 +2208,6 @@ async function analyzeCandidate(code4) {
     '次回決算: ' + (s.next_earnings || '-') + '\n' +
     '現在の余力(残金): ' + Math.round(cash).toLocaleString() + '円\n\n' +
     '【指値ライン】\n' + levelsTxt + '\n\n' +
-    (pickupEntry ? '【事前分析】\n' + (pickupEntry.synthesis_notes || '(なし)').slice(0, 100) + '\n' : '') +
     '【依頼】以下の順で出力してください（マークダウン可、挨拶不要、各項目50字以内）:\n\n' +
     '## 【着眼点】\n' +
     'この銘柄で注目すべき点と主なリスクを30字以内で。買い/見送りは断言しない（最終判断はあなたが一次情報で）。\n\n' +
@@ -2679,10 +2346,7 @@ async function compareCandidates() {
   panel.style.display = 'block';
   panel.innerHTML = '<div style="padding:14px;color:var(--t2);font-size:12px">🤝 GeminiとClaudeが全候補を比較中...</div>';
 
-  let [watchlist, pickup] = await Promise.all([
-    _fetchJSON('limit_watchlist.json'),
-    _fetchJSON('pickup_stocks.json'),
-  ]);
+  let watchlist = await _fetchJSON('limit_watchlist.json');
   // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
   if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
     watchlist = watchlist.watchlist;
@@ -2692,8 +2356,6 @@ async function compareCandidates() {
     return;
   }
 
-  const pickupMap = {};
-  if (pickup && pickup.stocks) for (const p of pickup.stocks) pickupMap[p.code] = p;
 
   // 通知済 + 接近 のみを比較対象 (待機は除外、深いディスカウントで動かない)
   const targets = watchlist.filter(s => {
@@ -2709,7 +2371,7 @@ async function compareCandidates() {
   }
 
   const listTxt = targets.map((s, i) => {
-    const pick = pickupMap[s.code + '0'];
+
     const lv = (s.levels || []).map(l => Math.round(l.price) + '円(-' + l.discount_pct + '%)' + (l.notified ? '●' : '')).join(', ');
     return (i + 1) + '. ' + s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', 現値 ' + Math.round(s.current_price) + '円, vol×' + (s.vol_ratio || '-') + (s.squeeze_candidate ? ', 🚀踏み上げ' : '') + ')\n' +
       '   指値: ' + lv + '\n' +
@@ -3145,10 +2807,22 @@ function isShortlisted(code) {
   return getShortlist().some(x => x.code === code);
 }
 
+function _shortlistNameFor(code) {
+  // 以前は井村流(_briefData)しか見ておらず、押し目カードから 👀 すると
+  // name が code のまま publish されていた。両レーンを見る。
+  const pools = [
+    ((window._pullbackData || {}).candidates) || [],
+    ((window._briefData || {}).candidates) || [],
+  ];
+  for (const arr of pools) {
+    const f = arr.find(x => String(x.code) === String(code));
+    if (f && f.name) return f.name;
+  }
+  return code;
+}
+
 function toggleShortlist(code) {
-  const cands = (window._briefData && window._briefData.candidates) || [];
-  const found = cands.find(c => c && c.code === code);
-  const name = (found && found.name) || code;
+  const name = _shortlistNameFor(code);
   let sl = getShortlist();
   if (sl.some(x => x.code === code)) {
     sl = sl.filter(x => x.code !== code);
@@ -3552,26 +3226,6 @@ function findStockContextData(cd) {
     }
   }
   
-  // 2. ピックアップデータ (pickup_stocks.json)
-  if (window._pickupData && Array.isArray(window._pickupData.stocks)) {
-    const found = window._pickupData.stocks.find(s => s.code === code5 || s.code.slice(0,4) === cd4);
-    if (found) {
-      info.push('◆ ピックアップ評価:');
-      info.push('  ・Tier: ' + found.tier + ' (目安価格: ¥' + Math.round(found.price) + ' / 損切: ¥' + Math.round(found.stop_loss) + ' / 目標: ¥' + Math.round(found.target) + ')');
-      if (found.synthesis_notes) info.push('  ・総合分析ノート: ' + found.synthesis_notes);
-    }
-  }
-  
-  // 3. Deep Insightデータ (deep_insight_synth.json)
-  if (window._synthData && Array.isArray(window._synthData.stocks)) {
-    const found = window._synthData.stocks.find(s => s.code === code5 || s.code4 === cd4);
-    if (found && found.debate) {
-      info.push('◆ Deep Insight 分析（合議結果）:');
-      info.push('  ・判断: ' + found.debate.trader_verdict + ' (推奨エントリー: ¥' + Math.round(found.debate.trader_recommended_entry) + ' / 損切: ¥' + Math.round(found.debate.trader_stop_loss) + ' / 利確: ¥' + Math.round(found.debate.trader_target) + ')');
-      if (found.debate.trader_reasoning) info.push('  ・却下/推奨理由: ' + found.debate.trader_reasoning);
-    }
-  }
-  
   // 4. 保有ポジション
   const foundH = H.find(h => h.cd === cd4);
   if (foundH) {
@@ -3587,7 +3241,7 @@ function findStockContextData(cd) {
   }
 
   if (info.length === 0) return '';
-  return '\n\n【システム自動連携: 銘柄(' + cd4 + ')の最新データ】\n' + info.join('\n');
+  return '\n\n【システム自動連携: 銘柄(' + cd4 + ')の公開データ】\n' + info.join('\n');
 }
 
 function askAboutStock(cd, nm) {
@@ -4657,6 +4311,7 @@ async function handleSharedFiles() {
 
 // 初期化
 calcS(); rTH(); rWatch();
+rDash();            // 朝会レポートの初回ロードは rDash 経由 (これが無いと市場/発掘が読み込み中のまま)
 renderTagChips();  // Phase D-1: タグチップを初期描画
 handleSharedFiles();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
