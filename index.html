@@ -334,9 +334,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
       <div class="frow" style="margin-top:8px">
       <div><label class="fl">買付日</label><input class="fi" id="tdt" type="date" style="margin-bottom:0"></div>
       <div><label class="fl">取引区分</label>
-        <select class="fi" id="ttype" style="margin-bottom:0">
+        <select class="fi" id="ttype" style="margin-bottom:0" onchange="onAct()">
           <option value="spot">現物</option>
           <option value="margin">信用買</option>
+          <option value="margin_short">信用売建</option>
         </select>
       </div>
     </div>
@@ -616,18 +617,18 @@ function buildPersonaPrefix() {
 function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
 
 function calcS() {
-  let cost = 0, val = 0;
+  // positionPnl で信用売建の符号も正しく合算する (val-cost の差分方式だと
+  // ショートは cp*sh - bp*sh になり符号が反転したままだった)。
+  let cost = 0, val = 0, pnl = 0;
   for (const h of H) {
-    // bp_unknown は cost/pnl 集計から除外 (cp は val に含める = 評価額には反映)
-    if (!h.bp_unknown && h.bp > 0) cost += h.bp * h.sh;
-    val += (h.cp || h.bp || 0) * h.sh;
+    const cp = h.cp || h.bp || 0;
+    if (!h.bp_unknown && h.bp > 0) {
+      cost += h.bp * h.sh;
+      pnl += positionPnl(h, cp);
+    }
+    val += cp * h.sh;
   }
-  // bp_unknown 銘柄の cp を val から差し引いて pnl 計算 (cost 側との対応を取るため)
-  let costless_val = 0;
-  for (const h of H) {
-    if (h.bp_unknown || !(h.bp > 0)) costless_val += (h.cp || 0) * h.sh;
-  }
-  const pnl = (val - costless_val) - cost, pct = cost > 0 ? pnl / cost * 100 : 0;
+  const pct = cost > 0 ? pnl / cost * 100 : 0;
   const rel = T.filter(t => t.a === 'sell').reduce((s, t) => s + (t.pnl || 0), 0);
   const f = v => (v >= 0 ? '¥' : '-¥') + Math.abs(Math.round(v)).toLocaleString();
   const c = v => v >= 0 ? 'up' : 'dn';
@@ -709,7 +710,7 @@ function rDash() {
   if (conc.length > 0) {
     alertHtml += '<div style="background:var(--yellow-soft);border:1px solid var(--yellow);border-radius:10px;padding:10px 12px;margin-bottom:12px">' +
       '<div style="font-size:12px;font-weight:700;color:var(--yellow);margin-bottom:6px">⚠️ ポジション集中: 運用資産の 20% を超える銘柄</div>' +
-      conc.map(c => '<div style="font-size:11px;color:var(--t2)">・' + _escape(c.nm) + ' <span style="color:var(--t3)">(' + c.cd + ' ' + (c.type==='margin'?'信用':'現物') + ')</span> <span style="font-family:var(--mono);font-weight:700;color:var(--text)">' + c.pct + '%</span></div>').join('') +
+      conc.map(c => '<div style="font-size:11px;color:var(--t2)">・' + _escape(c.nm) + ' <span style="color:var(--t3)">(' + c.cd + ' ' + typeLabel(c.type) + ')</span> <span style="font-family:var(--mono);font-weight:700;color:var(--text)">' + c.pct + '%</span></div>').join('') +
       '<div style="font-size:10px;color:var(--t3);margin-top:6px">短期回転戦略では1銘柄20%以下を推奨。分散・部分利確を検討。</div>' +
       '</div>';
   }
@@ -1144,10 +1145,12 @@ function computeTax(gross_pnl, rate) {
   return Math.round(gross_pnl * rate * 10000) / 10000;
 }
 
-function computeNetPnl(buy_price, sell_price, shares, tax_rate) {
+function computeNetPnl(buy_price, sell_price, shares, tax_rate, type) {
+  // buy_price/sell_price は「建てた価格」「決済した価格」を意味する
+  // (実際の買/売とは限らない。信用売建は建て=売, 決済=買のため gross_pnl が逆になる)。
   const buy_amount = buy_price * shares;
   const sell_amount = sell_price * shares;
-  const gross_pnl = sell_amount - buy_amount;
+  const gross_pnl = (type === 'margin_short') ? (buy_amount - sell_amount) : (sell_amount - buy_amount);
   const fee_total = computeSbiFee(buy_amount) + computeSbiFee(sell_amount);
   const tax = computeTax(gross_pnl, tax_rate);
   return { gross_pnl, buy_amount, sell_amount, fee_total, tax, net_pnl: gross_pnl - fee_total - tax };
@@ -1164,12 +1167,15 @@ function matchRoundTrips(trades, opensOut) {
     const cd = t.cd, a = t.a, sh = parseInt(t.sh || 0), p = parseFloat(t.p || 0), dt = t.dt || '';
     const tp = t.type || 'spot';
     const key = cd + ':' + tp;
-    if (a === 'buy') {
+    // 「建てる」操作かどうかは type によって buy/sell が入れ替わる
+    // (信用売建は新規売=建てる)。T.a は常にリテラルな買/売を保持している。
+    if (_isOpenAction(a, tp)) {
       if (!open_buys[key]) open_buys[key] = [];
       // tags/memo はエントリー理由の構造化記録 (P5)。export 経由で半年後の自己分析に使う
       open_buys[key].push({ shares_remaining: sh, price: p, date: dt, cd: cd, tp: tp,
                             tags: t.tags || [], memo: t.memo || '' });
-    } else if (a === 'sell') {
+    } else if (a === 'buy' || a === 'sell') {
+      // 「決済する」操作 (信用売建は返済買=決済、それ以外は売=決済)
       let remaining = sh;
       const lots = open_buys[key] || [];
       while (remaining > 0 && lots.length > 0) {
@@ -1214,7 +1220,7 @@ function _aggregateRounds(rounds, tax_rate) {
   let gross_sum = 0, fee_sum = 0, tax_sum = 0, net_sum = 0;
   const wins = [], losses = [];
   for (const r of rounds) {
-    const c = computeNetPnl(r.buy_price, r.sell_price, r.shares, tax_rate);
+    const c = computeNetPnl(r.buy_price, r.sell_price, r.shares, tax_rate, r.type);
     gross_sum += c.gross_pnl;
     fee_sum   += c.fee_total;
     tax_sum   += c.tax;
@@ -2445,8 +2451,8 @@ function hHTML(h, compact, idx) {
   const cp = h.cp || h.bp;
   // bp_unknown または bp<=0 のときは損益計算を抑制 (Infinity / NaN 回避)
   const bpValid = !h.bp_unknown && h.bp > 0;
-  const pnl = bpValid ? (cp - h.bp) * h.sh : 0;
-  const pct = bpValid ? (cp - h.bp) / h.bp * 100 : 0;
+  const pnl = bpValid ? positionPnl(h, cp) : 0;
+  const pct = bpValid ? (pnl / (h.bp * h.sh)) * 100 : 0;
   const cls = bpValid ? (pnl >= 0 ? 'up' : 'dn') : '';
   const toS = h.sl ? ((cp - h.sl) / cp * 100).toFixed(1) : null;
   let al = '';
@@ -2462,7 +2468,7 @@ function hHTML(h, compact, idx) {
     '<div><div class="hpnl ' + cls + '">' + pnlDisplay + '</div>' +
     '<div class="hpct ' + cls + '">' + pctDisplay + '</div></div></div>' +
     '<div class="hmeta">' +
-    '<span class="hbg">' + (h.type==='margin' ? '📊信用' : '💴現物') + '</span>' +
+    '<span class="hbg">' + typeBadge(h.type) + '</span>' +
     '<span class="hbg">' + h.sh + '株</span>' +
     '<span class="hbg" title="' + (h.bp_unknown ? '⚠️ 取得単価未確認 (口座管理リスト画面 OCR、要手動設定)' : '買値をタップして手動修正') + '">' + (h.bp_unknown ? '⚠️買' : '買') + ' <input class="bpin" type="number" step="0.1" min="0" value="' + h.bp + '" onchange="uBP(' + i + ',this.value)" onclick="this.select()">円</span>' +
     '<span class="hbg">現 <input class="cpin" type="number" value="' + cp + '" onchange="uCP(' + i + ',this.value)">円</span>' +
@@ -2516,9 +2522,9 @@ async function analyzeHolding(cd) {
   panel.textContent = '🤝 GeminiとClaudeが合議中...';
 
   const cp = h.cp || h.bp;
-  const pnl = (cp - h.bp) * h.sh;
-  const pct = ((cp - h.bp) / h.bp * 100).toFixed(2);
-  const typeStr = h.type === 'margin' ? '信用買建' : '現物';
+  const pnl = positionPnl(h, cp);
+  const pct = ((pnl / (h.bp * h.sh)) * 100).toFixed(2);
+  const typeStr = typeLabel(h.type);
   const cost = h.bp * h.sh;
 
   const prompt =
@@ -2597,7 +2603,7 @@ function uBP(idx, v) {
 function delH(idx) {
   const h = H[idx];
   if (!h) return;
-  if (!confirm((h.nm||h.cd) + ' (' + (h.type==='margin'?'信用':'現物') + ') を削除しますか？')) return;
+  if (!confirm((h.nm||h.cd) + ' (' + typeLabel(h.type) + ') を削除しますか？')) return;
   H.splice(idx, 1);
   sv(KH, H); rHold(); calcS(); rDash();
   toast('削除しました');
@@ -2853,7 +2859,11 @@ function _buildHumanPaperTradesPayload() {
   };
   // 決済済み: 異常データ (価格<=0 / 取得・決済日欠落 / 決済日<取得日) を除外して
   // R計測の汚染を防ぐ (過去の入力ミス: 価格0・年が2014・決済が取得より前 等)。
+  // 信用売建は entry_price/exit_price の意味が現物・信用買いと逆になり、
+  // backend の forward_tracker 契約 (ロング前提: entry=買値/exit=売値) を
+  // 誤ったサインで汚染しかねないため、対応するまでは export 対象外にする。
   const closed = rounds.filter(r =>
+    (r.type || 'spot') !== 'margin_short' &&
     r.buy_price > 0 && r.sell_price > 0 &&
     r.buy_date && r.sell_date && r.sell_date >= r.buy_date
   ).map(r => ({
@@ -2862,21 +2872,21 @@ function _buildHumanPaperTradesPayload() {
     entry_price: r.buy_price,
     exit_date: r.sell_date,
     exit_price: r.sell_price,
-    note: (r.type === 'margin' ? '信用' : '現物') + (r.shares ? ' ' + r.shares + '株' : '')
+    note: typeLabel(r.type) + (r.shares ? ' ' + r.shares + '株' : '')
       + _noteReasonSuffix(r.buy_tags, r.buy_memo),
   }));
   // 未決済 = 現在の保有 (H タブ) = ユーザーが実際に持っている建玉そのもの。
   // 取引ログの FIFO 残差ではなく H を使うことで、売却済み/入力ミスの「幽霊建玉」を排除。
   // (優待目的=AI分析対象外 と 取得単価不明/0 は除外)
   const open = (Array.isArray(H) ? H : []).filter(h =>
-    h && h.cd && h.bp > 0 && !h.yutai
+    h && h.cd && h.bp > 0 && !h.yutai && (h.type || 'spot') !== 'margin_short'
   ).map(h => ({
     code: code5(h.cd),
     entry_date: h.dt || null,
     entry_price: h.bp,
     exit_date: null,
     exit_price: null,
-    note: ((h.type === 'margin') ? '信用' : '現物') + (h.sh ? ' ' + h.sh + '株' : '') + ' 未決済'
+    note: typeLabel(h.type) + (h.sh ? ' ' + h.sh + '株' : '') + ' 未決済'
       + _noteReasonSuffix(h.tags, h.memo),
   }));
   return {
@@ -3075,7 +3085,7 @@ function openBulkBPModal() {
     const cp = h.cp || h.bp || 0;
     return '<div class="modal-item" data-idx="' + i + '">' +
       '<div class="modal-item-top">' +
-        '<div><div class="modal-item-name">' + _escape(h.nm || h.cd) + ' <span style="font-size:10px;color:var(--t3)">(' + h.cd + ' ' + (h.type==='margin'?'信用':'現物') + ')</span></div>' +
+        '<div><div class="modal-item-name">' + _escape(h.nm || h.cd) + ' <span style="font-size:10px;color:var(--t3)">(' + h.cd + ' ' + typeLabel(h.type) + ')</span></div>' +
         '<div class="modal-item-meta">' + (h.sh||0) + '株 / 現値 ' + cp.toLocaleString() + '円 (仮置き)</div></div>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-top:8px">' +
@@ -3233,7 +3243,7 @@ function findStockContextData(cd) {
   const foundH = H.find(h => h.cd === cd4);
   if (foundH) {
     info.push('◆ 保有ポジション:');
-    info.push('  ・取得単価: ¥' + Math.round(foundH.bp) + ' / 現在値: ¥' + Math.round(foundH.cp || foundH.bp) + ' / 株数: ' + foundH.sh + '株 / 損切ライン: ' + (foundH.sl ? '¥' + Math.round(foundH.sl) : '未設定') + ' / 区分: ' + (foundH.type === 'margin' ? '信用' : '現物'));
+    info.push('  ・取得単価: ¥' + Math.round(foundH.bp) + ' / 現在値: ¥' + Math.round(foundH.cp || foundH.bp) + ' / 株数: ' + foundH.sh + '株 / 損切ライン: ' + (foundH.sl ? '¥' + Math.round(foundH.sl) : '未設定') + ' / 区分: ' + typeLabel(foundH.type));
     if (foundH.memo) info.push('  ・買付メモ: ' + foundH.memo);
   }
 
@@ -3349,14 +3359,103 @@ function applyStop(sl, tgt) {
   if (!tgtEl.value) tgtEl.value = tgt;
   toast('🛡️ 損切り ' + sl.toLocaleString() + '円 / 利確 ' + tgt.toLocaleString() + '円');
 }
+// ════════════════════════════════════════════════════════════
+//  現物/信用買/信用売建 共通ヘルパー (2026-08-27)
+//  H の増減方向・損益符号・数値表記ゆれの正規化をここに集約する。
+//  以前は doTrade / doImport / calcS / hHTML が別々に (cp-bp)*sh 等を
+//  ベタ書きしており、信用売建て (ショート) の符号を表現できなかった。
+// ════════════════════════════════════════════════════════════
+
+// 全角数字・カンマ・円/株の単位を落として数値化する。<input type="number"> は
+// 不正値を保持できず空文字を返すため (症状「買値が消える」の主因)、
+// OCR/手入力どちらの経路でも先にこれを通す。
+function _num(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  let s = String(v).trim();
+  if (!s) return null;
+  s = s.replace(/[０-９．，－]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+  s = s.replace(/[,，]/g, '').replace(/[円株口]/g, '').trim();
+  if (s === '' || s === '-' || s === '.') return null;
+  const num = parseFloat(s);
+  return Number.isFinite(num) ? num : null;
+}
+
+// 生の売買表記 (新規買/返済買/新規売/返済売/買/売/BUY/SELL 等) を
+// 「実際に買いだったか売りだったか」という文字通りの意味に正規化する。
+// 新規/返済 (建てる/決済する) の区別は type と組み合わせ _isOpenAction が判定する。
+function _normAction(raw) {
+  const str = String(raw || '').trim();
+  if (!str) return null;
+  const hasBuy = /買|buy/i.test(str);
+  const hasSell = /売|sell/i.test(str);
+  if (hasBuy && !hasSell) return 'buy';
+  if (hasSell && !hasBuy) return 'sell';
+  return null;   // 両方/どちらも無い = 不明 (買いに化けさせない)
+}
+
+// type の表記ゆれ・欠損を正規化する。memo (「信用売建 6ヵ月」等) も手がかりにする。
+function _normType(rawType, memo) {
+  const t = String(rawType || '').trim().toLowerCase();
+  const m = String(memo || '');
+  if (t === 'margin_short' || /売建|空売/.test(m)) return 'margin_short';
+  if (t === 'margin' || /買建/.test(m)) return 'margin';
+  if (t === 'spot' || t === '') {
+    if (/売建|空売/.test(m)) return 'margin_short';
+    if (/買建|信用/.test(m)) return 'margin';
+    return 'spot';
+  }
+  if (/売建|空売|short/.test(t)) return 'margin_short';
+  if (/信用|margin/.test(t)) return 'margin';
+  return 'spot';
+}
+
+// 「買い/売り」の約定が、この type にとって "建てる (H が増える)" か
+// "決済する (H が減る)" かを判定する。現物・信用買いは 買=建てる/売=決済。
+// 信用売建てだけ逆転する (新規売=建てる、返済買=決済)。
+function _isOpenAction(action, type) {
+  const isBuy = action === 'buy';
+  return (type === 'margin_short') ? !isBuy : isBuy;
+}
+
+// 保有 1 件ぶんの損益。信用売建ては符号が反転する (現在値が下がるほど得)。
+function positionPnl(h, price) {
+  const sh = h.sh || 0, bp = h.bp || 0;
+  return (h.type === 'margin_short') ? (bp - price) * sh : (price - bp) * sh;
+}
+
+// 表示ラベル (保有カード・売買履歴・確認ダイアログ等で共通利用)
+function typeLabel(type) {
+  if (type === 'margin_short') return '信用売建';
+  if (type === 'margin') return '信用買建';
+  return '現物';
+}
+function typeBadge(type) {
+  if (type === 'margin_short') return '📉信用売';
+  if (type === 'margin') return '📊信用買';
+  return '💴現物';
+}
+
 function onAct() {
-  const b = document.getElementById('ta').value === 'buy';
-  document.getElementById('buyEx').style.display = b ? '' : 'none';
-  document.getElementById('tBtn').textContent = b ? '💱 買いを記録する' : '💰 売りを記録する';
-  document.getElementById('tBtn').className = 'btn ' + (b ? 'btnb' : 'btns');
+  const a = document.getElementById('ta').value;
+  const ttype = document.getElementById('ttype').value || 'spot';
+  const isShort = ttype === 'margin_short';
+  // 信用売建てだけ「買い/売り」の実務上の建てる/決済するが入れ替わる
+  // (新規売=建てる、返済買=決済)。select の value は buy/sell のまま固定し、
+  // 見た目のラベルだけ差し替える (ロジックは _isOpenAction に集約済み)。
+  const optBuy = document.querySelector('#ta option[value="buy"]');
+  const optSell = document.querySelector('#ta option[value="sell"]');
+  if (optBuy)  optBuy.textContent  = isShort ? '🔴 返済買（決済）' : '🟢 買い（新規）';
+  if (optSell) optSell.textContent = isShort ? '🟢 新規売（建）'   : '🔴 売り（決済）';
+  const opening = _isOpenAction(a, ttype);
+  document.getElementById('buyEx').style.display = opening ? '' : 'none';
+  document.getElementById('tBtn').textContent = opening
+    ? (isShort ? '💱 新規売を記録する' : '💱 買いを記録する')
+    : (isShort ? '💰 返済買を記録する' : '💰 売りを記録する');
+  document.getElementById('tBtn').className = 'btn ' + (opening ? 'btnb' : 'btns');
 }
 function doTrade() {
-  const a = document.getElementById('ta').value;
+  const a = document.getElementById('ta').value;   // 'buy'/'sell' = リテラルな売買方向
   const cd = document.getElementById('tc').value.trim();
   const nm = document.getElementById('tn').value.trim();
   const sh = parseFloat(document.getElementById('tsh').value);
@@ -3365,9 +3464,12 @@ function doTrade() {
   // 売買共通: 現物/信用区分はフォームから (信用建玉の売りでも参照)
   const ttype = document.getElementById('ttype').value || 'spot';
   const yutai = document.getElementById('tYutai') ? document.getElementById('tYutai').checked : false;
+  // 建てる(H増加)か決済する(H減少)かは type によって買/売が入れ替わる
+  // (信用売建てだけ「新規売=建てる」「返済買=決済」)
+  const opening = _isOpenAction(a, ttype);
 
-  // Phase A-1: 損切り未設定ハードロック (短期回転戦略の安全装置)
-  if (a === 'buy') {
+  // Phase A-1: 損切り未設定ハードロック (短期回転戦略の安全装置。新規建て全般が対象)
+  if (opening) {
     const lockEnabled = ld('tj_hard_lock', true);
     const noSL = H.filter(h => (!h.sl || h.sl <= 0) && !h.yutai);
     if (lockEnabled && noSL.length > 0) {
@@ -3379,7 +3481,7 @@ function doTrade() {
       }
     }
   }
-  if (a === 'buy') {
+  if (opening) {
     const sl = parseFloat(document.getElementById('tsl').value) || null;
     const tgt = parseFloat(document.getElementById('ttgt').value) || null;
     const memo = document.getElementById('tmemo').value.trim();
@@ -3392,37 +3494,45 @@ function doTrade() {
     const idx = H.findIndex(h => h.cd===cd && (h.type||'spot')===ttype);
     if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, tags: [...new Set([...(ex.tags||[]), ...tags])], yutai}; }
     else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, execution_meta:exec_meta, yutai});
-    sv(KH,H); cash=Math.max(0,cash-p*sh); sv(KC,cash);
+    sv(KH,H);
+    // 現金の増減は「実際に買ったか売ったか」(a) で決まり、建てる/決済すると独立
+    // (信用売建ての新規売=建てる操作だが、現金は増える)。
+    cash = (a === 'buy') ? Math.max(0, cash - p*sh) : cash + p*sh;
+    sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
     T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, memo, execution_meta:exec_meta, yutai}); sv(KT,T);
     const driftHint = exec_meta && exec_meta.drift_entry_pct != null
       ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
       : '';
-    toast('✅ ' + nm + ' 買い記録' + driftHint);
+    const openLabel = (a === 'buy') ? '買い' : '新規売';
+    toast('✅ ' + nm + ' ' + openLabel + '記録' + driftHint);
   } else {
-    // 売り時もフォームの ttype で現物/信用を区別
+    // 決済時もフォームの ttype で現物/信用を区別
     const h = H.find(h => h.cd===cd && (h.type||'spot')===ttype);
     const isYutai = h ? !!h.yutai : false;
     let pnl=null;
     // T0-3 Stage A: 売り注文時に drift_exit_pct を計算し execution_meta を更新
     const exec_meta = h ? buildExecutionMetaOnSell(h, p) : null;
-    // Phase D-1: 売り取引のタグは「H に保存済の買い時タグ」+「今回追加で選択したタグ」
+    // Phase D-1: 決済取引のタグは「H に保存済の建て時タグ」+「今回追加で選択したタグ」
     const sellTags = [...new Set([...(h && h.tags ? h.tags : []), ..._selectedTags.setup, ..._selectedTags.emotion])];
-    if (h) { pnl=(p-h.bp)*sh; if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd || (hh.type||'spot')!==ttype); else h.sh-=sh; sv(KH,H); }
-    cash+=p*sh; sv(KC,cash);
+    if (h) { pnl=positionPnl(h,p); if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd || (hh.type||'spot')!==ttype); else h.sh-=sh; sv(KH,H); }
+    cash = (a === 'buy') ? Math.max(0, cash - p*sh) : cash + p*sh;
+    sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
     T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl,tags:sellTags, execution_meta:exec_meta, yutai: isYutai}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
     const driftHint = exec_meta && exec_meta.drift_exit_pct_vs_target != null
       ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
       : '';
-    toast('✅ ' + nm + ' 売り記録' + ps + driftHint);
+    const closeLabel = (a === 'buy') ? '返済買' : '売り';
+    toast('✅ ' + nm + ' ' + closeLabel + '記録' + ps + driftHint);
     renderDriftSummary();        // dashboard の執行癖セクションを更新
     renderTaxAfterSummary();     // T0-4: 税後 PnL も更新
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
   if (document.getElementById('tYutai')) document.getElementById('tYutai').checked = false;
   clearTagSelection();  // Phase D-1: タグ選択リセット
+  onAct();  // ラベル/表示をリセット後の状態に戻す
   rTH();
 }
 function rTH() {
@@ -3716,9 +3826,9 @@ async function askAISodanForHolding(cd, nm) {
 
   const h = H.find(x => x.cd === cd);
   const cp = h ? (h.cp || h.bp) : 0;
-  const pnl = h ? (cp - h.bp) * h.sh : 0;
-  const pct = h ? ((cp - h.bp) / h.bp * 100).toFixed(2) : '0';
-  const typeStr = h ? (h.type === 'margin' ? '信用買建' : '現物') : '現物';
+  const pnl = h ? positionPnl(h, cp) : 0;
+  const pct = h ? ((pnl / (h.bp * h.sh)) * 100).toFixed(2) : '0';
+  const typeStr = h ? typeLabel(h.type) : '現物';
 
   const prompt = buildPersonaPrefix() +
     'あなたはプロの投資アシスタントです。Google検索を実行して「' + nm + ' 事業内容」「' + nm + ' 直近 決算」「' + nm + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
