@@ -247,7 +247,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
   </div>
 
   <div class="sec-lbl">🔥 ピックアップ <span id="pullbackCount"></span></div>
-  <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">「60日高値から浅く押した ＋ 上昇基調は維持 ＋ 直近決算が増収増益」を満たす銘柄の機械抽出です。<b>買いシグナルではありません</b>（エッジ未検証・最終判断は決算短信等の一次情報で）。</div>
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">「60日高値から浅く押した ＋ 上昇基調は維持 ＋ 直近決算が増収増益」を満たす銘柄の機械抽出です。<b>買いシグナルではありません</b>（エッジ未検証・最終判断は決算短信等の一次情報で）。<br>※ 該当数が多い日は条件がゆるく当たっている局面、少ない日は絞り込めている局面です。<b>どちらが有利かは検証していません</b>（該当数に予測力があるかは未測定）。</div>
   <div id="dpullback" style="margin-bottom:14px">読み込み中…</div>
 
   <div class="sec-lbl">🔎 別の観点: 割安成長 (井村流) <span id="candBriefCount"></span></div>
@@ -1417,6 +1417,17 @@ function researchFromCandidate(code) {
   }
 }
 
+// 直近営業日の候補数の分布 (breadth)。**自分のスクリーナーの目盛りであって相場の
+// 予測ではない。** 多い/少ないのどちらが有利かは未測定なので方向を示す語は書かない。
+function _breadthLine(b) {
+  if (!b || !(b.n_days >= 3)) return '';   // 履歴が浅いうちは中央値に意味がない
+  const txt = '直近' + b.n_days + '営業日の候補数: 中央値 ' + b.median_candidates +
+    '件・幅 ' + b.min_candidates + '〜' + b.max_candidates + '件 → 今日は ' +
+    b.today_candidates + '件（少ない順で ' + b.rank_from_low + '/' + b.n_days + '番目）';
+  return '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📊 ' +
+    _escape(txt) + '</div>';
+}
+
 function renderPullback(d) {
   const el = document.getElementById('dpullback');
   const countEl = document.getElementById('pullbackCount');
@@ -1433,9 +1444,10 @@ function renderPullback(d) {
   }
 
   const asOf = d.as_of_date ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📅 ' + _escape(d.as_of_date) + ' の終値時点 / 母集団 ' + _escape(String(d.universe_size || '—')) + '銘柄 → 押し目 ' + _escape(String(d.pullback_passed || 0)) + '銘柄 → 決算通過 ' + _escape(String(d.candidate_count || 0)) + '銘柄</div>' : '';
+  const breadth = _breadthLine(d.breadth);
 
   if (!d.candidates || d.candidates.length === 0) {
-    el.innerHTML = asOf + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">今日は条件に合う銘柄がありませんでした（条件を緩めない設計です）。</div>';
+    el.innerHTML = asOf + breadth + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">今日は条件に合う銘柄がありませんでした（条件を緩めない設計です）。</div>';
     return;
   }
 
@@ -1455,7 +1467,7 @@ function renderPullback(d) {
         '</button>' +
       '</div>';
   }
-  el.innerHTML = asOf + cardsHtml + moreHtml;
+  el.innerHTML = asOf + breadth + cardsHtml + moreHtml;
 }
 
 function renderPullbackFromCache() {
@@ -1514,8 +1526,12 @@ function _renderPullbackCard(c) {
     '</div>';
   }
 
-  const streakHtml = (c.streak && c.streak >= 2)
-    ? '<span style="font-size:10px;color:var(--t3);margin-left:6px;">🔁' + _escape(String(c.streak)) + '日連続</span>' : '';
+  // 鮮度。streak はバックエンドで as_of ベースの「連続営業日数」に統一済み
+  // (以前は run 数を数えており、休場日の再実行で水増しされていた)。
+  const streakHtml = (c.streak >= 2)
+    ? '<span style="font-size:10px;color:var(--t3);margin-left:6px;">🔁' + _escape(String(c.streak)) + '営業日連続</span>'
+    : (c.streak === 1
+        ? '<span style="font-size:10px;color:var(--t3);margin-left:6px;">🆕 今日が初日</span>' : '');
 
   const earnDateHtml = c.next_earnings
     ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;">📅 次回決算 ' + _escape(String(c.next_earnings)) + '</div>' : '';
@@ -3740,6 +3756,34 @@ function _exLinks(code4) {
 // 📊 チャート分析: いまのチャートの「形」(トレンド/移動平均/ゴールデンクロス/出来高/支持抵抗)
 // を AI が事実として要約 → 納得したら株探/みんかぶで実チャートを開くボタンを提示。
 // シグナルは予測ではない (検証Dで予測力なし) ことを明記し、売買助言はしない。
+// 押し目候補 (pullback_candidates.json) に載っている銘柄なら、J-Quants 由来の
+// 実数をそのまま返す。チャート分析を「Web検索の再話」ではなく自前データの説明に
+// するための橋渡し。analyzeCandidate() が limit_watchlist の実数を渡すのと同じ作法。
+function _pullbackFactsFor(code4) {
+  const t = String(code4 || '').toUpperCase();
+  if (!t) return null;
+  const arr = ((window._pullbackData || {}).candidates) || [];
+  const c = arr.find(x => String(x.ticker || '').toUpperCase() === t ||
+                          String(x.code || '').toUpperCase() === t);
+  if (!c) return null;
+  const p = c.pullback || {};
+  const f = (v, unit) => (v == null ? '未取得' : String(v) + (unit || ''));
+  return {
+    name: c.name || '',
+    asOf: c.as_of || (window._pullbackData || {}).as_of_date || '',
+    lines: [
+      '終値: ' + f(c.price, '円'),
+      '60日高値からの下落率: ' + f(p.drawdown_60d_pct, '%'),
+      '25日移動平均からの乖離: ' + f(p.ma25_dev_pct, '%'),
+      '75日移動平均からの乖離: ' + f(p.ma75_dev_pct, '%'),
+      'RSI14: ' + f(p.rsi14),
+      'ボリンジャーバンド %B: ' + f(p.bb_pct_b),
+      'ATR(値幅の目安): ' + f(p.atr, '円'),
+      '出来高比(20日平均比): ×' + f(p.vol_ratio)
+    ]
+  };
+}
+
 async function examineChartAnalysis() {
   const code4 = _exParseCode();
   if (!/^[0-9A-Za-z]{4}$/.test(code4)) { toast('⚠️ 4桁の証券コードを入れてください'); return; }
@@ -3755,23 +3799,42 @@ async function examineChartAnalysis() {
   panel.style.display = 'block';
   panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:6px">' +
     '<div class="spin"></div><span>📊 チャートの形（トレンド・移動平均・出来高）を調べています… (約10〜15秒)</span></div>';
+  // 候補リストにある銘柄は自前の実数を注入する。無い銘柄は従来どおり Web 検索に
+  // フォールバックし、その旨をプロンプトと画面の両方に明示する。
+  const facts = _pullbackFactsFor(code4);
+  const sourceNote = facts
+    ? '数値は自前データ（J-Quants・' + (facts.asOf || '直近') + ' 終値時点）です。'
+    : '数値は Web 検索由来です（この銘柄は候補リストに無いため自前データがありません）。';
+
+  const factsBlock = facts
+    ? '【自前データ（J-Quants実測・' + (facts.asOf || '直近') + ' 終値時点）】\n' +
+      facts.lines.map(x => '- ' + x).join('\n') + '\n' +
+      'この数値をそのまま使って説明してください。これに反する数値や、ここに無い数値の創作は禁止です。\n' +
+      '不足する情報（支持線/抵抗線、5日線と25日線のクロスの有無）だけ Google検索で補い、その分は「検索由来」と明記してください。\n\n'
+    : '【自前データ】この銘柄の自前データはありません。Google検索で「' + name + ' 株価 チャート テクニカル」「' + name + ' 移動平均 ゴールデンクロス デッドクロス」「' + name + ' 株価 トレンド 出来高」を調べ、**すべての数値に「検索由来」と明記**してください。\n\n';
+
   const prompt = buildPersonaPrefix() +
-    'あなたはチャートの「形」を説明する調査アシスタントです。売買の助言はしません。Google検索で「' + name + ' 株価 チャート テクニカル」「' + name + ' 移動平均 ゴールデンクロス デッドクロス」「' + name + ' 株価 トレンド 出来高」などを調べ、いまのチャートの形を事実として簡潔に説明してください。\n\n' +
-    '【含める観点】(分かる範囲で・数値は出典の取れる範囲で)\n' +
-    '- トレンド: 上昇/下降/横ばい、25日移動平均線との位置関係\n' +
-    '- 移動平均: 直近で5日線と25日線のゴールデンクロス/デッドクロスが出ているか\n' +
-    '- 支持線/抵抗線: 上値メド・下値メドのおおよその価格\n' +
-    '- 出来高: 増えているか/減っているか\n\n' +
+    'あなたはチャートの「形」を説明する調査アシスタントです。売買の助言はしません。いまのチャートの形を事実として簡潔に説明してください。\n\n' +
+    factsBlock +
+    '【含める観点】\n' +
+    '- トレンド: 上昇/下降/横ばい、25日・75日移動平均線との位置関係\n' +
+    '- 押し目の深さ: 60日高値からどれだけ下げた水準か\n' +
+    '- 過熱感: RSI14 と ボリンジャーバンド %B が示す位置（買われ過ぎ/売られ過ぎ/中立）\n' +
+    '- 値幅: ATR がおおよそ1日あたりどれくらいの値動きか\n' +
+    '- 出来高: 20日平均に対して多いか少ないか\n' +
+    '- 支持線/抵抗線: 上値メド・下値メドのおおよその価格（検索由来と明記）\n\n' +
     '【厳守】\n' +
     '1. 「買い/売り/買うべき/狙い目」等の売買助言・予測は書かない。形の説明だけ。\n' +
     '2. ゴールデンクロス等は「そういう形が出ている」という事実として書き、「だから上がる/下がる」とは書かない（こうしたシグナルは自前の10年検証で予測力が確認できていないため）。\n' +
-    '3. 数値を創作しない。確認できないものは「未確認」と書く。\n' +
-    '4. HTMLタグ禁止。マークダウン（**太字**）と箇条書きで5〜8行程度に簡潔に。\n\n' +
+    '3. 出来高（需給）から「買い手優位」等の方向を読まない。事実のみ述べる（自前の10年検証で需給に売買予測力なしと確認済み）。\n' +
+    '4. 数値を創作しない。確認できないものは「未確認」と書く。\n' +
+    '5. 冒頭に基準日（' + (facts && facts.asOf ? facts.asOf : '不明') + ' 終値時点）を書く。\n' +
+    '6. HTMLタグ禁止。マークダウン（**太字**）と箇条書きで5〜8行程度に簡潔に。\n\n' +
     '【対象】' + code4 + ' ' + name;
   try {
     const res = await callGemini(prompt, null, null, 4000);
     panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">📊 チャートの状態 (' + name + ')</div>' +
-      '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">「今の形」の説明です。シグナルは予測ではありません（最終判断は一次情報で）。</div>' +
+      '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">「今の形」の説明です。シグナルは予測ではありません（最終判断は一次情報で）。<br>' + _escape(sourceNote) + '</div>' +
       '<div style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
       chartBtns +
       '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'exChart\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
