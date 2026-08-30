@@ -275,6 +275,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">「60日高値から浅く押した ＋ 上昇基調は維持 ＋ 直近決算が増収増益」を満たす銘柄の機械抽出です。<b>買いシグナルではありません</b>（エッジ未検証・最終判断は決算短信等の一次情報で）。<br>※ 該当数が多い日は条件がゆるく当たっている局面、少ない日は絞り込めている局面です。<b>どちらが有利かは検証していません</b>（該当数に予測力があるかは未測定）。</div>
   <div id="dpullback" style="margin-bottom:14px">読み込み中…</div>
 
+  <div class="sec-lbl">🎁 優待の権利日 <span id="yutaiCount"></span></div>
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">登録した優待銘柄の<b>権利付最終日</b>（＝この日の引けまで持てば権利が取れる日）が近い順です。<b>おすすめ順ではありません</b>。<br>※ 翌営業日の<b>権利落ち日</b>には、配当・優待の相当額ぶん株価が機械的に下がります。優待の内容・条件は会社IRの一次情報でご確認ください。</div>
+  <div id="dyutai" style="margin-bottom:14px">読み込み中…</div>
+
   <div class="sec-lbl">🔎 別の観点: 割安成長 (井村流) <span id="candBriefCount"></span></div>
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">※ 需給（信用残・空売残）は週次更新のため、数日程度のタイムラグがあります。</div>
   <div id="dcandbriefs" style="margin-bottom:14px">読み込み中…</div>
@@ -803,7 +807,7 @@ async function loadMorningReports(forceRefresh = false) {
     return;
   }
   try {
-    const [macro, watch, brief, forward, forwardHuman, pullback, eventRadar] = await Promise.all([
+    const [macro, watch, brief, forward, forwardHuman, pullback, eventRadar, yutai] = await Promise.all([
       _fetchJSON('macro_state.json'),
       _fetchJSON('limit_watchlist.json'),
       _fetchJSON('candidate_brief.json'),
@@ -811,6 +815,7 @@ async function loadMorningReports(forceRefresh = false) {
       _fetchJSON('forward_human_compare.json'),
       _fetchJSON('pullback_candidates.json'),
       _fetchJSON('event_radar.json'),
+      _fetchJSON('yutai_radar.json'),
     ]);
 
     // window へのキャッシュ
@@ -821,11 +826,12 @@ async function loadMorningReports(forceRefresh = false) {
     window._forwardHumanData = forwardHuman;
     window._pullbackData = pullback;  // 押し目×決算レーンのキャッシュ
     window._eventRadarData = eventRadar;  // 開示イベントレーンのキャッシュ
+    window._yutaiData = yutai;            // 優待レーンのキャッシュ
 
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, watch, brief, forward, forwardHuman, pullback, eventRadar,
+        macro, watch, brief, forward, forwardHuman, pullback, eventRadar, yutai,
         fetchedAt: now, date: TODAY
       }));
     } catch (e) {
@@ -835,6 +841,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderMacro(macro);
     renderEventRadar(eventRadar);  // 今日の開示 (観測レーン)
     renderPullback(pullback);    // ピックアップ (押し目×決算) — 主レーン
+    renderYutai(yutai);          // 優待の権利付最終日 (事実の通知)
     renderCandidates(watch);
     renderCandidateBrief(brief); // 井村流候補の描画
     renderForwardResults(forward);
@@ -1364,18 +1371,47 @@ function _safeUrl(u, fallback) {
   return (typeof u === 'string' && /^https?:\/\//i.test(u.trim())) ? u.trim() : fallback;
 }
 
+// マクロ判定の「いつの値か」。3 営業日相当より古ければ警告色にする。
+//
+// ⚠️ 2026-08-30 に実害を確認: 公開 macro_state.json が 2026-06-03 の版に
+//    毎日巻き戻っており (morning_prices が repo に commit せず、他ジョブが
+//    古い checkout で publish していた)、3 ヶ月前の日経HV・ドル円が
+//    「現在の地合い」として表示されていた。バックエンドに鮮度ゲートを
+//    入れたうえで、表示側でも必ず日付を出して気づけるようにする。
+const MACRO_STALE_HOURS = 72;
+
+function _macroAgeHours(evaluatedAt) {
+  if (!evaluatedAt) return null;
+  const t = Date.parse(evaluatedAt.length <= 16 ? evaluatedAt + '+09:00' : evaluatedAt);
+  if (isNaN(t)) return null;
+  return (Date.now() - t) / 3600000;
+}
+
 function renderMacro(d) {
   const el = document.getElementById('dmacro');
   if (!d) { el.textContent = '取得できませんでした'; return; }
   const regime = d.regime || '-';
   const colorMap = {normal:'#10b981', caution:'#f59e0b', storm:'#ef4444', halt:'#ef4444'};
   const regimeColor = colorMap[regime] || '#94a3b8';
+
+  const ageH = _macroAgeHours(d.evaluated_at);
+  const stale = ageH != null && ageH > MACRO_STALE_HOURS;
+  const asOf = d.evaluated_at
+    ? (stale
+        ? '<div style="font-size:11px;color:var(--red);margin-top:6px;line-height:1.5">⚠️ この地合いは ' +
+          _escape(d.evaluated_at) + ' 時点の値です（約' + Math.floor(ageH / 24) +
+          '日前）。更新が止まっている可能性があります。</div>'
+        : '<div style="font-size:10px;color:var(--t3);margin-top:6px">📅 ' +
+          _escape(d.evaluated_at) + ' 時点</div>')
+    : '<div style="font-size:11px;color:var(--red);margin-top:6px">⚠️ 評価時刻が不明です</div>';
+
   el.innerHTML =
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
-    '<span style="font-size:14px;font-weight:700;color:' + regimeColor + '">' + _escape(regime).toUpperCase() + '</span>' +
+    '<span style="font-size:14px;font-weight:700;color:' + (stale ? 'var(--t3)' : regimeColor) + '">' + _escape(regime).toUpperCase() + '</span>' +
     '<span style="font-size:10px;color:var(--t3)">日経HV ' + _escape(d.hv_20d == null ? '-' : d.hv_20d) + '% / MA25乖離 ' + _escape(d.ma25_dev == null ? '-' : d.ma25_dev) + '%</span>' +
     '</div>' +
-    '<div style="font-size:11px;color:var(--t2);line-height:1.5">' + _escape(d.summary || '') + '</div>';
+    '<div style="font-size:11px;color:' + (stale ? 'var(--t3)' : 'var(--t2)') + ';line-height:1.5">' + _escape(d.summary || '') + '</div>' +
+    asOf;
 }
 
 // ============================================================
@@ -1603,13 +1639,26 @@ function renderPullback(d) {
 
   const asOf = d.as_of_date ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📅 ' + _escape(d.as_of_date) + ' の終値時点 / 母集団 ' + _escape(String(d.universe_size || '—')) + '銘柄 → 押し目 ' + _escape(String(d.pullback_passed || 0)) + '銘柄 → 決算通過 ' + _escape(String(d.candidate_count || 0)) + '銘柄</div>' : '';
   const breadth = _breadthLine(d.breadth);
+  const sortHtml =
+    '<div style="display:flex;gap:6px;margin-bottom:8px;padding:0 4px;">' +
+      '<button onclick="togglePullbackSort()" style="background:none;border:1px dashed var(--border);border-radius:8px;color:var(--t3);font-size:11px;font-weight:600;padding:6px 12px;cursor:pointer;">' +
+        (_pullbackSort === 'turn' ? '↕ 並び: 転換の近い順（タップで深い順）'
+                                  : '↕ 並び: 押し目の深い順（タップで転換順）') +
+      '</button>' +
+    '</div>';
 
   if (!d.candidates || d.candidates.length === 0) {
     el.innerHTML = asOf + breadth + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">今日は条件に合う銘柄がありませんでした（条件を緩めない設計です）。</div>';
     return;
   }
 
-  const all = d.candidates;
+  // 並び替え。既定はバックエンドの順 = 「転換の近さ」(事実の階層による辞書式)。
+  // 「深い順」は従来の drawdown 降順。どちらもエッジの主張ではなく見せ方。
+  let all = d.candidates.slice();
+  if (_pullbackSort === 'deep') {
+    all.sort((a, b2) => ((b2.pullback || {}).drawdown_60d_pct || 0) -
+                        ((a.pullback || {}).drawdown_60d_pct || 0));
+  }
   const shown = _pullbackShowAll ? all : all.slice(0, PULLBACK_SHOW_LIMIT);
   const cardsHtml = shown.map(c => _renderPullbackCard(c)).join('');
 
@@ -1625,7 +1674,14 @@ function renderPullback(d) {
         '</button>' +
       '</div>';
   }
-  el.innerHTML = asOf + breadth + cardsHtml + moreHtml;
+  el.innerHTML = asOf + breadth + sortHtml + cardsHtml + moreHtml;
+}
+
+// 既定 'turn' = 「上昇に転じたか」の事実で並べる (バックエンドの順そのまま)。
+let _pullbackSort = 'turn';
+function togglePullbackSort() {
+  _pullbackSort = (_pullbackSort === 'turn') ? 'deep' : 'turn';
+  renderPullbackFromCache();
 }
 
 function renderPullbackFromCache() {
@@ -1697,15 +1753,94 @@ function _renderPullbackCard(c) {
   const sizeHtml = b.size
     ? '<div style="background:var(--s2);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);line-height:1.5;">🧮 ' + _escape(b.size) + '</div>' : '';
 
+  // 権利落ち警告 (D-5)。AdjC は分割のみ調整で配当落ちは調整されないため、
+  // 利回りぶんの下げは -8% ストップを材料と無関係に削る。
+  const exDateHtml = b.ex_date
+    ? '<div style="background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);line-height:1.5;">' + _escape(b.ex_date) + '</div>' : '';
+
   return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;box-shadow:var(--shadow)">' +
     headerHtml +
     block('📉', '押し目の状況', b.pullback, 'var(--acc)') +
+    block('⏱', '当日の動き', b.turn, '#10b981') +
+    exDateHtml +
     block('📏', '値動きの大きさ', b.volatility, '#f59e0b') +
     block('📊', '直近決算', b.earnings, '#10b981') +
     block('💰', '参考指標', b.valuation, 'var(--t3)') +
     earnDateHtml +
     sizeHtml +
     '<div style="font-size:11px;color:var(--t3);border-top:1px dashed var(--border);padding-top:6px;line-height:1.5;">' + _escape(b.one_liner || '') + streakHtml + '</div>' +
+  '</div>';
+}
+
+// ============================================================
+//  「🎁 優待の権利日」セクション (yutai_radar.json 表示用)
+//
+//  バックエンド yutai_radar.py が平日 19:30 JST に生成する。
+//  ⚠️ J-Quants に優待内容のデータは無いので、優待の中身は
+//     yutai_master.json に登録されたものだけが出る (創作しない)。
+//  ⚠️ 「おすすめ」ではない。並び順は権利付最終日の近い順 = 事実。
+// ============================================================
+function renderYutai(d) {
+  const el = document.getElementById('dyutai');
+  const countEl = document.getElementById('yutaiCount');
+  if (!el) return;
+
+  if (!d || !Array.isArray(d.rows)) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">優待レーンは未稼働です（yutai_master.json に銘柄を登録すると動きます）。</div>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
+  // 権利付最終日が近い順に並んでいる。過ぎたものは出さない。
+  const rows = d.rows.filter(r => r.schedule && r.schedule.last_buy_date);
+  if (countEl) countEl.textContent = rows.length ? '(' + rows.length + '件)' : '';
+
+  const asOf = d.as_of_date
+    ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📅 ' + _escape(d.as_of_date) + ' 時点 / 登録 ' + _escape(String(d.registered_count || 0)) + '銘柄</div>'
+    : '';
+
+  if (!rows.length) {
+    el.innerHTML = asOf + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">権利確定月が登録された銘柄がありません。</div>';
+    return;
+  }
+
+  el.innerHTML = asOf + rows.map(r => _renderYutaiCard(r)).join('');
+}
+
+function _renderYutaiCard(r) {
+  const b = r.brief || {};
+  const code4 = r.ticker || '';
+  const linkUrl = _safeUrl(b.link, 'https://kabutan.jp/stock/?code=' + encodeURIComponent(code4));
+  const left = (r.schedule || {}).business_days_left;
+
+  // 残り営業日でトーンを変える (0-2 は赤、3-5 は黄、それ以上は通常)
+  const tone = left == null ? 'var(--t3)' : (left <= 2 ? 'var(--red)' : (left <= 5 ? '#f59e0b' : 'var(--t3)'));
+  const badge = left == null ? '' :
+    '<div style="text-align:right;white-space:nowrap;margin-left:6px;">' +
+      '<div style="font-size:13px;font-weight:700;color:' + tone + '">' +
+        (left === 0 ? '本日' : 'あと' + _escape(String(left)) + '日') + '</div>' +
+      '<div style="font-size:9px;color:var(--t3);">権利付最終日まで</div>' +
+    '</div>';
+
+  const inactive = r.active === false
+    ? '<div style="font-size:11px;color:var(--red);margin-bottom:6px;">🛑 優待の廃止/中止が開示されています</div>' : '';
+
+  const row = (icon, text, color) => text
+    ? '<div style="display:flex;gap:6px;line-height:1.55;font-size:12px;color:' + (color || 'var(--t2)') + ';margin-bottom:4px;"><span style="flex:none;">' + icon + '</span><span>' + _escape(text) + '</span></div>'
+    : '';
+
+  return '<div style="background:var(--s1);border:1px solid ' + (r.active === false ? 'rgba(239,68,68,.4)' : 'var(--border)') + ';border-radius:10px;padding:12px;margin-bottom:10px;box-shadow:var(--shadow)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">' +
+      '<a href="' + _escape(linkUrl) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;min-width:0;">' +
+        '<span style="font-size:15px;font-weight:700;color:var(--text);border-bottom:1.5px solid var(--border);padding-bottom:1px;">' + _escape(r.name || '') + '</span>' +
+        '<span style="font-size:11px;color:var(--t3);margin-left:6px;">(' + _escape(code4) + ') ↗</span>' +
+      '</a>' + badge +
+    '</div>' +
+    inactive +
+    row('📅', b.schedule) +
+    row('🎁', b.benefit) +
+    row('💰', b.facts) +
+    row('', b.warning, 'var(--red)') +
   '</div>';
 }
 
