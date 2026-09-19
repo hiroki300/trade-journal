@@ -1,0 +1,114 @@
+/**
+ * 2026-09-19 監査で直した表示の回帰テスト。
+ *
+ *   node tests/pr1_2026_09_19.test.js
+ *
+ * - 💡買い候補セクションの撤去 (🏆比較が未宣言の `pick` で必ず落ちていた。
+ *   中身は井村流の部分集合で、決算・需給・モメンタムの欄も全件空だった)
+ * - 🎁優待が当日キャッシュ経路で描画されず「読み込み中…」のままだった
+ * - 優待の「廃止/中止の開示」が、権利月未登録という理由で黙って消えていた
+ * - マクロ時刻: バックエンドが +09:00 付きで書くようになったので表示を整える
+ * - 🤝売買判断: プロンプトが「経過日数から」判断を求めるのに保有開始日を渡していなかった
+ */
+const fs = require('fs'), vm = require('vm'), path = require('path');
+const HTML = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const scripts = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+const all = scripts.join('\n');
+
+let bad = 0;
+const chk = (ok, label) => { console.log(`  ${ok ? 'OK  ' : 'NG  '}${label}`); if (!ok) bad++; };
+
+function grab(name) {
+  const i = all.indexOf(`function ${name}(`);
+  if (i < 0) throw new Error(`${name} not found`);
+  let d = 0, k = all.indexOf('{', i);
+  for (; k < all.length; k++) { if (all[k] === '{') d++; else if (all[k] === '}') { d--; if (!d) break; } }
+  return all.slice(i, k + 1);
+}
+
+// DOM は getElementById だけのスタブ。id ごとに innerHTML / textContent を覚える。
+const els = {};
+const doc = { getElementById: id => (els[id] = els[id] || { innerHTML: '', textContent: '' }) };
+const sb = { console, window: {}, Date, document: doc };
+vm.createContext(sb);
+vm.runInContext([
+  'const MACRO_STALE_HOURS = 72;',
+  grab('_escape'), grab('_safeUrl'), grab('_fmtEvalAt'), grab('_macroAgeHours'),
+  grab('renderYutai'), grab('_renderYutaiCard'),
+].join('\n'), sb);
+const run = c => vm.runInContext(c, sb);
+
+// ════════════════════════════════════════════════════════════
+console.log('--- 💡買い候補の撤去 ---');
+for (const name of ['compareCandidates', 'renderCandidates', 'renderCandidatesFromCache',
+                    'analyzeCandidate', '_renderCandidateCard', '_renderAIResult', 'copyOrderInfo']) {
+  chk(!all.includes(name), `${name} の定義も呼び出しも残っていない`);
+}
+chk(!HTML.includes('id="compareBtn"') && !HTML.includes('id="dcandidates"') && !HTML.includes('id="cashFilter"'),
+    '買い候補の DOM (比較ボタン / 一覧 / 残金フィルタ) が無い');
+chk(!all.includes('_watchlistData'), 'limit_watchlist のキャッシュ変数が残っていない');
+chk(!all.includes("_fetchJSON('limit_watchlist.json')"), 'limit_watchlist.json を取りに行かない');
+chk(all.includes('function toggleChart('), '保有カードの📈チャート (toggleChart) は残す');
+
+// ════════════════════════════════════════════════════════════
+console.log('--- 優待: キャッシュ経路でも描画する ---');
+const lmr = grab('loadMorningReports');
+const cacheBlock = lmr.slice(lmr.indexOf("localStorage.getItem('tj_reports_cache')"), lmr.indexOf('if (!forceRefresh'));
+chk(/const \{[^}]*\byutai\b[^}]*\} = cached/.test(cacheBlock), 'キャッシュから yutai を取り出す');
+chk(cacheBlock.includes('renderYutai(yutai)'), '起動直後のキャッシュ描画で renderYutai を呼ぶ');
+const sameDay = lmr.slice(lmr.indexOf('if (!forceRefresh'), lmr.indexOf('try {', lmr.indexOf('if (!forceRefresh')));
+chk(sameDay.includes('renderYutai(window._yutaiData)'), '当日キャッシュ有効の経路でも renderYutai を呼ぶ');
+
+// ════════════════════════════════════════════════════════════
+console.log('--- 優待: 廃止の開示と未登録を黙って消さない ---');
+// 2026-09-18 の公開データと同じ形: 全行 schedule 空・7475 は active:false
+sb.d = { as_of_date: '2026-09-18', registered_count: 3, rows: [
+  { code: '74750', ticker: '7475', name: 'アルビス', active: false, schedule: {}, brief: { link: '' } },
+  { code: '43740', ticker: '4374', name: 'ロボペイメント', active: true, schedule: {}, brief: {} },
+  { code: '19040', ticker: '1904', name: '', active: true, schedule: {}, brief: {} },
+]};
+run('renderYutai(d)');
+const y = els.dyutai.innerHTML;
+chk(y.includes('🛑 優待の廃止/中止が開示されています'), '権利月が無くても廃止の開示は表示する');
+chk(y.includes('権利確定月が未登録の銘柄') && y.includes('ロボペイメント') && y.includes('1904'),
+    '未登録の銘柄を名前 (無ければコード) で明示する');
+chk(!y.includes('権利確定月が登録された銘柄がありません'), 'カードがあるときは「ありません」を出さない');
+
+sb.d2 = { as_of_date: '2026-09-18', registered_count: 1, rows: [
+  { code: '43740', ticker: '4374', name: 'ロボペイメント', active: true, schedule: {}, brief: {} } ]};
+run('renderYutai(d2)');
+chk(els.dyutai.innerHTML.includes('権利確定月が登録された銘柄がありません') &&
+    els.dyutai.innerHTML.includes('ロボペイメント'), '全件未登録なら「ありません」+ 未登録の内訳');
+
+sb.d3 = { as_of_date: '2026-09-18', registered_count: 1, rows: [
+  { code: '81360', ticker: '8136', name: 'サンリオ', active: true,
+    schedule: { last_buy_date: '2026-09-26', business_days_left: 3 }, brief: { schedule: '権利付最終日 9/26' } } ]};
+run('renderYutai(d3)');
+chk(els.dyutai.innerHTML.includes('サンリオ') && els.dyutai.innerHTML.includes('あと3日'), '日付がある行は従来どおり');
+chk(!/おすすめ|狙い目|買うべき|買い推奨/.test(grab('renderYutai')), '推奨の語を足していない');
+
+// ════════════════════════════════════════════════════════════
+console.log('--- マクロ時刻 ---');
+chk(run('_fmtEvalAt("2026-09-24T10:23+09:00")') === '2026-09-24 10:23', '+09:00 付きを「YYYY-MM-DD HH:MM」で出す');
+chk(run('_fmtEvalAt("2026-09-18T01:23")') === '2026-09-18 01:23', '旧形式もそのまま出す');
+chk(run('_fmtEvalAt(null)') === '', 'null は空文字');
+const aware = run('_macroAgeHours("2026-09-24T10:23+09:00")');
+const expect = (Date.now() - Date.parse('2026-09-24T01:23:00Z')) / 3600000;
+chk(Math.abs(aware - expect) < 0.01, '+09:00 付きはオフセットどおりに経過時間を数える (JST 10:23 = UTC 01:23)');
+chk(grab('renderMacro').includes('_fmtEvalAt(d.evaluated_at)'), 'renderMacro が表示用に整形している');
+
+// ════════════════════════════════════════════════════════════
+console.log('--- 🤝売買判断に保有開始日を渡す ---');
+const ah = grab('analyzeHolding');
+chk(ah.includes("'保有開始日: '+h.dt"), 'プロンプトに保有開始日を入れる');
+chk(ah.includes('保有開始日: 不明'), '開始日が無いときは「不明」と明示する (黙って落とさない)');
+
+// ════════════════════════════════════════════════════════════
+console.log('--- 構文 ---');
+scripts.forEach((src, i) => {
+  try { new vm.Script(src); } catch (e) { chk(false, `inline <script> #${i} 構文エラー: ${e.message}`); }
+});
+chk(true, `inline <script> ${scripts.length} 本の構文OK`);
+
+console.log(bad ? `\nRESULT: ${bad} NG` : '\nRESULT: OK');
+process.exit(bad ? 1 : 0);

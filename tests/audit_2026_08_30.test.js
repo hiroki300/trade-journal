@@ -7,7 +7,7 @@
  * 取り出して vm で評価する (tests/pullback.test.js と同じ作法)。
  */
 const fs = require('fs'), vm = require('vm');
-const HTML = fs.readFileSync('C:/Users/hayak/OneDrive/Desktop/trade-journal/index.html', 'utf8');
+const HTML = fs.readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
 const scripts = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const all = scripts.join('\n');
 
@@ -48,8 +48,9 @@ const hNow = run('_macroAgeHours(new Date(Date.now() - 3600000).toISOString())')
 chk(hNow > 0.9 && hNow < 1.1, `1時間前を約1時間と数える (${hNow.toFixed(2)}h)`);
 chk(run('_macroAgeHours(null)') === null, 'null は null');
 chk(run('_macroAgeHours("zzz")') === null, 'パース不能は null');
-// 実際に踏んだ値: 2026-06-03T12:48 (オフセット無し) を JST として解釈できること
-chk(run('_macroAgeHours("2026-06-03T12:48")') > 24 * 60, 'オフセット無しでも JST として解釈できる');
+// 旧形式 (オフセット無し) もパースできること。※旧形式の値は実はランナーの UTC だった
+// (2026-09-19 監査)。バックエンドは 2026-09-20 から +09:00 付きで出力する。
+chk(run('_macroAgeHours("2026-06-03T12:48")') > 24 * 60, 'オフセット無しの旧形式もパースできる');
 
 // ════════════════════════════════════════════════════════════
 //  押し目カード: 当日の動き / 権利落ち / 並び替え

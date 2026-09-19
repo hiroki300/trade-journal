@@ -7,7 +7,7 @@
  * 取り出して vm で評価する (tests/import.test.js と同じ作法)。
  */
 const fs = require('fs'), vm = require('vm');
-const HTML = fs.readFileSync('C:/Users/hayak/OneDrive/Desktop/trade-journal/index.html', 'utf8');
+const HTML = fs.readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
 const scripts = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 
 // ① 全インライン script の構文チェック
