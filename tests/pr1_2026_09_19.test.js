@@ -131,6 +131,16 @@ chk(ah2.includes('!h.dt_unknown'), 'dt_unknown の保有は経過日数を主張
 chk(ah2.includes('実際の建日ではありません'), '取込日であることを AI に明示する');
 
 // ════════════════════════════════════════════════════════════
+//  井村流セクションの鮮度表示 (このレーンだけ日付が出ていなかった)
+// ════════════════════════════════════════════════════════════
+console.log('--- 井村流の鮮度表示 ---');
+const rcb = grab('renderCandidateBrief');
+chk(rcb.includes('generated_at'), '生成日を読む');
+chk(rcb.includes('週次更新が止まっている可能性'), '古いときは警告を出す');
+chk(rcb.includes('生成日が不明'), '生成日が無いときも黙って通さない');
+chk(rcb.includes('ymdJST()'), '当日日付はその場で取る (読み込み時の定数を使わない)');
+
+// ════════════════════════════════════════════════════════════
 console.log('--- 構文 ---');
 scripts.forEach((src, i) => {
   try { new vm.Script(src); } catch (e) { chk(false, `inline <script> #${i} 構文エラー: ${e.message}`); }
