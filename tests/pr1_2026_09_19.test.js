@@ -104,6 +104,33 @@ chk(ah.includes("'保有開始日: '+h.dt"), 'プロンプトに保有開始日�
 chk(ah.includes('保有開始日: 不明'), '開始日が無いときは「不明」と明示する (黙って落とさない)');
 
 // ════════════════════════════════════════════════════════════
+//  レビュー指摘の修正: 保有スクショの dt は「取込日」であって建日ではない
+// ════════════════════════════════════════════════════════════
+console.log('--- 建日が分からない保有を「保有開始日」と言わない ---');
+vm.runInContext([grab('_num'), grab('_normType'), grab('_isOpenAction'), grab('positionPnl'),
+                 grab('applyHoldImport'), grab('applyHistImport')].join('\n'), sb);
+sb.TODAY = '2026-09-20';
+// 画面A (保有証券リスト) 相当: 建日が無い
+const r1 = run("applyHoldImport([], [{code:'8136', name:'サンリオ', shares:100, current_price:1200}], {})");
+chk(r1.H[0].dt === '2026-09-20' && r1.H[0].dt_unknown === true, '建日が読めない保有は dt_unknown=true');
+// 画面C (詳細) 相当: 建日が読めた
+const r2 = run("applyHoldImport([], [{code:'8136', shares:100, buy_price:1100, current_price:1200, buy_date:'2026-09-01'}], {})");
+chk(r2.H[0].dt === '2026-09-01' && r2.H[0].dt_unknown === false, '建日が読めた保有は dt_unknown=false');
+// 後から建日が読めたら印を消す
+const r3 = run("applyHoldImport(" + JSON.stringify(r1.H) + ", [{code:'8136', shares:100, buy_price:1100, buy_date:'2026-09-01'}], {})");
+chk(r3.H[0].dt === '2026-09-01' && r3.H[0].dt_unknown === false, '再取込で建日が読めたら印を消す');
+// 約定履歴の取込は約定日が事実
+const r4 = run("applyHistImport([], [], 0, [{code:'8136', action:'buy', shares:100, price:1100, date:'2026-09-02'}])");
+chk(r4.H[0].dt === '2026-09-02' && r4.H[0].dt_unknown === false, '約定履歴からの建玉は dt が事実');
+
+const ah2 = grab('analyzeHolding');
+chk(ah2.includes('ymdJST()') && !ah2.includes('Date.parse(TODAY)'),
+    '経過日数は読み込み時の TODAY でなく、その場の JST 日付で数える');
+chk(ah2.includes('_hd >= 0') && ah2.includes('_hd <= 3650'), '未来日・桁違いの日付は経過日数にしない');
+chk(ah2.includes('!h.dt_unknown'), 'dt_unknown の保有は経過日数を主張しない');
+chk(ah2.includes('実際の建日ではありません'), '取込日であることを AI に明示する');
+
+// ════════════════════════════════════════════════════════════
 console.log('--- 構文 ---');
 scripts.forEach((src, i) => {
   try { new vm.Script(src); } catch (e) { chk(false, `inline <script> #${i} 構文エラー: ${e.message}`); }

@@ -2384,7 +2384,11 @@ async function analyzeHolding(cd) {
   const pct = ((pnl / (h.bp * h.sh)) * 100).toFixed(2);
   const typeStr = typeLabel(h.type);
   const cost = h.bp * h.sh;
-  const heldDays = h.dt ? Math.floor((Date.parse(TODAY) - Date.parse(h.dt)) / 86400000) : null;
+  // TODAY は読み込み時の定数なので、開いたまま日付をまたぐと1日ずれる → その場で取る。
+  // 未来日・桁違いの日付 (入力ミス) は「不明」に倒す。建日が仮置き (dt_unknown) の保有は
+  // そもそも経過日数を主張しない。
+  const _hd = h.dt ? Math.floor((Date.parse(ymdJST()) - Date.parse(h.dt)) / 86400000) : NaN;
+  const heldDays = (!h.dt_unknown && Number.isFinite(_hd) && _hd >= 0 && _hd <= 3650) ? _hd : null;
 
   const prompt =
     buildPersonaPrefix() +
@@ -2396,7 +2400,11 @@ async function analyzeHolding(cd) {
     '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
     '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株） / 現在値: '+cp.toLocaleString()+'円\n'+
     '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
-    (h.dt ? '保有開始日: '+h.dt+'（'+(heldDays!=null && !isNaN(heldDays) ? '暦日で'+heldDays+'日経過' : '経過日数不明')+'。時間切れ撤退は10営業日が目安）\n' : '保有開始日: 不明\n')+
+    (heldDays != null
+      ? '保有開始日: '+h.dt+'（暦日で'+heldDays+'日経過。時間切れ撤退は10営業日が目安）\n'
+      : (h.dt_unknown
+          ? '保有開始日: 不明（'+h.dt+' に保有スクショから取り込んだ日付で、実際の建日ではありません。経過日数は判断材料に使わないでください）\n'
+          : '保有開始日: 不明\n'))+
     (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円 / ':'')+(h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'') +
     (h.memo?'メモ: '+h.memo+'\n':'') + '\n' +
     '【依頼】以下の順で、余計な挨拶文は一切なしで出力してください（HTMLタグは絶対禁止、マークダウンのみ可）:\n\n' +
@@ -4231,10 +4239,14 @@ function applyHoldImport(H, items, opts) {
       if (it.shares && it.shares > 0) nextH[idx].sh = it.shares;
       if (!nextH[idx].nm && nm) nextH[idx].nm = nm;
       if (memoVal !== 'SS取込') nextH[idx].memo = memoVal;
-      if (it.buy_date) nextH[idx].dt = it.buy_date;
+      if (it.buy_date) { nextH[idx].dt = it.buy_date; nextH[idx].dt_unknown = false; }
     } else {
+      // 保有一覧のスクショ (画面A/B) には建日が無い。dt は取込日で仮置きになるので
+      // 「いつから持っているか」を事実として扱えない。bp_unknown と同じ作法で印を付け、
+      // AI プロンプト側で経過日数を主張しないようにする。
       nextH.push({cd: cd || nm, nm: nm || cd, sh, bp: bpVal, cp: cp || bpVal, sl: null, tgt: null,
-                  memo: memoVal, dt: it.buy_date || TODAY, type: t, bp_unknown: bpUnknown});
+                  memo: memoVal, dt: it.buy_date || TODAY, type: t, bp_unknown: bpUnknown,
+                  dt_unknown: !it.buy_date});
     }
   }
 
@@ -4285,7 +4297,9 @@ function applyHistImport(H, T, cash, items) {
         const ex = nextH[idx], tot = ex.sh + sh;
         nextH[idx] = {...ex, sh: tot, bp: Math.round((ex.bp * ex.sh + p * sh) / tot * 10) / 10, bp_unknown: false};
       } else {
-        nextH.push({cd: cd || nm, nm, sh, bp: p, cp: p, sl: null, tgt: null, memo: 'SS取込', dt, type});
+        // 約定履歴の取込は約定日 (dt) が読めているので、保有取込と違い建日は事実。
+        nextH.push({cd: cd || nm, nm, sh, bp: p, cp: p, sl: null, tgt: null, memo: 'SS取込', dt, type,
+                    dt_unknown: false});
       }
     } else if (idx >= 0) {
       const h = nextH[idx];
