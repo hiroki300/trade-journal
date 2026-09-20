@@ -232,18 +232,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="sec-lbl">👥 forward人間比較 (検証中)</div>
   <div id="dforwardhumancompare" style="margin-bottom:14px">読み込み中…</div>
 
-  <div class="sec-lbl">💴 真の税後 PnL (Phase 6 T0-4 計測)</div>
-  <div id="dpnl" style="margin-bottom:14px">読み込み中…</div>
-
-  <div class="sec-lbl">📊 あなたの執行癖 (Phase 6 T0-3 計測)</div>
-  <div id="ddrift" style="margin-bottom:14px">読み込み中…</div>
-
-  <div class="sec-lbl">🏷️ タグ別パフォーマンス (Phase D-1)</div>
-  <div id="dtags" style="margin-bottom:14px">読み込み中…</div>
-
-  <div class="sec-lbl">🎯 AI 判定別の的中率 (Phase D-4)</div>
-  <div id="daiacc" style="margin-bottom:14px">読み込み中…</div>
-
 </div>
 
 <div class="page" id="page-discover">
@@ -311,8 +299,13 @@ select.fi{appearance:none;-webkit-appearance:none;}
     </div>
     <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshots()" style="display:none">🤖 Geminiで一括読み取る</button>
     <div class="ss-result" id="ssResult"></div>
+    <label id="histOnlyWrap" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
+      <input type="checkbox" id="histOnlyChk" checked style="width:16px;height:16px;cursor:pointer">
+      <span>📋 <b>履歴だけ</b>取り込む（保有・残金は変更しない）<br><span style="font-size:11px;color:var(--t3)">月1回まとめて約定履歴を入れるとき用。保有はスクショで別に更新します</span></span>
+    </label>
     <button class="btn btn-apply" id="ssApplyBtn" onclick="showImportModal()" style="display:none">✅ 上記の内容を取り込む</button>
   </div>
+  <div id="journalStatus" style="margin-bottom:10px"></div>
   <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:10px">
     <div class="sec-lbl">✏️ 手動で記録</div>
     <select class="fi" id="ta" onchange="onAct()">
@@ -342,13 +335,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
           <option value="margin_short">信用売建</option>
         </select>
       </div>
-    </div>
-    <!-- Phase D-1: 手法タグ・感情タグ -->
-    <div style="margin-top:8px">
-      <label class="fl">手法（複数選択可）</label>
-      <div id="tagSetupRow" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
-      <label class="fl">感情（複数選択可）</label>
-      <div id="tagEmotionRow" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
     </div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:6px">
       <input type="checkbox" id="tYutai" style="width:16px;height:16px;margin:0;cursor:pointer">
@@ -768,10 +754,6 @@ async function loadMorningReports(forceRefresh = false) {
         renderCandidateBrief(brief);
         renderForwardResults(forward);
         renderForwardHumanCompare(forwardHuman);
-        renderDriftSummary();
-        renderTaxAfterSummary();
-        renderTagPerformance();
-        renderAIAccuracy();
         
         const gen = (pullback && pullback.generated_at) || '';
         const genStr = gen ? '(キャッシュ ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
@@ -792,10 +774,6 @@ async function loadMorningReports(forceRefresh = false) {
     renderCandidateBriefFromCache(); // 井村流候補キャッシュ描画
     renderForwardResultsFromCache();
     renderForwardHumanCompareFromCache();
-    renderDriftSummary();
-    renderTaxAfterSummary();
-    renderTagPerformance();  // Phase D-1
-    renderAIAccuracy();      // Phase D-4
     return;
   }
   try {
@@ -835,10 +813,6 @@ async function loadMorningReports(forceRefresh = false) {
     renderCandidateBrief(brief); // 井村流候補の描画
     renderForwardResults(forward);
     renderForwardHumanCompare(forwardHuman);
-    renderDriftSummary();           // T0-3 Stage A: 執行癖セクション
-    renderTaxAfterSummary();        // T0-4: 真の税後 PnL ダッシュボード
-    renderTagPerformance();         // Phase D-1: タグ別パフォーマンス
-    renderAIAccuracy();             // Phase D-4: AI 判定別の的中率
     const gen = (pullback && pullback.generated_at) || '';
     const genStr = gen ? '(更新 ' + gen.slice(5,10) + ' ' + gen.slice(11,16) + ')' : '';
     document.querySelectorAll('.mr-gen').forEach(e => e.textContent = genStr);
@@ -850,301 +824,6 @@ async function loadMorningReports(forceRefresh = false) {
       document.querySelectorAll('.mr-gen').forEach(e => e.textContent = '(取得失敗)');
     }
   }
-}
-
-// ============================================================
-//  Phase 6 T0-3 Stage A: 執行ドリフト計測 (handbook §1 T0-3 Stage A)
-// ============================================================
-//
-//   AI 推奨と実約定の乖離 (drift) を localStorage に蓄積し、ユーザーの
-//   執行癖を可視化 + AI 合議に注入する。
-//
-//   - 買い注文時: AI 推奨 (synth.json/pickup.json) を lookup し
-//     execution_meta を H エントリに保存
-//   - 売り注文時: drift_exit_pct_vs_target を計算し T エントリに保存
-//   - 📤 ボタン: 執行癖サマリ + KH + KT をクリップボードにコピー
-//   - AI 合議: 「貴方の癖」セクションを prompt 末尾に自動注入
-
-function lookupAIRecommendationByCode(cd) {
-  // cd は 4 桁、公開 JSON は code5 (= cd + '0')
-  // 2026-08-25: deep_insight_synth(5/31) と pickup_stocks(6/01) は 3 ヶ月止まっており、
-  // ここを通ると execution_meta に古い推奨価格が入り「執行癖」「AI的中率」が壊れ、
-  // さらに AI プロンプトへ再注入されていた。LIVE な 2 ソースのみに限定する。
-  const code5 = (cd.length === 4 ? cd + '0' : cd);
-  const pb = window._pullbackData;
-  if (pb && Array.isArray(pb.candidates)) {
-    const found = pb.candidates.find(c => c.code === code5 || c.ticker === cd);
-    if (found) {
-      const size = found.size_if_entered || {};
-      return {
-        ai_recommended_entry: found.price ?? null,
-        ai_recommended_stop: size.stop_price ?? null,
-        ai_recommended_target: null,
-        verdict_at_entry: null,
-        tier_at_entry: null,
-        extraction_source: 'pullback_candidates',
-        source: 'pullback_candidates',
-        as_of: found.as_of || pb.as_of_date || null,
-        momentum_pass: null
-      };
-    }
-  }
-  return null;
-}
-
-function buildExecutionMetaOnBuy(cd, actual_entry) {
-  const ai = lookupAIRecommendationByCode(cd);
-  if (!ai || !ai.ai_recommended_entry) return null;
-  const drift = ((actual_entry - ai.ai_recommended_entry) / ai.ai_recommended_entry) * 100;
-  return {
-    ai_recommended_entry: ai.ai_recommended_entry,
-    ai_recommended_stop: ai.ai_recommended_stop,
-    ai_recommended_target: ai.ai_recommended_target,
-    actual_entry: actual_entry,
-    actual_entry_at: new Date().toISOString(),
-    drift_entry_pct: Math.round(drift * 100) / 100,
-    verdict_at_entry: ai.verdict_at_entry,
-    tier_at_entry: ai.tier_at_entry,
-    extraction_source: ai.extraction_source,
-    source: ai.source,
-  };
-}
-
-function buildExecutionMetaOnSell(holding, actual_exit) {
-  // holding.execution_meta は買い時に保存済
-  const em = holding && holding.execution_meta;
-  if (!em) return null;
-  let drift_exit_vs_target = null;
-  if (em.ai_recommended_target) {
-    drift_exit_vs_target = ((actual_exit - em.ai_recommended_target) / em.ai_recommended_target) * 100;
-    drift_exit_vs_target = Math.round(drift_exit_vs_target * 100) / 100;
-  }
-  return {
-    ...em,
-    actual_exit: actual_exit,
-    actual_exit_at: new Date().toISOString(),
-    drift_exit_pct_vs_target: drift_exit_vs_target,
-  };
-}
-
-function buildDriftSummary() {
-  // 完了済売買 (T で sell + execution_meta あり) から平均ドリフトを計算
-  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && !t.yutai);
-  if (sells.length === 0) return null;
-  const drifts_entry = sells
-    .map(s => s.execution_meta.drift_entry_pct)
-    .filter(d => typeof d === 'number');
-  const drifts_exit = sells
-    .map(s => s.execution_meta.drift_exit_pct_vs_target)
-    .filter(d => typeof d === 'number');
-  const avg = arr => arr.length ? arr.reduce((a,b) => a+b, 0) / arr.length : null;
-  const avg_entry = avg(drifts_entry);
-  const avg_exit  = avg(drifts_exit);
-  return {
-    sample_size: sells.length,
-    avg_drift_entry_pct: avg_entry != null ? Math.round(avg_entry * 100) / 100 : null,
-    avg_drift_exit_pct_vs_target: avg_exit != null ? Math.round(avg_exit * 100) / 100 : null,
-    summary_text: _formatDriftText(sells.length, avg_entry, avg_exit),
-  };
-}
-
-function _formatDriftText(n, avg_entry, avg_exit) {
-  const parts = [`過去 ${n} 回平均`];
-  if (avg_entry != null) {
-    const sign = avg_entry >= 0 ? '+' : '';
-    const dir = avg_entry > 0 ? '高値掴み' : (avg_entry < 0 ? '指値勝ち' : '同値');
-    parts.push(`エントリー ${sign}${avg_entry.toFixed(2)}% (${dir} 傾向)`);
-  }
-  if (avg_exit != null) {
-    const sign = avg_exit >= 0 ? '+' : '';
-    const dir = avg_exit < 0 ? '早出' : (avg_exit > 0 ? '延ばし' : '同値');
-    parts.push(`利確 目標から ${sign}${avg_exit.toFixed(2)}% (${dir} 傾向)`);
-  }
-  return parts.join(' / ');
-}
-
-function renderDriftSummary() {
-  const el = document.getElementById('ddrift');
-  if (!el) return;
-  const d = buildDriftSummary();
-  if (!d) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 売買履歴蓄積中 (Phase 6 T0-3 計測フェーズ、初回完了取引後に表示)</div>';
-    return;
-  }
-  el.innerHTML =
-    '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px">' +
-    '<div style="font-size:11px;color:var(--t2);line-height:1.6">📊 ' + _escape(d.summary_text) + '</div>' +
-    '</div>' +
-    '<button onclick="exportTradeHistoryToClipboard()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:10px;color:#fff;font-size:12px;font-weight:700;padding:9px;cursor:pointer">📤 履歴を AI に渡す (クリップボードへコピー)</button>';
-}
-
-async function exportTradeHistoryToClipboard() {
-  const drift = buildDriftSummary();
-  const recent_trades = T.slice(-30);
-  const payload = {
-    generated_at: new Date().toISOString(),
-    drift_summary: drift,
-    holdings: H,
-    trades: recent_trades,
-  };
-  const text =
-    '【あなたの保有 + 売買履歴】 (' + ymdJST() + ')\n' +
-    (drift ? '執行癖: ' + drift.summary_text + '\n\n' : '売買履歴 0 件\n\n') +
-    JSON.stringify(payload, null, 2);
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('📤 クリップボードにコピー完了 (' + recent_trades.length + ' 取引)');
-  } catch (e) {
-    toast('⚠️ コピー失敗: ' + e.message);
-  }
-}
-
-function getDriftPromptInjection() {
-  // AI 合議 prompt の末尾に注入する「貴方の癖」セクション
-  const d = buildDriftSummary();
-  if (!d) return '';
-  return '\n\n【あなたの執行癖 (過去 ' + d.sample_size + ' 回の実績)】\n' +
-    d.summary_text + '\n' +
-    '※ この癖を踏まえ、推奨価格や保有期間を調整してください。';
-}
-
-// ============================================================
-//  Phase D-4: AI 的中率ダッシュボード
-//   execution_meta.verdict_at_entry / tier_at_entry が記録された
-//   完了取引から、判定別 / tier 別の勝率と累計 PnL を集計する。
-// ============================================================
-
-function buildAIAccuracy() {
-  const sells = T.filter(t => t.a === 'sell' && t.execution_meta && (t.execution_meta.verdict_at_entry || t.execution_meta.tier_at_entry || t.execution_meta.momentum_pass !== undefined) && !t.yutai);
-  if (sells.length === 0) return null;
-  const byVerdict = {};
-  const byTier = {};
-  const byMomentum = {};
-  for (const s of sells) {
-    const v = s.execution_meta.verdict_at_entry;
-    const tier = s.execution_meta.tier_at_entry;
-    const mom = s.execution_meta.momentum_pass;
-    const win = (s.pnl || 0) > 0;
-    if (v) {
-      if (!byVerdict[v]) byVerdict[v] = {n:0, wins:0, pnl:0};
-      byVerdict[v].n++;
-      if (win) byVerdict[v].wins++;
-      byVerdict[v].pnl += (s.pnl || 0);
-    }
-    if (tier) {
-      if (!byTier[tier]) byTier[tier] = {n:0, wins:0, pnl:0};
-      byTier[tier].n++;
-      if (win) byTier[tier].wins++;
-      byTier[tier].pnl += (s.pnl || 0);
-    }
-    if (mom !== undefined && mom !== null) {
-      const mKey = mom ? 'モメンタム合格' : 'モメンタム不適合';
-      if (!byMomentum[mKey]) byMomentum[mKey] = {n:0, wins:0, pnl:0};
-      byMomentum[mKey].n++;
-      if (win) byMomentum[mKey].wins++;
-      byMomentum[mKey].pnl += (s.pnl || 0);
-    }
-  }
-  return {sample_size: sells.length, byVerdict, byTier, byMomentum};
-}
-
-function renderAIAccuracy() {
-  const el = document.getElementById('daiacc');
-  if (!el) return;
-  const a = buildAIAccuracy();
-  if (!a) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 AI 判定別の的中率: サンプル蓄積中 (verdict/tier/モメンタム付き売り取引の完了後に表示)</div>';
-    return;
-  }
-  const fmt = stats => {
-    if (stats.n < 3) return '<span style="color:var(--t3)">サンプル不足 (' + stats.n + '回)</span>';
-    const wr = Math.round(stats.wins / stats.n * 100);
-    const wrColor = wr >= 60 ? 'var(--green)' : (wr >= 40 ? 'var(--yellow)' : 'var(--red)');
-    const pnlColor = stats.pnl >= 0 ? 'var(--green)' : 'var(--red)';
-    return '<span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + stats.n + '回)</span> <span style="color:' + pnlColor + ';font-family:var(--mono);font-weight:700">' + (stats.pnl>=0?'+':'') + Math.round(stats.pnl).toLocaleString() + '円</span>';
-  };
-  const renderGroup = (title, obj, sortKey) => {
-    const entries = Object.entries(obj).sort((x, y) => sortKey(y[1]) - sortKey(x[1]));
-    if (entries.length === 0) return '';
-    return '<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--t2);font-weight:700;margin-bottom:4px">' + title + '</div>' +
-      entries.map(([k, s]) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-top:1px dashed var(--border);font-size:11px">' +
-        '<span style="color:var(--text);font-weight:600">' + _escape(k) + '</span>' +
-        '<span>' + fmt(s) + '</span>' +
-      '</div>').join('') +
-      '</div>';
-  };
-  el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
-    renderGroup('判定別 (verdict_at_entry)', a.byVerdict, s => s.n) +
-    renderGroup('tier 別 (Deep Insight)', a.byTier, s => s.n) +
-    renderGroup('モメンタム別 (momentum_pass)', a.byMomentum, s => s.n) +
-    '<div style="font-size:9px;color:var(--t3);margin-top:6px">※ Deep Insight Agent のコスト対効果検証。n≥3 で集計</div>' +
-    '</div>';
-}
-
-// Phase D-3: 過去の負けパターンを AI プロンプトに注入 (同じパターンの早期警告)
-function getLossPatternInjection() {
-  // 売り取引のうち pnl < 0 を損益額の小さい順 (=大損) で 3 件
-  const losses = T.filter(t => t.a === 'sell' && t.pnl != null && t.pnl < 0 && !t.yutai)
-    .sort((a, b) => a.pnl - b.pnl)
-    .slice(0, 3);
-  if (losses.length === 0) return '';
-  const lines = losses.map(l => {
-    const tags = (Array.isArray(l.tags) && l.tags.length > 0) ? l.tags.join(' ') : '(タグなし)';
-    // 同じコードの最新買い取引のメモを引っ張る (なければ売却時メモ)
-    const buyTrade = [...T].reverse().find(t => t.a === 'buy' && t.cd === l.cd && (t.dt || '') <= (l.dt || ''));
-    const memo = (buyTrade && buyTrade.memo) || l.memo || '(理由記録なし)';
-    return '・' + (l.dt || '?') + ' ' + (l.nm || l.cd) + ' ' + Math.round(l.pnl).toLocaleString() + '円損 / ' + tags + ' / 理由: ' + memo;
-  }).join('\n');
-  return '\n\n【あなたの過去の大きな失敗 (直近の負け Top3)】\n' + lines + '\n' +
-    '※ 今回の判断でこれらと同じパターンが見えたら、明確に警告してください (例: 「過去 #FOMO で損切り遅れた失敗と同じ匂い」)。';
-}
-
-// ============================================================
-//  Phase 6 T0-4: 真の税後 PnL 計測 (handbook §1 T0-4)
-// ============================================================
-//
-//   "+12〜16% で利確" 目標は税前・手数料前の数字。SBI 手数料 +
-//   20.315% 源泉徴収を反映した「真の税後 PnL」を計算する。
-//
-//   本実装は backend realized_pnl_calculator.py (PR #12) の JS ミラー。
-//   Tier 0 では PWA から localStorage の T (KT) を直接読んで集計、
-//   Tier 1 (T0-3 Stage B 完了後) では backend cron が同ロジックで
-//   tax_after_summary.json を publish する予定。
-
-const WITHHOLDING_TAX_RATE = 0.20315;  // 所得税 15.315% + 住民税 5%
-const SBI_FEE_TABLE = [
-  // 約定代金 ≤ first → fee = second (昇順)
-  [50000,   55],
-  [100000,  99],
-  [200000, 115],
-  [500000, 275],
-  [1000000, 535],
-];
-const SBI_FEE_DEFAULT = 640;  // 100 万円超
-
-function computeSbiFee(amount) {
-  if (!amount || amount <= 0) return 0;
-  for (const [bracket, fee] of SBI_FEE_TABLE) {
-    if (amount <= bracket) return fee;
-  }
-  return SBI_FEE_DEFAULT;
-}
-
-function computeTax(gross_pnl, rate) {
-  if (rate == null) rate = WITHHOLDING_TAX_RATE;
-  if (gross_pnl <= 0) return 0;
-  return Math.round(gross_pnl * rate * 10000) / 10000;
-}
-
-function computeNetPnl(buy_price, sell_price, shares, tax_rate, type) {
-  // buy_price/sell_price は「建てた価格」「決済した価格」を意味する
-  // (実際の買/売とは限らない。信用売建は建て=売, 決済=買のため gross_pnl が逆になる)。
-  const buy_amount = buy_price * shares;
-  const sell_amount = sell_price * shares;
-  const gross_pnl = (type === 'margin_short') ? (buy_amount - sell_amount) : (sell_amount - buy_amount);
-  const fee_total = computeSbiFee(buy_amount) + computeSbiFee(sell_amount);
-  const tax = computeTax(gross_pnl, tax_rate);
-  return { gross_pnl, buy_amount, sell_amount, fee_total, tax, net_pnl: gross_pnl - fee_total - tax };
 }
 
 function matchRoundTrips(trades, opensOut) {
@@ -1199,136 +878,6 @@ function matchRoundTrips(trades, opensOut) {
     }
   }
   return rounds;
-}
-
-function _aggregateRounds(rounds, tax_rate) {
-  if (!rounds.length) {
-    return {
-      trades: 0, gross_pnl_jpy: 0, fee_total_jpy: 0, tax_jpy: 0, net_pnl_jpy: 0,
-      win_rate: null, avg_win_jpy: null, avg_loss_jpy: null, rr_realized: null,
-    };
-  }
-  let gross_sum = 0, fee_sum = 0, tax_sum = 0, net_sum = 0;
-  const wins = [], losses = [];
-  for (const r of rounds) {
-    const c = computeNetPnl(r.buy_price, r.sell_price, r.shares, tax_rate, r.type);
-    gross_sum += c.gross_pnl;
-    fee_sum   += c.fee_total;
-    tax_sum   += c.tax;
-    net_sum   += c.net_pnl;
-    if (c.gross_pnl > 0) wins.push(c.gross_pnl);
-    else if (c.gross_pnl < 0) losses.push(c.gross_pnl);
-  }
-  const n = rounds.length;
-  const avg_win = wins.length ? wins.reduce((a,b)=>a+b, 0)/wins.length : null;
-  const avg_loss = losses.length ? losses.reduce((a,b)=>a+b, 0)/losses.length : null;
-  const win_rate = n ? wins.length/n : null;
-  const rr_realized = (avg_win != null && avg_loss != null && avg_loss !== 0)
-    ? Math.round(avg_win/Math.abs(avg_loss) * 100)/100 : null;
-  return {
-    trades: n,
-    gross_pnl_jpy: Math.round(gross_sum),
-    fee_total_jpy: Math.round(fee_sum),
-    tax_jpy: Math.round(tax_sum),
-    net_pnl_jpy: Math.round(net_sum * 10)/10,
-    win_rate: win_rate != null ? Math.round(win_rate*10000)/10000 : null,
-    avg_win_jpy: avg_win != null ? Math.round(avg_win) : null,
-    avg_loss_jpy: avg_loss != null ? Math.round(avg_loss) : null,
-    rr_realized,
-  };
-}
-
-function _filterRoundsByWindow(rounds, start_date, end_date) {
-  // sell_date が start_date <= dt <= end_date のラウンドのみ
-  return rounds.filter(r => {
-    const d = r.sell_date;
-    return d && d >= start_date && d <= end_date;
-  });
-}
-
-function _addPct(agg, capital_jpy) {
-  if (capital_jpy && capital_jpy > 0) {
-    agg.net_pnl_pct = Math.round(agg.net_pnl_jpy / capital_jpy * 100 * 100)/100;
-  } else {
-    agg.net_pnl_pct = null;
-  }
-  return agg;
-}
-
-function buildTaxAfterSummary(trades, capital_jpy, as_of_str = null, tax_rate = null) {
-  // backend realized_pnl_calculator.build_summary の JS ミラー
-  if (!as_of_str) as_of_str = ymdJST();
-  const as_of = new Date(as_of_str);
-  const all_rounds = matchRoundTrips(trades);
-
-  // current_month: YYYY-MM-01 〜 as_of
-  const month_start = as_of_str.slice(0,7) + '-01';
-  const t30_start = new Date(as_of.getTime() - 30*86400000).toISOString().slice(0,10);
-  const t90_start = new Date(as_of.getTime() - 90*86400000).toISOString().slice(0,10);
-
-  const cm = _addPct(_aggregateRounds(_filterRoundsByWindow(all_rounds, month_start, as_of_str), tax_rate), capital_jpy);
-  const t30 = _addPct(_aggregateRounds(_filterRoundsByWindow(all_rounds, t30_start, as_of_str), tax_rate), capital_jpy);
-  const t90 = _addPct(_aggregateRounds(_filterRoundsByWindow(all_rounds, t90_start, as_of_str), tax_rate), capital_jpy);
-
-  return {
-    schema_version: '1.0',
-    as_of: as_of_str,
-    capital_jpy,
-    current_month: cm,
-    trailing_30d: t30,
-    trailing_90d: t90,
-  };
-}
-
-function _estimateCapitalJpy() {
-  // 評価額 (保有 × 現値) + 残金 = 概算運用資産
-  let holdings_val = 0;
-  for (const h of H) {
-    holdings_val += (h.cp || h.bp || 0) * (h.sh || 0);
-  }
-  return Math.round(holdings_val + (cash || 0));
-}
-
-function renderTaxAfterSummary() {
-  const el = document.getElementById('dpnl');
-  if (!el) return;
-  const capital = _estimateCapitalJpy();
-  const summary = buildTaxAfterSummary(T, capital);
-  const cm = summary.current_month;
-  if (cm.trades === 0 && summary.trailing_30d.trades === 0 && summary.trailing_90d.trades === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">💴 確定損益なし (売り取引完了後に表示、SBI 手数料 + 源泉徴収 20.315% 反映)</div>';
-    return;
-  }
-  function fmt(jpy) {
-    const sign = jpy >= 0 ? '+' : '−';
-    return sign + '¥' + Math.abs(jpy).toLocaleString();
-  }
-  function pct(p) {
-    if (p == null) return '—';
-    return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
-  }
-  function colorOf(n) { return n >= 0 ? 'var(--green)' : 'var(--red)'; }
-  function block(label, agg) {
-    if (agg.trades === 0) {
-      return '<div style="font-size:10px;color:var(--t3);padding:6px 0">' + label + ': データなし</div>';
-    }
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">' +
-      '<div style="font-size:11px;color:var(--t2)">' + label + ' <span style="color:var(--t3)">(' + agg.trades + ' 取引)</span></div>' +
-      '<div style="text-align:right">' +
-      '<div style="font-size:13px;font-weight:700;color:' + colorOf(agg.net_pnl_jpy) + '">' + fmt(agg.net_pnl_jpy) + ' <span style="font-size:10px;color:var(--t3)">(' + pct(agg.net_pnl_pct) + ')</span></div>' +
-      '<div style="font-size:9px;color:var(--t3)">gross ' + fmt(agg.gross_pnl_jpy) + ' / fee ' + fmt(-agg.fee_total_jpy) + ' / tax ' + fmt(-agg.tax_jpy) + '</div>' +
-      '</div></div>';
-  }
-  el.innerHTML =
-    '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
-    block('今月', cm) +
-    block('過去 30 日', summary.trailing_30d) +
-    block('過去 90 日', summary.trailing_90d) +
-    '<div style="font-size:9px;color:var(--t3);margin-top:6px">capital ¥' + capital.toLocaleString() + ' / 勝率 ' +
-    (cm.win_rate != null ? (cm.win_rate*100).toFixed(0)+'%' : '—') +
-    ' / RR ' + (cm.rr_realized != null ? cm.rr_realized : '—') +
-    ' (今月)</div>' +
-    '</div>';
 }
 
 function _escape(s) {
@@ -1873,9 +1422,6 @@ function renderCandidateBrief(d) {
   // P5: 見送りワンタップ — 候補を見た上での「今週はやらない」も記録 (質>件数・習慣維持)
   const skipBtnHtml =
     '<div style="text-align:center;margin-top:10px;">' +
-      '<button onclick="recordSkipWeek()" style="background:none;border:1px dashed var(--border);border-radius:8px;color:var(--t3);font-size:11px;font-weight:600;padding:8px 14px;cursor:pointer;">' +
-        '🙅 今週は見送り（記録だけ残す）' +
-      '</button>' +
     '</div>';
   el.innerHTML = noteHtml + cardsHtml + skipBtnHtml;
 }
@@ -2372,7 +1918,8 @@ function tHTML(t) {
   const ps = t.pnl != null ? (t.pnl>=0?'+¥':'-¥') + Math.abs(Math.round(t.pnl)).toLocaleString() : '';
   return '<div class="trow"><div class="tside ' + (ib?'tb':'ts') + '">' + (ib?'買':'売') + '</div>' +
     '<div class="tinfo"><div class="tnm">' + t.nm + ' <span style="color:var(--t3)">' + t.cd + '</span></div>' +
-    '<div class="tmeta">' + t.p.toLocaleString() + '円×' + t.sh + '株　' + t.dt + '</div></div>' +
+    '<div class="tmeta">' + t.p.toLocaleString() + '円×' + t.sh + '株　' + t.dt +
+    ' <button onclick="editTradeRow(\'' + t.id + '\')" style="background:none;border:none;color:var(--t3);font-size:11px;cursor:pointer;padding:0 2px">✏️</button></div></div>' +
     '<div class="tpnl ' + (t.pnl==null?'':(t.pnl>=0?'up':'dn')) + '">' + ps + '</div></div>';
 }
 
@@ -2437,7 +1984,7 @@ async function analyzeHolding(cd) {
     '本日の株価の動きの背景と、最大の懸念点（決算発表日が近いなど）を2〜3行で説明してください。\n\n'+
     '## 【一言（補助）】\n'+
     'この建玉を見るときの要点を30字以内で。売買は断言せず、最終判断はあなたが出口規律と一次情報で。' +
-    getDriftPromptInjection() + getLossPatternInjection();
+    '';
 
   try {
     // analyzeHolding: 5 セクション — 途切れ防止のため4000トークン指定
@@ -2511,135 +2058,13 @@ function toggleHardLock(on) {
 }
 
 // ============================================================
-//  Phase D-1: 手法タグ・感情タグ
-// ============================================================
-
-const TAG_PRESETS = {
-  setup:   ['#ブレイクアウト', '#押し目買い', '#決算プレイ', '#リバウンド', '#材料先取り', '#指値待ち', '#踏み上げ'],
-  emotion: ['#FOMO', '#自信あり', '#リベンジ', '#なんとなく', '#計画通り', '#焦り'],
-};
-let _selectedTags = {setup:[], emotion:[]};
-
-function renderTagChips() {
-  const make = (kind, presets) => presets.map(t => {
-    const on = _selectedTags[kind].includes(t);
-    return '<span onclick="toggleTag(\'' + kind + '\',\'' + t + '\')" style="font-size:11px;padding:4px 9px;border-radius:12px;cursor:pointer;border:1px solid ' + (on ? 'var(--acc)' : 'var(--border)') + ';background:' + (on ? 'var(--acc)' : 'var(--s2)') + ';color:' + (on ? '#fff' : 'var(--t2)') + ';font-weight:' + (on ? '700' : '500') + ';user-select:none">' + t + '</span>';
-  }).join('');
-  const su = document.getElementById('tagSetupRow');
-  const em = document.getElementById('tagEmotionRow');
-  if (su) su.innerHTML = make('setup', TAG_PRESETS.setup);
-  if (em) em.innerHTML = make('emotion', TAG_PRESETS.emotion);
-}
-
-function toggleTag(kind, tag) {
-  const arr = _selectedTags[kind];
-  const i = arr.indexOf(tag);
-  if (i >= 0) arr.splice(i, 1);
-  else arr.push(tag);
-  renderTagChips();
-}
-
-function clearTagSelection() {
-  _selectedTags = {setup:[], emotion:[]};
-  renderTagChips();
-}
-
-// 売買履歴の売り取引タグ別パフォーマンス集計
-function buildTagPerformance() {
-  const sells = T.filter(t => t.a === 'sell' && t.pnl != null && Array.isArray(t.tags) && t.tags.length > 0);
-  if (sells.length === 0) return [];
-  const byTag = {};
-  for (const s of sells) {
-    for (const tag of s.tags) {
-      if (!byTag[tag]) byTag[tag] = {tag, trades:0, wins:0, pnl:0};
-      byTag[tag].trades++;
-      if (s.pnl > 0) byTag[tag].wins++;
-      byTag[tag].pnl += s.pnl;
-    }
-  }
-  return Object.values(byTag)
-    .map(x => ({...x, win_rate: x.trades > 0 ? x.wins / x.trades : 0}))
-    .sort((a, b) => b.trades - a.trades);
-}
-
-function renderTagPerformance() {
-  const el = document.getElementById('dtags');
-  if (!el) return;
-  const rows = buildTagPerformance();
-  const usable = rows.filter(r => r.trades >= 3);
-  if (usable.length === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--t3)">📊 タグ別パフォーマンス: サンプル蓄積中 (各タグ 3 件以上の売り取引で表示)</div>';
-    return;
-  }
-  const fmt = v => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString();
-  el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
-    '<div style="font-size:11px;color:var(--t2);margin-bottom:6px;font-weight:700">📊 タグ別パフォーマンス (n≥3)</div>' +
-    usable.map(r => {
-      const wr = Math.round(r.win_rate * 100);
-      const color = r.pnl >= 0 ? 'var(--green)' : 'var(--red)';
-      const wrColor = wr >= 50 ? 'var(--green)' : (wr >= 30 ? 'var(--yellow)' : 'var(--red)');
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px dashed var(--border);font-size:11px">' +
-        '<span style="color:var(--text);font-weight:600">' + _escape(r.tag) + '</span>' +
-        '<span><span style="color:' + wrColor + ';font-weight:700">勝率 ' + wr + '%</span> <span style="color:var(--t3)">(' + r.trades + '回)</span> <span style="color:' + color + ';font-family:var(--mono);font-weight:700">' + fmt(r.pnl) + '円</span></span>' +
-        '</div>';
-    }).join('') +
-    '</div>';
-}
-
-// ============================================================
 //  Phase C-2: ローカル JSON エクスポート/インポート
 // ============================================================
 
 function exportAllData() {
-  // 最新の execution_meta が全 trade に揃っているかのバリデーションと補完
-  let updatedCount = 0;
-  let missingCount = 0;
-  for (const t of T) {
-    if (!t.execution_meta) {
-      const latest = lookupAIRecommendationByCode(t.cd);
-      if (latest) {
-        t.execution_meta = latest;
-        updatedCount++;
-      } else {
-        missingCount++;
-      }
-    } else {
-      const current = t.execution_meta;
-      const latest = lookupAIRecommendationByCode(t.cd);
-      if (latest) {
-        let changed = false;
-        if ((current.momentum_pass === undefined || current.momentum_pass === null) && latest.momentum_pass !== null) {
-          current.momentum_pass = latest.momentum_pass;
-          changed = true;
-        }
-        if (!current.verdict_at_entry && latest.verdict_at_entry) {
-          current.verdict_at_entry = latest.verdict_at_entry;
-          changed = true;
-        }
-        if (!current.tier_at_entry && latest.tier_at_entry) {
-          current.tier_at_entry = latest.tier_at_entry;
-          changed = true;
-        }
-        if (changed) {
-          updatedCount++;
-        }
-      }
-    }
-  }
-
-  if (updatedCount > 0) {
-    sv(KT, T);
-  }
-
-  if (missingCount > 0) {
-    const msg = '【データ品質チェック】\n' +
-      '取引履歴 ' + T.length + ' 件中、' + missingCount + ' 件に AI 判定情報（execution_meta）がありません。\n' +
-      '（通常の自己判断取引、または過去のAIデータから消去された銘柄です）\n\n' +
-      'バックエンドで分析を行う際、これらの取引は分析対象外となります。\n' +
-      'このままエクスポートを続行しますか？';
-    if (!confirm(msg)) return;
-  }
-
+  // 2026-09-20: ここで過去の取引に「今日の AI 推奨」を書き戻していた
+  // (execution_meta の補完)。バックアップのつもりで過去データを書き換える副作用で、
+  // しかも参照先の執行癖/AI判定別セクションは実データが常に空だったため撤去した。
   const payload = {
     schema: 'trade-journal-v1',
     exported_at: new Date().toISOString(),
@@ -2661,11 +2086,7 @@ function exportAllData() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  let statusStr = '📤 バックアップを保存 (保有 ' + H.length + ' / 履歴 ' + T.length + ')';
-  if (updatedCount > 0) {
-    statusStr += ' ※' + updatedCount + '件のAI情報を補完';
-  }
-  toast(statusStr);
+  toast('📤 バックアップを保存 (保有 ' + H.length + ' / 履歴 ' + T.length + ')');
 }
 
 // forward検証用: 取引を human_paper_trades.json (backend forward_tracker 契約) に写像。
@@ -2684,15 +2105,6 @@ function _noteReasonSuffix(tags, memo) {
 // P5: 見送り記録 (質>件数 — 見送りも記録して習慣を維持。R対象外の別カウント)
 function getSkips() {
   try { return JSON.parse(localStorage.getItem('tj_skips') || '[]'); } catch (e) { return []; }
-}
-
-function recordSkipWeek() {
-  const reason = prompt('今週は見送り — 理由 (任意・空欄OK)\n例: 条件に合う候補なし / 地合いが悪い / 多忙', '');
-  if (reason === null) return;  // キャンセル
-  const skips = getSkips();
-  skips.push({ date: new Date().toISOString().slice(0, 10), reason: reason.trim() || null });
-  localStorage.setItem('tj_skips', JSON.stringify(skips));
-  toast('🙅 見送りを記録しました (☁️公開で連携・週次リマインドも止まります)');
 }
 
 // P2: 👀 ショートリスト — 候補カードから「平日に指値ウォッチしてほしい銘柄」を選ぶ。
@@ -2732,6 +2144,87 @@ function toggleShortlist(code) {
   }
 }
 
+// 契約「1ポジション = 1要素、分割決済は加重平均」(HANDOFF_human_paper_trades.md) に合わせる。
+// FIFO は1ロットずつ round を吐くので、同じ日に建てた同じ銘柄が複数行になり、
+// 件数 (n) が水増しされて CI が実際より狭く出ていた (2026-09-19 監査)。
+function consolidateRounds(rounds) {
+  const byKey = new Map();
+  for (const r of rounds) {
+    const key = [r.code, r.type || 'spot', r.buy_date].join('|');
+    const cur = byKey.get(key);
+    const sh = Number(r.shares) || 0;
+    if (!cur) {
+      byKey.set(key, {...r, shares: sh, _buyAmt: r.buy_price * sh, _sellAmt: r.sell_price * sh});
+    } else {
+      cur.shares += sh;
+      cur._buyAmt += r.buy_price * sh;
+      cur._sellAmt += r.sell_price * sh;
+      if (r.sell_date > cur.sell_date) cur.sell_date = r.sell_date;   // 最後の決済日
+      if (!cur.buy_memo && r.buy_memo) cur.buy_memo = r.buy_memo;
+      cur.buy_tags = (cur.buy_tags || []).concat(r.buy_tags || []);
+    }
+  }
+  return [...byKey.values()].map(r => {
+    const sh = r.shares || 0;
+    const out = {...r,
+      buy_price: sh ? Math.round(r._buyAmt / sh * 10) / 10 : r.buy_price,
+      sell_price: sh ? Math.round(r._sellAmt / sh * 10) / 10 : r.sell_price};
+    delete out._buyAmt; delete out._sellAmt;
+    out.buy_tags = [...new Set(out.buy_tags || [])];
+    return out;
+  });
+}
+
+// doctrine の最長保有は1ヶ月。1年を超える記録は年の入力ミスとみなし、
+// export から外して「要確認」として画面に出す (黙って採点に混ぜない)。
+const MAX_PLAUSIBLE_HOLD_DAYS = 365;
+
+function splitImplausibleRounds(rounds) {
+  const ok = [], review = [];
+  for (const r of rounds) {
+    const d1 = Date.parse(r.buy_date), d2 = Date.parse(r.sell_date);
+    const days = (isNaN(d1) || isNaN(d2)) ? null : Math.floor((d2 - d1) / 86400000);
+    (days != null && days > MAX_PLAUSIBLE_HOLD_DAYS ? review : ok).push({...r, hold_days: days});
+  }
+  return {ok, review};
+}
+
+// 決済の記録待ち: 保有スクショに写らなくなった建玉 (= 売った) を、約定履歴を
+// 取り込むまで覚えておく。これが無いと removeMissing で消えた建玉の決済が
+// どこにも残らず、負けだけが記録から抜ける (実データで2件確認)。
+function getPendingExits() {
+  try { return JSON.parse(localStorage.getItem('tj_pending_exits') || '[]'); } catch (e) { return []; }
+}
+
+function setPendingExits(list) {
+  localStorage.setItem('tj_pending_exits', JSON.stringify(list || []));
+}
+
+function addPendingExits(removed, today) {
+  const cur = getPendingExits();
+  for (const h of removed || []) {
+    const type = h.type || 'spot';
+    if (cur.some(x => x.code === h.cd && (x.type || 'spot') === type)) continue;
+    cur.push({code: h.cd, name: h.nm || h.cd, type, shares: h.sh || null,
+              entry_price: h.bp || null, entry_date: h.dt || null, noticed_on: today});
+  }
+  setPendingExits(cur);
+  return cur;
+}
+
+// 約定履歴を取り込んだら、その売り (信用売建は買い戻し) で待ちを消し込む。
+function clearPendingExitsFor(items) {
+  const cur = getPendingExits();
+  const closed = new Set();
+  for (const it of items || []) {
+    const type = it.type || 'spot';
+    if (!_isOpenAction(it.action, type)) closed.add(String(it.code || '').trim() + ':' + type);
+  }
+  const next = cur.filter(x => !closed.has(String(x.code) + ':' + (x.type || 'spot')));
+  setPendingExits(next);
+  return next;
+}
+
 function _buildHumanPaperTradesPayload() {
   const rounds = matchRoundTrips(T);  // 決済済み round-trips (R履歴用)。未決済は H から作る
   // J-Quants 5桁コード化 (4桁→末尾0、130A→130A0)。
@@ -2744,16 +2237,21 @@ function _buildHumanPaperTradesPayload() {
   // 信用売建は entry_price/exit_price の意味が現物・信用買いと逆になり、
   // backend の forward_tracker 契約 (ロング前提: entry=買値/exit=売値) を
   // 誤ったサインで汚染しかねないため、対応するまでは export 対象外にする。
-  const closed = rounds.filter(r =>
+  const sane = rounds.filter(r =>
     (r.type || 'spot') !== 'margin_short' &&
     r.buy_price > 0 && r.sell_price > 0 &&
     r.buy_date && r.sell_date && r.sell_date >= r.buy_date
-  ).map(r => ({
+  );
+  // ロットを1ポジションへ統合 → あり得ない保有期間 (年の入力ミス) を別枠へ
+  const split = splitImplausibleRounds(consolidateRounds(sane));
+  window._exportNeedsReview = split.review;
+  const closed = split.ok.map(r => ({
     code: code5(r.code),
     entry_date: r.buy_date,
     entry_price: r.buy_price,
     exit_date: r.sell_date,
     exit_price: r.sell_price,
+    shares: r.shares || null,
     note: typeLabel(r.type) + (r.shares ? ' ' + r.shares + '株' : '')
       + _noteReasonSuffix(r.buy_tags, r.buy_memo),
   }));
@@ -2768,14 +2266,22 @@ function _buildHumanPaperTradesPayload() {
     entry_price: h.bp,
     exit_date: null,
     exit_price: null,
+    shares: h.sh || null,
+    entry_date_is_import_day: !!h.dt_unknown,   // 保有スクショ由来 = 建日ではない
     note: typeLabel(h.type) + (h.sh ? ' ' + h.sh + '株' : '') + ' 未決済'
       + _noteReasonSuffix(h.tags, h.memo),
   }));
   return {
     _generated_at: new Date().toISOString(),
-    _note: '人間紙トレ記録 (journal export)。決済済=取引ログ FIFO(異常値除外)、未決済=保有タブ。forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。skips=見送り週の記録 (R対象外・習慣維持)。',
+    _note: '売買記録 (journal export)。決済済=取引ログ FIFO を 1ポジション=1要素へ統合 '
+      + '(分割決済は株数加重平均・異常値と保有1年超は除外)、未決済=保有タブ。'
+      + 'forward_tracker が機械baseline と比較。未決済は exit null=採点対象外・R計算は backend。'
+      + 'pending_exits=保有から消えたのに約定の記録が無い建玉 (決済の記録待ち)。',
     trades: closed.concat(open),
     skips: getSkips(),
+    pending_exits: getPendingExits(),
+    needs_review: split.review.map(r => ({code: code5(r.code), entry_date: r.buy_date,
+                                          exit_date: r.sell_date, hold_days: r.hold_days})),
   };
 }
 
@@ -2848,10 +2354,20 @@ async function _ghPutJson(pat, filename, obj, message) {
 //    PAT はこの端末のブラウザ(localStorage)に平文で保存。fine-grained・当該repo Contents 権限のみ・短期expiry推奨。
 //    P2/P5: 紙トレ (trades+skips) に加えて 👀ショートリスト (shortlist.json=平日 limit_watch の
 //    監視対象) も同じボタンで publish する (1ボタンで同期完結)。
-async function publishHumanPaperTrades() {
+// 取込の直後に自動で呼ぶ。PAT が保存されていなければ何もしない (催促もしない)。
+async function maybeAutoPublish() {
+  if (!(localStorage.getItem('tj_ghpat') || '').trim()) return;
+  try { await publishHumanPaperTrades({auto: true}); } catch (e) { console.warn('auto publish failed', e); }
+}
+
+async function publishHumanPaperTrades(opts) {
+  const auto = !!(opts && opts.auto);
   const patEl = document.getElementById('hptGhPat');
   const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
-  if (!pat) { alert('GitHub PAT を入力してください\n(fine-grained / trade-journal-data: Contents = Read and write)。'); return; }
+  if (!pat) {
+    if (!auto) alert('GitHub PAT を入力してください\n(fine-grained / trade-journal-data: Contents = Read and write)。');
+    return;
+  }
   const payload = _buildHumanPaperTradesPayload();
   const hasShortlist = localStorage.getItem('tj_shortlist') !== null;
   if (!payload.trades.length && !payload.skips.length && !hasShortlist) {
@@ -2862,6 +2378,7 @@ async function publishHumanPaperTrades() {
     const r1 = await _ghPutJson(pat, 'human_paper_trades.json', payload,
       '📤 human_paper_trades update (' + payload.trades.length + '件+見送り' + payload.skips.length + ') [skip ci]');
     if (!r1.ok) {
+      if (auto) { toast('⚠️ 自動公開に失敗しました (HTTP ' + r1.status + ')。🔑API設定から再実行してください'); return; }
       alert(r1.transient
         ? '公開中断: 既存ファイルの確認に失敗 (HTTP ' + r1.status + ')。時間をおいて再実行してください。'
         : '公開失敗 (HTTP ' + r1.status + ')。PATの権限/対象リポを確認してください。\n' + (r1.detail || ''));
@@ -3369,54 +2886,89 @@ function doTrade() {
     const memo = document.getElementById('tmemo').value.trim();
     const tdt = document.getElementById('tdt').value || TODAY;
     // Phase D-1: 選択されたタグ (手法 + 感情) を取引と保有に保存
-    const tags = [..._selectedTags.setup, ..._selectedTags.emotion];
-    // T0-3 Stage A: 買い注文時に AI 推奨を lookup し execution_meta を保存
-    const exec_meta = buildExecutionMetaOnBuy(cd, p);
+    const tags = [];   // 手法/感情タグは撤去 (実績 0/41 件)
     // 現物と信用は別ポジションとして区別 (doImport と整合)
     const idx = H.findIndex(h => h.cd===cd && (h.type||'spot')===ttype);
     if (idx>=0) { const ex=H[idx],tot=ex.sh+sh; H[idx]={...ex,sh:tot,bp:Math.round((ex.bp*ex.sh+p*sh)/tot*10)/10, tags: [...new Set([...(ex.tags||[]), ...tags])], yutai}; }
-    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, execution_meta:exec_meta, yutai});
+    else H.push({cd,nm,sh,bp:p,sl,tgt,memo,dt:tdt,type:ttype,cp:p, tags, yutai, dt_unknown:false});
     sv(KH,H);
     // 現金の増減は「実際に買ったか売ったか」(a) で決まり、建てる/決済すると独立
     // (信用売建ての新規売=建てる操作だが、現金は増える)。
     cash = (a === 'buy') ? Math.max(0, cash - p*sh) : cash + p*sh;
     sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, memo, execution_meta:exec_meta, yutai}); sv(KT,T);
-    const driftHint = exec_meta && exec_meta.drift_entry_pct != null
-      ? ' (AI 推奨比 ' + (exec_meta.drift_entry_pct >= 0 ? '+' : '') + exec_meta.drift_entry_pct.toFixed(1) + '%)'
-      : '';
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype, tags, memo, yutai}); sv(KT,T);
     const openLabel = (a === 'buy') ? '買い' : '新規売';
-    toast('✅ ' + nm + ' ' + openLabel + '記録' + driftHint);
+    toast('✅ ' + nm + ' ' + openLabel + '記録');
   } else {
     // 決済時もフォームの ttype で現物/信用を区別
     const h = H.find(h => h.cd===cd && (h.type||'spot')===ttype);
     const isYutai = h ? !!h.yutai : false;
     let pnl=null;
-    // T0-3 Stage A: 売り注文時に drift_exit_pct を計算し execution_meta を更新
-    const exec_meta = h ? buildExecutionMetaOnSell(h, p) : null;
-    // Phase D-1: 決済取引のタグは「H に保存済の建て時タグ」+「今回追加で選択したタグ」
-    const sellTags = [...new Set([...(h && h.tags ? h.tags : []), ..._selectedTags.setup, ..._selectedTags.emotion])];
+    const sellTags = [...new Set(h && h.tags ? h.tags : [])];
     if (h) { pnl=positionPnl(h,p); if(h.sh<=sh)H=H.filter(hh=>hh.cd!==cd || (hh.type||'spot')!==ttype); else h.sh-=sh; sv(KH,H); }
     cash = (a === 'buy') ? Math.max(0, cash - p*sh) : cash + p*sh;
     sv(KC,cash);
     document.getElementById('cashIn').value = cash || '';
-    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl,tags:sellTags, execution_meta:exec_meta, yutai: isYutai}); sv(KT,T);
+    T.push({id:Date.now(),a,cd,nm,sh,p,dt:TODAY,type:ttype,pnl,tags:sellTags, yutai: isYutai}); sv(KT,T);
     const ps = pnl!=null ? ' 損益' + (pnl>=0?'+':'-') + '¥' + Math.abs(Math.round(pnl)).toLocaleString() : '';
-    const driftHint = exec_meta && exec_meta.drift_exit_pct_vs_target != null
-      ? ' / 目標比 ' + (exec_meta.drift_exit_pct_vs_target >= 0 ? '+' : '') + exec_meta.drift_exit_pct_vs_target.toFixed(1) + '%'
-      : '';
     const closeLabel = (a === 'buy') ? '返済買' : '売り';
-    toast('✅ ' + nm + ' ' + closeLabel + '記録' + ps + driftHint);
-    renderDriftSummary();        // dashboard の執行癖セクションを更新
-    renderTaxAfterSummary();     // T0-4: 税後 PnL も更新
+    toast('✅ ' + nm + ' ' + closeLabel + '記録' + ps);
   }
   ['tc','tn','tsh','tp','tsl','ttgt','tmemo','tdt'].forEach(id => document.getElementById(id).value=''); document.getElementById('ttype').value='spot';
   if (document.getElementById('tYutai')) document.getElementById('tYutai').checked = false;
-  clearTagSelection();  // Phase D-1: タグ選択リセット
   onAct();  // ラベル/表示をリセット後の状態に戻す
   rTH();
 }
+// 決済の記録待ち・要確認の行を画面に出す (黙って持たない)。
+function renderJournalStatus() {
+  const el = document.getElementById('journalStatus');
+  if (!el) return;
+  const pend = getPendingExits();
+  const review = window._exportNeedsReview || [];
+  let html = '';
+  if (pend.length) {
+    const names = pend.map(x => _escape((x.name || x.code) + '(' + typeLabel(x.type) + ')')).join('・');
+    html += '<div style="background:var(--s1);border:1px solid rgba(245,158,11,.5);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:8px">' +
+      '⏳ <b>決済の記録待ち ' + pend.length + '件</b><br>' + names +
+      '<br><span style="font-size:11px;color:var(--t3)">保有から消えた＝売却済みのはずですが、約定の記録がありません。📋約定履歴のスクショを取り込むと消えます。</span>' +
+      '<div style="margin-top:6px"><button onclick="dismissPendingExits()" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--t3);font-size:11px;padding:4px 10px;cursor:pointer">この一覧を消す</button></div></div>';
+  }
+  if (review.length) {
+    const rows = review.map(r => _escape(r.code + ' ' + r.buy_date + '→' + r.sell_date + ' (' + r.hold_days + '日)')).join('<br>');
+    html += '<div style="background:var(--s1);border:1px solid rgba(239,68,68,.45);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6">' +
+      '⚠️ <b>要確認 ' + review.length + '件</b>（保有期間が1年を超えています。年の入力ミスの可能性）<br>' + rows +
+      '<br><span style="font-size:11px;color:var(--t3)">公開データからは外しています。下の履歴から日付を直せます。</span></div>';
+  }
+  el.innerHTML = html;
+}
+
+function dismissPendingExits() {
+  if (!confirm('決済の記録待ちの一覧を消しますか？\n(記録そのものは増えません)')) return;
+  setPendingExits([]);
+  renderJournalStatus();
+  toast('⏳ 記録待ちの一覧を消しました');
+}
+
+// 履歴の1行を直す (年の入力ミス・OCR の読み違いを本人が直せるように)。
+function editTradeRow(id) {
+  const t = T.find(x => String(x.id) === String(id));
+  if (!t) return;
+  const dt = prompt('約定日 (YYYY-MM-DD)', t.dt || '');
+  if (dt === null) return;
+  if (dt && !/^\d{4}-\d{2}-\d{2}$/.test(dt.trim())) { toast('⚠️ YYYY-MM-DD の形式で入れてください'); return; }
+  const p = prompt('約定価格 (円)', String(t.p ?? ''));
+  if (p === null) return;
+  const pv = _num(p);
+  if (pv == null || pv <= 0) { toast('⚠️ 価格が読み取れません'); return; }
+  t.dt = dt.trim() || t.dt;
+  t.p = pv;
+  sv(KT, T);
+  _buildHumanPaperTradesPayload();   // 要確認リストを作り直す
+  rTH(); calcS(); renderJournalStatus();
+  toast('✏️ 履歴を直しました (☁️公開で反映されます)');
+}
+
 function rTH() {
   document.getElementById('tHist').innerHTML = T.length
     ? [...T].reverse().slice(0,30).map(tHTML).join('')
@@ -3894,6 +3446,8 @@ function saveKeys() {
 let ssType='hold', ssImageList=[], parsedItems=[];
 
 function setSsType(t) {
+  const hw = document.getElementById('histOnlyWrap');
+  if (hw) hw.style.display = (t === 'hist') ? 'flex' : 'none';
   ssType=t;
   ['hold','hist','pnl','watch','cash'].forEach(x => { const el=document.getElementById('sst-'+x); if(el) el.classList.toggle('on',x===t); });
 }
@@ -4281,7 +3835,11 @@ function applyHoldImport(H, items, opts) {
 
 // 約定履歴(hist)スクショの取り込み。doTrade と同じ規則
 // (type 込みでマッチング、現金も増減、bp_unknown を解除、株数0 で type ごと削除)。
-function applyHistImport(H, T, cash, items) {
+function applyHistImport(H, T, cash, items, opts) {
+  // opts.touchHoldings=false: 取引ログ (T) だけ増やし、保有と残金は触らない。
+  // 月1回まとめて約定履歴を取り込む運用で、保有スクショで既に最新化されている
+  // H と残金を二重計上しないため (2026-09-20 の方針変更)。
+  const touch = !(opts && opts.touchHoldings === false);
   let nextH = H.map(h => ({...h}));
   const nextT = T.slice();
   let nextCash = cash;
@@ -4306,6 +3864,12 @@ function applyHistImport(H, T, cash, items) {
     const opening = _isOpenAction(a, type);
     let pnl = null;
     const idx = nextH.findIndex(h => h.cd === (cd || nm) && (h.type || 'spot') === type);
+    if (!touch) {
+      // 履歴のみモード: 損益は保有平均が無いと出せないので null のまま記録する
+      // (R の計算は backend が entry/exit から行うので支障はない)
+      nextT.push({id: Date.now() + Math.random(), a, cd: cd || nm, nm, sh, p, dt, type, pnl: null});
+      continue;
+    }
     if (opening) {
       if (idx >= 0) {
         const ex = nextH[idx], tot = ex.sh + sh;
@@ -4433,6 +3997,9 @@ function doImport() {
         'このうち、以前登録されていて今回のスクショには写っていない銘柄が ' + wetRun.removed.length + ' 件あります:\n・' + names +
         '\n\n売却済みとして保有から削除しますか？\n(キャンセルすると削除せず追加/更新だけ行います)');
       H = ok ? wetRun.H : dryRun.H;
+      // 消した建玉 = 売ったはず。約定履歴を取り込むまで「決済の記録待ち」で覚える
+      // (これが無いと負けだけが記録から抜ける)。
+      if (ok) addPendingExits(wetRun.removed, TODAY);
     } else {
       H = dryRun.H;
     }
@@ -4440,11 +4007,13 @@ function doImport() {
     count = checked.length - skipped.length;
     sv(KH, H);
   } else if (ssType === 'hist') {
-    const r = applyHistImport(H, T, cash, checked);
+    const histOnly = !!document.getElementById('histOnlyChk')?.checked;
+    const r = applyHistImport(H, T, cash, checked, {touchHoldings: !histOnly});
     H = r.H; T = r.T; cash = r.cash; skipped = r.skipped;
     count = checked.length - skipped.length;
     sv(KH, H); sv(KT, T); sv(KC, cash);
     document.getElementById('cashIn').value = cash || '';
+    clearPendingExitsFor(checked);   // 決済を記録できたぶん、待ちを消す
   } else if (ssType === 'pnl') {
     const r = applyPnlImport(T, checked);
     T = r.T; skipped = r.skipped;
@@ -4467,13 +4036,16 @@ function doImport() {
     count = checked.length - skipped.length;
     sv(KW, W);
   }
-  closeModal(); calcS(); rTH(); rHold(); rWatch();
+  closeModal(); calcS(); rTH(); rHold(); rWatch(); renderJournalStatus();
   // スキップ理由を無言で捨てず表示する (以前は該当行が黙って消えていた)
   const skipNote = skipped.length > 0
     ? '（' + skipped.length + '件スキップ: ' + [...new Set(skipped.map(x => x.reason))].join('・') + '）'
     : '';
   if (ssType === 'cash' && count > 0) toast('💴 残金を' + cash.toLocaleString() + '円に更新しました');
   else toast('✅ ' + count + '件を取り込みました' + skipNote);
+  // 保有/約定を取り込んだら、そのまま公開まで済ませる (公開し忘れると建玉チェック
+  // LINE が古い保有を見続ける。実データで8日ぶん古いまま動いていた)。
+  if ((ssType === 'hold' || ssType === 'hist') && count > 0) maybeAutoPublish();
   parsedItems = []; ssImageList = [];
   document.getElementById('ssPreviewList').style.display = 'none';
   document.getElementById('ssPreviewGrid').innerHTML = '';
@@ -4514,7 +4086,6 @@ async function handleSharedFiles() {
 // 初期化
 calcS(); rTH(); rWatch();
 rDash();            // 朝会レポートの初回ロードは rDash 経由 (これが無いと市場/発掘が読み込み中のまま)
-renderTagChips();  // Phase D-1: タグチップを初期描画
 handleSharedFiles();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 </script>
