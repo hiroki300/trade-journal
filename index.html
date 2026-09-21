@@ -490,6 +490,8 @@ select.fi{appearance:none;-webkit-appearance:none;}
       <button onclick="exportHumanPaperTrades()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer;margin-bottom:8px">📤 ① ファイルに出力</button>
       <input id="hptGhPat" type="password" autocomplete="off" placeholder="GitHub PAT（保存済みなら空欄でOK）" style="width:100%;box-sizing:border-box;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:7px;margin-bottom:6px">
       <button onclick="publishHumanPaperTrades()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">☁️ ② 公開して自動連携 (publish)</button>
+      <button onclick="testGhConnection()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;font-weight:600;padding:7px;cursor:pointer;margin-top:6px">🔌 接続テスト（PATの期限・権限を確認）</button>
+      <div id="pubStatus" style="margin-top:6px"></div>
       <button onclick="clearGhPat()" style="width:100%;background:none;border:1px solid var(--border);border-radius:7px;color:var(--t3);font-size:10px;font-weight:600;padding:6px;cursor:pointer;margin-top:6px">🗑 保存したPATをこの端末から消去</button>
       <div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4">※PATは<b>平文(暗号化なし)</b>でこの端末のブラウザ(localStorage)に保存されます。<b>fine-grained・trade-journal-data の Contents (Read and write) のみ</b>／<b>有効期限は短め(30〜90日)を推奨</b>。共用端末では使わず、使い終えたら上の「消去」を。</div>
     </div>
@@ -2525,10 +2527,140 @@ async function _ghPutJson(pat, filename, obj, message) {
       sha: sha, branch: 'main',
     }),
   });
-  if (putR.status === 200 || putR.status === 201) return { ok: true, status: putR.status };
+  // fine-grained PAT なら GitHub が有効期限をヘッダで返す。期限切れの予告に使う。
+  const exp = putR.headers.get('github-authentication-token-expiration') || '';
+  if (putR.status === 200 || putR.status === 201) {
+    return { ok: true, status: putR.status, expires: exp };
+  }
   let detail = '';
   try { detail = (await putR.text()).slice(0, 200); } catch (e) {}
-  return { ok: false, status: putR.status, detail: detail };
+  return { ok: false, status: putR.status, detail: detail, expires: exp };
+}
+
+// ── 公開の健康状態 ────────────────────────────────────────────
+//  「自動連携が止まったのに誰も気づかない」を防ぐための最小の仕掛け。
+//  ① 成功/失敗を端末に記録して 🔑API設定 と 💱売買 に出す
+//  ② 公開済みデータの _generated_at を読んで「何日前のものか」を出す
+//  ③ PAT を実際に GitHub へ当てて 401/403/404 を切り分ける接続テスト
+const PUB_STATE_KEY = 'tj_pub_state';
+const PUB_STALE_DAYS = 7;
+let _pubFresh = null;
+
+function getPubState() {
+  try { return JSON.parse(localStorage.getItem(PUB_STATE_KEY) || 'null') || null; }
+  catch (e) { return null; }
+}
+function setPubState(o) {
+  try { localStorage.setItem(PUB_STATE_KEY, JSON.stringify(o || {})); } catch (e) {}
+}
+function _daysAgo(iso) {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (!t || isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+function _jstShort(iso) {
+  const t = iso ? new Date(iso) : null;
+  if (!t || isNaN(t.getTime())) return '—';
+  const j = new Date(t.getTime() + 9 * 3600 * 1000);
+  return (j.getUTCMonth() + 1) + '/' + j.getUTCDate() + ' ' +
+         String(j.getUTCHours()).padStart(2, '0') + ':' +
+         String(j.getUTCMinutes()).padStart(2, '0');
+}
+
+// 公開済みデータを見て「いつのものか」を確かめる (PAT は不要・読むだけ)
+async function loadPublishedFreshness(force) {
+  if (_pubFresh && !force) return _pubFresh;
+  try {
+    const r = await fetch(PUB_BASE + '/human_paper_trades.json', { cache: 'no-store' });
+    if (!r.ok) { _pubFresh = { err: 'HTTP ' + r.status }; return _pubFresh; }
+    const d = await r.json();
+    const trades = Array.isArray(d.trades) ? d.trades : [];
+    _pubFresh = {
+      at: d._generated_at || null,
+      days: _daysAgo(d._generated_at),
+      n: trades.length,
+      openN: trades.filter(t => t && !t.exit_date).length,
+    };
+  } catch (e) {
+    _pubFresh = { err: (e && e.message) ? e.message : String(e) };
+  }
+  return _pubFresh;
+}
+
+// PAT を実際に当てて切り分ける。推測せず HTTP で言い切る。
+async function testGhConnection() {
+  const patEl = document.getElementById('hptGhPat');
+  const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
+  if (!pat) {
+    alert('この端末に PAT が保存されていません。\n\nGitHub で fine-grained PAT を作り\n' +
+          '（対象リポジトリ: trade-journal-data / 権限: Contents = Read and write）\n' +
+          '上の入力欄に貼って「☁️ 公開して自動連携」を1回押してください。');
+    return;
+  }
+  let r;
+  try {
+    r = await fetch('https://api.github.com/repos/hiroki300/trade-journal-data/contents/human_paper_trades.json?ref=main',
+                    { headers: { 'Authorization': 'Bearer ' + pat,
+                                 'Accept': 'application/vnd.github+json' },
+                      cache: 'no-store' });
+  } catch (e) {
+    alert('通信できませんでした: ' + ((e && e.message) ? e.message : e) +
+          '\n(圏外・機内モード・回線のブロックの可能性)');
+    return;
+  }
+  const exp = r.headers.get('github-authentication-token-expiration') || '';
+  let msg;
+  if (r.status === 200) {
+    msg = '✅ 接続できました。書き込み先も見えています。';
+    if (exp) msg += '\n\nこの PAT の有効期限: ' + exp;
+    else msg += '\n\n(有効期限はサーバから返っていません。classic PAT の可能性)';
+  } else if (r.status === 401) {
+    msg = '❌ PAT が無効か、有効期限が切れています (401)。\n\n' +
+          'GitHub で新しい fine-grained PAT を作り直して、上の入力欄に貼り直してください。';
+  } else if (r.status === 403) {
+    msg = '❌ 権限が足りません (403)。\n\nPAT の権限に ' +
+          'trade-journal-data の Contents = Read and write が必要です。' +
+          (exp ? '\n有効期限: ' + exp : '');
+  } else if (r.status === 404) {
+    msg = '❌ 対象が見つかりません (404)。\n\nPAT の「Repository access」に ' +
+          'trade-journal-data が入っていない可能性が高いです。';
+  } else {
+    msg = '⚠️ 予期しない応答 (HTTP ' + r.status + ')。時間をおいて再実行してください。';
+  }
+  setPubState({ at: new Date().toISOString(), ok: r.status === 200,
+                status: r.status, expires: exp, test: true });
+  renderPubStatus();
+  renderJournalStatus();
+  alert(msg);
+}
+
+// 🔑API設定 の中に出す小さな状態表示
+function renderPubStatus() {
+  const el = document.getElementById('pubStatus');
+  if (!el) return;
+  const st = getPubState();
+  const f = _pubFresh;
+  const bits = [];
+  if (f && !f.err && f.at) {
+    const d = f.days;
+    const warn = (d != null && d >= PUB_STALE_DAYS);
+    bits.push((warn ? '⚠️ ' : '') + '公開データ: ' + _jstShort(f.at) +
+              (d != null ? '（' + d + '日前）' : '') +
+              '・取引' + f.n + '件（未決済' + f.openN + '件）');
+  } else if (f && f.err) {
+    bits.push('公開データを読めませんでした (' + _escape(f.err) + ')');
+  }
+  if (st) {
+    bits.push((st.ok ? '✅' : '❌') + ' 最後の' + (st.test ? '接続テスト' : '公開') +
+              ': ' + _jstShort(st.at) +
+              (st.ok ? '' : ' / HTTP ' + (st.status || '?')));
+    if (st.expires) bits.push('PAT 有効期限: ' + _escape(st.expires));
+  }
+  el.innerHTML = bits.length
+    ? '<div style="font-size:10px;color:var(--t3);line-height:1.6">' +
+      bits.map(_escape).join('<br>') + '</div>'
+    : '';
+  if (!_pubFresh) loadPublishedFreshness().then(() => renderPubStatus());
 }
 
 // ② 自動: trade-journal-data に直接 publish → forward_score が公開版を自動取得 (手置き不要)。
@@ -2538,7 +2670,14 @@ async function _ghPutJson(pat, filename, obj, message) {
 // 取込の直後に自動で呼ぶ。PAT が保存されていなければ何もしない (催促もしない)。
 async function maybeAutoPublish() {
   if (!(localStorage.getItem('tj_ghpat') || '').trim()) return;
-  try { await publishHumanPaperTrades({auto: true}); } catch (e) { console.warn('auto publish failed', e); }
+  try {
+    await publishHumanPaperTrades({auto: true});
+  } catch (e) {
+    console.warn('auto publish failed', e);
+    setPubState({ at: new Date().toISOString(), ok: false, status: 0,
+                  detail: ((e && e.message) ? e.message : String(e)).slice(0, 120) });
+    renderJournalStatus();
+  }
 }
 
 async function publishHumanPaperTrades(opts) {
@@ -2559,6 +2698,9 @@ async function publishHumanPaperTrades(opts) {
     const r1 = await _ghPutJson(pat, 'human_paper_trades.json', payload,
       '📤 human_paper_trades update (' + payload.trades.length + '件+見送り' + payload.skips.length + ') [skip ci]');
     if (!r1.ok) {
+      setPubState({ at: new Date().toISOString(), ok: false, status: r1.status,
+                    detail: (r1.detail || '').slice(0, 120), expires: r1.expires || '' });
+      renderJournalStatus();
       if (auto) { toast('⚠️ 自動公開に失敗しました (HTTP ' + r1.status + ')。🔑API設定から再実行してください'); return; }
       alert(r1.transient
         ? '公開中断: 既存ファイルの確認に失敗 (HTTP ' + r1.status + ')。時間をおいて再実行してください。'
@@ -2575,6 +2717,11 @@ async function publishHumanPaperTrades(opts) {
       }, '👀 shortlist update (' + sl.length + '銘柄) [skip ci]');
       slMsg = r2.ok ? ' / 👀' + sl.length + '銘柄' : ' / ⚠️ウォッチ公開は失敗 (再実行を)';
     }
+    setPubState({ at: new Date().toISOString(), ok: true, status: r1.status,
+                  expires: r1.expires || '' });
+    _pubFresh = null;               // 次に読むときは公開側を取り直す
+    renderPubStatus();
+    renderJournalStatus();
     toast('☁️ 公開しました (' + payload.trades.length + '件+見送り' + payload.skips.length + slMsg + ')。次の日曜 forward_score が採点します');
   } catch (err) {
     alert('公開エラー: ' + (err && err.message ? err.message : err));
@@ -3115,6 +3262,22 @@ function renderJournalStatus() {
       '<br><span style="font-size:11px;color:var(--t3)">保有から消えた＝売却済みのはずですが、約定の記録がありません。📋約定履歴のスクショを取り込むと消えます。</span>' +
       '<div style="margin-top:6px"><button onclick="dismissPendingExits()" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--t3);font-size:11px;padding:4px 10px;cursor:pointer">この一覧を消す</button></div></div>';
   }
+  const st = getPubState();
+  const f = _pubFresh;
+  const stale = f && !f.err && f.days != null && f.days >= PUB_STALE_DAYS;
+  if ((st && st.ok === false) || stale) {
+    const head = (st && st.ok === false)
+      ? '☁️ <b>自動連携が失敗しています</b>（HTTP ' + (st.status || '?') + '・' +
+        _jstShort(st.at) + '）'
+      : '☁️ <b>公開データが ' + f.days + '日前のままです</b>（' + _jstShort(f.at) + '）';
+    const why = (st && st.ok === false)
+      ? 'PAT の有効期限切れがいちばん多い原因です。'
+      : 'この間に売買していれば、毎晩の出口チェックは古い建玉を見ています。';
+    html += '<div style="background:var(--s1);border:1px solid rgba(239,68,68,.5);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:8px">' +
+      head + '<br><span style="font-size:11px;color:var(--t3)">' + why +
+      ' 🔑API設定 の「🔌 接続テスト」で原因を切り分けられます。</span>' +
+      '<div style="margin-top:6px"><button onclick="openKeyModal()" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:4px 10px;cursor:pointer">🔑 API設定を開く</button></div></div>';
+  }
   if (review.length) {
     const rows = review.map(r => _escape(r.code + ' ' + r.buy_date + '→' + r.sell_date + ' (' + r.hold_days + '日)')).join('<br>');
     html += '<div style="background:var(--s1);border:1px solid rgba(239,68,68,.45);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6">' +
@@ -3122,6 +3285,7 @@ function renderJournalStatus() {
       '<br><span style="font-size:11px;color:var(--t3)">公開データからは外しています。下の履歴から日付を直せます。</span></div>';
   }
   el.innerHTML = html;
+  if (!_pubFresh) loadPublishedFreshness().then(() => renderJournalStatus());
 }
 
 function dismissPendingExits() {
