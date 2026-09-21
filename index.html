@@ -1237,6 +1237,9 @@ function _renderPullbackCard(c) {
         (codeId
           ? '<button onclick="researchFromCandidate(\'' + codeId + '\')" style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);border-radius:6px;padding:3px 9px;font-size:10px;color:var(--acc);font-weight:700;line-height:1.2;white-space:nowrap;cursor:pointer;">🔍 調べる</button>'
           : '') +
+        (codeId
+          ? '<button id="chartbtn_' + codeId + '" onclick="toggleInlineChart(\'' + codeId + '\')" style="margin-left:6px;background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.35);border-radius:6px;padding:3px 9px;font-size:10px;color:#0284c7;font-weight:700;line-height:1.2;white-space:nowrap;cursor:pointer;">📈 チャート</button>'
+          : '') +
       '</div>' +
       '<div style="text-align:right;white-space:nowrap;margin-left:6px;">' +
         (dd != null ? '<div style="font-size:13px;font-weight:700;color:var(--red);">-' + _escape(String(dd)) + '%</div><div style="font-size:9px;color:var(--t3);">60日高値比</div>' : '') +
@@ -1292,6 +1295,7 @@ function _renderPullbackCard(c) {
     block('📏', '値動きの大きさ', b.volatility, '#f59e0b') +
     block('📐', 'よく売買された価格帯', b.levels, '#8b5cf6') +
     block('📍', 'いまの位置 (チャートの数字)', b.position, '#0ea5e9') +
+    (codeId ? '<div id="chart_' + codeId + '" style="display:none;margin-bottom:8px"></div>' : '') +
     block('📊', '直近決算', b.earnings, '#10b981') +
     block('💰', '参考指標', b.valuation, 'var(--t3)') +
     earnDateHtml +
@@ -1847,6 +1851,181 @@ function _renderBriefCard(s) {
       bodyHtml +
       metricsDetail +
     '</div>';
+}
+
+// ============================================================
+//  アプリ内チャート (インライン SVG・外部ライブラリ無し)
+// ============================================================
+//  日足 110 本のローソク足 + MA25/MA75 + 出来高。水平線は
+//  -8%ストップ / 20日高安 / 高安が集まった価格、帯は「最も売買が多かった価格帯」。
+//  系列はバックエンド (pullback_charts.json) が作る。**フロントで指標を作り直さない**。
+//  チャートを開いたときだけ取りにいく (常時読み込みを重くしない)。
+// ============================================================
+const CHART_W = 360, CHART_H = 250;          // モバイル幅 ~360px
+const CHART_PAD = {l: 4, r: 46, t: 8, b: 16};
+const CHART_PRICE_H = 170, CHART_VOL_H = 44;
+
+let _chartsData = null;       // セッション内キャッシュ (localStorage には置かない)
+let _chartsFetching = null;
+
+async function _loadCharts(force) {
+  if (_chartsData && !force) return _chartsData;
+  if (_chartsFetching) return _chartsFetching;
+  _chartsFetching = _fetchJSON('pullback_charts.json').then(d => {
+    _chartsData = d; _chartsFetching = null; return d;
+  }).catch(() => { _chartsFetching = null; return null; });
+  return _chartsFetching;
+}
+
+function _niceNum(v) {
+  if (v == null || isNaN(v)) return '—';
+  return Math.round(v).toLocaleString();
+}
+
+// 純関数: 系列 → SVG 文字列。数値が壊れていても例外にしない (描けない旨を返す)。
+function buildChartSVG(ch) {
+  if (!ch || !Array.isArray(ch.bars) || ch.bars.length < 2) {
+    return '<div style="font-size:11px;color:var(--t3);padding:8px">チャート用の日足がありません</div>';
+  }
+  const bars = ch.bars.filter(b => Array.isArray(b) && b.length >= 6 && b[4] != null);
+  const n = bars.length;
+  const lines = ch.lines || {};
+  const highs = bars.map(b => +b[2]), lows = bars.map(b => +b[3]);
+  // 縦の目盛りは**バーと -8%ストップ**だけで決める。遠い注記 (高安クラスタ等) を
+  // 含めるとローソク足が潰れて読めなくなるので、範囲外の線は描かない (hline が弾く)。
+  const extra = [lines.stop].filter(v => v != null).map(Number);
+  let hi = Math.max(...highs, ...extra), lo = Math.min(...lows, ...extra);
+  if (!(hi > lo)) { hi = lo + 1; }
+  const padY = (hi - lo) * 0.06;
+  hi += padY; lo -= padY;
+
+  const x0 = CHART_PAD.l, x1 = CHART_W - CHART_PAD.r;
+  const y0 = CHART_PAD.t, y1 = CHART_PAD.t + CHART_PRICE_H;
+  const bw = (x1 - x0) / n;
+  const X = i => x0 + bw * (i + 0.5);
+  const Y = v => y1 - (v - lo) / (hi - lo) * (y1 - y0);
+
+  let svg = '';
+  // 最も売買が多かった価格帯 (上位1つだけ・薄い帯)
+  const band = (ch.bands || [])[0];
+  if (band && band.lo != null && band.hi != null) {
+    const yA = Y(Math.max(band.hi, band.lo)), yB = Y(Math.min(band.hi, band.lo));
+    svg += '<rect x="' + x0 + '" y="' + yA.toFixed(1) + '" width="' + (x1 - x0) +
+           '" height="' + Math.max(1, yB - yA).toFixed(1) +
+           '" fill="#8b5cf6" opacity="0.16"></rect>';
+  }
+  // ローソク足
+  bars.forEach((b, i) => {
+    const o = +b[1], h = +b[2], l = +b[3], c = +b[4];
+    const up = c >= o;
+    const col = up ? '#10b981' : '#ef4444';
+    const cx = X(i);
+    svg += '<line x1="' + cx.toFixed(1) + '" y1="' + Y(h).toFixed(1) + '" x2="' + cx.toFixed(1) +
+           '" y2="' + Y(l).toFixed(1) + '" stroke="' + col + '" stroke-width="0.7"></line>';
+    const yT = Y(Math.max(o, c)), yB2 = Y(Math.min(o, c));
+    svg += '<rect x="' + (cx - bw * 0.35).toFixed(1) + '" y="' + yT.toFixed(1) +
+           '" width="' + Math.max(0.8, bw * 0.7).toFixed(1) + '" height="' +
+           Math.max(0.8, yB2 - yT).toFixed(1) + '" fill="' + col + '"></rect>';
+  });
+  // 移動平均
+  const poly = (arr, color) => {
+    const pts = [];
+    (arr || []).forEach((v, i) => { if (v != null) pts.push(X(i).toFixed(1) + ',' + Y(+v).toFixed(1)); });
+    return pts.length > 1
+      ? '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.1"></polyline>'
+      : '';
+  };
+  svg += poly(ch.ma25, '#f59e0b') + poly(ch.ma75, '#6366f1');
+  // 水平線 (ラベルつき)。ラベルが重ならないよう、使った y をずらして記憶する。
+  const usedY = [];
+  const labelY = y => {
+    let ly = y + 3;
+    while (usedY.some(u => Math.abs(u - ly) < 8)) ly += 8;
+    usedY.push(ly);
+    return ly;
+  };
+  const hline = (v, color, dash, label) => {
+    if (v == null || +v < lo || +v > hi) return '';
+    const y = Y(+v);
+    return '<line x1="' + x0 + '" y1="' + y.toFixed(1) + '" x2="' + x1 + '" y2="' + y.toFixed(1) +
+      '" stroke="' + color + '" stroke-width="0.8" stroke-dasharray="' + dash + '"></line>' +
+      '<text x="' + (x1 + 3) + '" y="' + labelY(y).toFixed(1) + '" font-size="8" fill="' + color + '">' +
+      _escape(label) + '</text>';
+  };
+  svg += hline(lines.high_20d, 'var(--t3)', '2 2', '20日高値');
+  svg += hline(lines.low_20d, 'var(--t3)', '2 2', '20日安値');
+  (ch.swings || []).forEach(sw => {
+    svg += hline(sw.price, '#8b5cf6', '1 3', (sw.touches || '') + '回');
+  });
+  svg += hline(lines.stop, '#ef4444', '4 2', '-8%');
+  // 終値のラベル (右余白の線ラベルとぶつからないよう、チャートの内側に置く)
+  const lastC = +bars[n - 1][4];
+  svg += '<text x="' + (x1 - 2) + '" y="' + (Y(lastC) - 4).toFixed(1) +
+         '" font-size="9" font-weight="700" fill="var(--text)" text-anchor="end">' +
+         _niceNum(lastC) + '</text>';
+
+  // 出来高
+  const vy0 = y1 + 18, vy1 = vy0 + CHART_VOL_H;
+  const vmax = Math.max(...bars.map(b => +b[5] || 0), 1);
+  bars.forEach((b, i) => {
+    const v = +b[5] || 0;
+    const h = (v / vmax) * CHART_VOL_H;
+    const up = +b[4] >= +b[1];
+    svg += '<rect x="' + (X(i) - bw * 0.35).toFixed(1) + '" y="' + (vy1 - h).toFixed(1) +
+           '" width="' + Math.max(0.8, bw * 0.7).toFixed(1) + '" height="' + h.toFixed(1) +
+           '" fill="' + (up ? '#10b981' : '#ef4444') + '" opacity="0.45"></rect>';
+  });
+  // 日付ラベル (月が変わるところだけ)
+  let prevMonth = '';
+  bars.forEach((b, i) => {
+    const m = String(b[0] || '').slice(5, 7);
+    if (m && m !== prevMonth) {
+      prevMonth = m;
+      if (i > 2) {
+        svg += '<text x="' + X(i).toFixed(1) + '" y="' + (vy1 + 12) +
+               '" font-size="8" fill="var(--t3)" text-anchor="middle">' + _escape(m) + '月</text>';
+      }
+    }
+  });
+  return '<svg viewBox="0 0 ' + CHART_W + ' ' + CHART_H + '" width="100%" ' +
+    'style="display:block;background:var(--s2);border-radius:8px" ' +
+    'role="img" aria-label="日足チャート">' + svg + '</svg>';
+}
+
+function chartCaption(ch) {
+  const l = (ch && ch.lines) || {};
+  return '日足' + ((ch && ch.n) || 0) + '本 (' + _escape((ch && ch.from) || '') + '〜' +
+    _escape((ch && ch.to) || '') + ')。' +
+    '<span style="color:#f59e0b">━</span>MA25 ' +
+    '<span style="color:#6366f1">━</span>MA75 ' +
+    '<span style="color:#ef4444">┄</span>-8%ストップ' + (l.stop ? '(' + _niceNum(l.stop) + '円)' : '') +
+    ' <span style="color:#8b5cf6">┄</span>高安が集まった価格 ' +
+    '<span style="color:#8b5cf6">▭</span>最も売買が多かった価格帯。' +
+    '価格帯は日足からの推計で、そこで反発するという意味ではありません (予測力は未測定)。52週高安は範囲外。';
+}
+
+async function toggleInlineChart(codeId) {
+  const box = document.getElementById('chart_' + codeId);
+  const btn = document.getElementById('chartbtn_' + codeId);
+  if (!box) return;
+  if (box.style.display === 'block') {
+    box.style.display = 'none';
+    if (btn) btn.textContent = '📈 チャート';
+    return;
+  }
+  box.style.display = 'block';
+  box.innerHTML = '<div style="font-size:11px;color:var(--t3);padding:8px">チャートを読み込み中…</div>';
+  if (btn) btn.textContent = '📈 閉じる';
+  const data = await _loadCharts();
+  const ch = data && data.charts && data.charts[codeId];
+  if (!ch) {
+    box.innerHTML = '<div style="font-size:11px;color:var(--t3);padding:8px">' +
+      'この銘柄のチャート用データがまだ公開されていません (次回の更新で入ります)。</div>';
+    return;
+  }
+  box.innerHTML = buildChartSVG(ch) +
+    '<div style="font-size:9px;color:var(--t3);line-height:1.5;margin-top:4px;padding:0 2px">' +
+    chartCaption(ch) + '</div>';
 }
 
 // ============================================================
