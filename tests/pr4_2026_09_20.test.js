@@ -45,6 +45,18 @@ chk(html.includes('よく売買された価格帯'), '見出しが出る');
 chk(html.includes('2,975円〜3,010円') && html.includes('1.5〜2.0日ぶん下'), 'バックエンドの文言をそのまま出す');
 chk(html.includes('全体の56%'), 'ストップまでのシェアも出る');
 
+console.log('--- 📍 いまの位置 (捨てていた数字) ---');
+sb.c3 = { code: '72030', ticker: '7203', name: 'トヨタ', price: 3116, brief: {
+  position: '60日のレンジ 2,686円〜3,233円 の下から79%の位置／20日の高値 3,145円(0.4日ぶん上)' +
+            '・安値 2,870円(3.5日ぶん下)／MA25 3,027円・傾き+7.2%(25日前比)／MA75 2,923円' +
+            '／ボリンジャー 2,894円〜3,152円・幅は直近100日で下から13%（値動きが縮んでいる側）',
+  one_liner: '増収増益' } };
+const html3 = run('_renderPullbackCard(c3)');
+chk(html3.includes('いまの位置'), '見出しが出る');
+chk(html3.includes('MA25 3,027円') && html3.includes('2,686円〜3,233円'), '移動平均とレンジの絶対価格が出る');
+chk(grab('_renderPullbackCard').includes("block('📍', 'いまの位置 (チャートの数字)', b.position"),
+    'brief.position をそのまま渡すだけ');
+
 console.log('--- brief.levels が無いカードは何も出さない (壊れない) ---');
 sb.c2 = { code: '81360', ticker: '8136', name: 'サンリオ', price: 1268,
           brief: { pullback: '押し目', one_liner: '増収増益' } };
