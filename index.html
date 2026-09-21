@@ -283,14 +283,6 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">※ 需給（信用残・空売残）は週次更新のため、数日程度のタイムラグがあります。</div>
   <div id="dcandbriefs" style="margin-bottom:14px">読み込み中…</div>
 
-  <div class="sec-lbl">💡 買い候補 (LINE 通知 + 指値接近)</div>
-  <button id="compareBtn" onclick="compareCandidates()" style="width:100%;background:linear-gradient(135deg,var(--purple),var(--pink));border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;margin-bottom:8px;box-shadow:var(--shadow-lg)">🏆 候補を全部比較して Top 3 を選ぶ (Gemini + Claude 合議)</button>
-  <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
-    <input type="checkbox" id="cashFilter" onchange="renderCandidatesFromCache()" style="width:16px;height:16px;cursor:pointer">
-    <span>💰 残金 (<span id="cashFilterAmount">0</span>円) で <strong>100株</strong> 買える銘柄のみ表示</span>
-  </label>
-  <div id="comparePanel" style="display:none;margin-bottom:14px"></div>
-  <div id="dcandidates" style="margin-bottom:14px">読み込み中…</div>
 
 </div>
 
@@ -746,7 +738,7 @@ async function _fetchJSON(name) {
 
 // 朝会レポートの「当日」キャッシュ。朝に1回取得したら、その日は再取得せず即表示
 // (タブ切替・PWA 再起動でも GitHub raw を叩かない)。日付が変わったら翌朝1回だけ取得。
-// 日中の更新 (限値ウォッチ 12:30/15:30 等) を取りに行きたいときは「🔄 再取得」で強制更新。
+// 夕方以降に出る更新 (押し目 20:00 / 開示 21:00 の予定、実際は数時間遅れがち) は「🔄 再取得」で強制更新。
 let _isReportsFetched = false;
 let _reportsCacheDate = '';   // この値が TODAY と一致する間は再取得しない
 
@@ -758,21 +750,21 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, watch, brief, forward, forwardHuman, pullback, eventRadar, date } = cached;
+        const { macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, date } = cached;
         _reportsCacheDate = date || '';
 
-        window._watchlistData = watch;
         window._macroData = macro;
         window._briefData = brief;
         window._forwardData = forward;
         window._forwardHumanData = forwardHuman;
         window._pullbackData = pullback;
         window._eventRadarData = eventRadar;
+        window._yutaiData = yutai;
 
         renderMacro(macro);
         renderEventRadar(eventRadar);
         renderPullback(pullback);
-        renderCandidates(watch);
+        renderYutai(yutai);   // 2026-09-19: キャッシュ経路で優待を描画せず「読み込み中…」のままだった
         renderCandidateBrief(brief);
         renderForwardResults(forward);
         renderForwardHumanCompare(forwardHuman);
@@ -793,8 +785,8 @@ async function loadMorningReports(forceRefresh = false) {
   }
 
   if (!forceRefresh && _isReportsFetched && _reportsCacheDate === TODAY) {
-    // 当日キャッシュ有効: ネットを叩かず、残金フィルタの再描画とローカルサマリのみ更新
-    renderCandidatesFromCache();
+    // 当日キャッシュ有効: ネットを叩かず、キャッシュから再描画とローカルサマリのみ更新
+    renderYutai(window._yutaiData);
     renderEventRadarFromCache();     // 開示イベント キャッシュ描画
     renderPullbackFromCache();       // 押し目×決算 キャッシュ描画
     renderCandidateBriefFromCache(); // 井村流候補キャッシュ描画
@@ -807,9 +799,8 @@ async function loadMorningReports(forceRefresh = false) {
     return;
   }
   try {
-    const [macro, watch, brief, forward, forwardHuman, pullback, eventRadar, yutai] = await Promise.all([
+    const [macro, brief, forward, forwardHuman, pullback, eventRadar, yutai] = await Promise.all([
       _fetchJSON('macro_state.json'),
-      _fetchJSON('limit_watchlist.json'),
       _fetchJSON('candidate_brief.json'),
       _fetchJSON('forward_results.json'),
       _fetchJSON('forward_human_compare.json'),
@@ -819,7 +810,6 @@ async function loadMorningReports(forceRefresh = false) {
     ]);
 
     // window へのキャッシュ
-    window._watchlistData = watch;
     window._macroData = macro;  // Phase A-2: マクロ警告 + AI ペルソナ切替で参照
     window._briefData = brief;  // 井村流候補のキャッシュ
     window._forwardData = forward;
@@ -831,7 +821,7 @@ async function loadMorningReports(forceRefresh = false) {
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, watch, brief, forward, forwardHuman, pullback, eventRadar, yutai,
+        macro, brief, forward, forwardHuman, pullback, eventRadar, yutai,
         fetchedAt: now, date: TODAY
       }));
     } catch (e) {
@@ -842,7 +832,6 @@ async function loadMorningReports(forceRefresh = false) {
     renderEventRadar(eventRadar);  // 今日の開示 (観測レーン)
     renderPullback(pullback);    // ピックアップ (押し目×決算) — 主レーン
     renderYutai(yutai);          // 優待の権利付最終日 (事実の通知)
-    renderCandidates(watch);
     renderCandidateBrief(brief); // 井村流候補の描画
     renderForwardResults(forward);
     renderForwardHumanCompare(forwardHuman);
@@ -897,23 +886,6 @@ function lookupAIRecommendationByCode(cd) {
         source: 'pullback_candidates',
         as_of: found.as_of || pb.as_of_date || null,
         momentum_pass: null
-      };
-    }
-  }
-  // フォールバック2: limit_watchlist.json (買い候補) からも lookup
-  const watch = window._watchlistData;
-  if (watch && Array.isArray(watch)) {
-    const found = watch.find(w => w.code === cd || w.code === code5);
-    if (found) {
-      return {
-        ai_recommended_entry: found.trigger_price || null,
-        ai_recommended_stop: found.stop_loss || null,
-        ai_recommended_target: found.target || null,
-        verdict_at_entry: found.rank || null,
-        tier_at_entry: found.rank || null,
-        extraction_source: 'limit_watchlist',
-        source: 'limit_watchlist',
-        momentum_pass: found.momentum_pass ?? null
       };
     }
   }
@@ -1380,6 +1352,11 @@ function _safeUrl(u, fallback) {
 //    入れたうえで、表示側でも必ず日付を出して気づけるようにする。
 const MACRO_STALE_HOURS = 72;
 
+// 表示用: "2026-09-24T10:23+09:00" → "2026-09-24 10:23" (オフセット無しの旧形式もそのまま)
+function _fmtEvalAt(evaluatedAt) {
+  return String(evaluatedAt || '').slice(0, 16).replace('T', ' ');
+}
+
 function _macroAgeHours(evaluatedAt) {
   if (!evaluatedAt) return null;
   const t = Date.parse(evaluatedAt.length <= 16 ? evaluatedAt + '+09:00' : evaluatedAt);
@@ -1399,10 +1376,10 @@ function renderMacro(d) {
   const asOf = d.evaluated_at
     ? (stale
         ? '<div style="font-size:11px;color:var(--red);margin-top:6px;line-height:1.5">⚠️ この地合いは ' +
-          _escape(d.evaluated_at) + ' 時点の値です（約' + Math.floor(ageH / 24) +
+          _escape(_fmtEvalAt(d.evaluated_at)) + ' 時点の値です（約' + Math.floor(ageH / 24) +
           '日前）。更新が止まっている可能性があります。</div>'
         : '<div style="font-size:10px;color:var(--t3);margin-top:6px">📅 ' +
-          _escape(d.evaluated_at) + ' 時点</div>')
+          _escape(_fmtEvalAt(d.evaluated_at)) + ' 時点</div>')
     : '<div style="font-size:11px;color:var(--red);margin-top:6px">⚠️ 評価時刻が不明です</div>';
 
   el.innerHTML =
@@ -1793,18 +1770,27 @@ function renderYutai(d) {
 
   // 権利付最終日が近い順に並んでいる。過ぎたものは出さない。
   const rows = d.rows.filter(r => r.schedule && r.schedule.last_buy_date);
+  // 権利月が未登録の行は日付を出せない。ただし「廃止/中止の開示」は日付が無くても
+  // 最も役に立つ事実なので隠さない (2026-09-19 監査: 7475 の廃止が表示されていなかった)。
+  const inactiveNoDate = d.rows.filter(r => r.active === false && !(r.schedule && r.schedule.last_buy_date));
+  const unregistered = d.rows.filter(r => r.active !== false && !(r.schedule && r.schedule.last_buy_date));
   if (countEl) countEl.textContent = rows.length ? '(' + rows.length + '件)' : '';
 
   const asOf = d.as_of_date
     ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📅 ' + _escape(d.as_of_date) + ' 時点 / 登録 ' + _escape(String(d.registered_count || 0)) + '銘柄</div>'
     : '';
 
-  if (!rows.length) {
-    el.innerHTML = asOf + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">権利確定月が登録された銘柄がありません。</div>';
+  const unregNote = unregistered.length
+    ? '<div style="font-size:11px;color:var(--t3);margin:0 4px 8px;line-height:1.5">権利確定月が未登録の銘柄: ' +
+      _escape(unregistered.map(r => r.name || r.ticker || r.code).join('、')) +
+      '（yutai_master.json に record_months を入れると日付が出ます）</div>'
+    : '';
+  const cards = rows.concat(inactiveNoDate).map(r => _renderYutaiCard(r)).join('');
+  if (!cards) {
+    el.innerHTML = asOf + unregNote + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">権利確定月が登録された銘柄がありません。</div>';
     return;
   }
-
-  el.innerHTML = asOf + rows.map(r => _renderYutaiCard(r)).join('');
+  el.innerHTML = asOf + cards + unregNote;
 }
 
 function _renderYutaiCard(r) {
@@ -1862,7 +1848,21 @@ function renderCandidateBrief(d) {
     countEl.textContent = d.count ? '(' + d.count + '件)' : '';
   }
 
-  const noteHtml = d.note ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;line-height:1.4;padding:0 4px;">⚠️ 免責: ' + _escape(d.note) + '</div>' : '';
+  // 鮮度を必ず出す。このレーンだけ日付表示が無く、生成が止まっても
+  // 「今週の候補」として静かに古い版が出続ける状態だった (2026-09-19 監査)。
+  // 井村流は週次 (日曜) 生成なので、10日を超えたら止まっている疑いとして赤で出す。
+  const genAt = d.generated_at || d.as_of_date || '';
+  const ageDays = genAt ? Math.floor((Date.parse(ymdJST()) - Date.parse(String(genAt).slice(0, 10))) / 86400000) : null;
+  const stale = ageDays != null && ageDays > 10;
+  const freshHtml = genAt
+    ? (stale
+        ? '<div style="font-size:11px;color:var(--red);margin-bottom:6px;padding:0 4px;line-height:1.5">⚠️ この候補は ' +
+          _escape(String(genAt).slice(0, 10)) + ' 生成（約' + ageDays + '日前）。週次更新が止まっている可能性があります</div>'
+        : '<div style="font-size:10px;color:var(--t3);margin-bottom:6px;padding:0 4px">📅 ' +
+          _escape(String(genAt).slice(0, 10)) + ' 生成（週次）</div>')
+    : '<div style="font-size:11px;color:var(--red);margin-bottom:6px;padding:0 4px">⚠️ 生成日が不明です</div>';
+
+  const noteHtml = freshHtml + (d.note ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;line-height:1.4;padding:0 4px;">⚠️ 免責: ' + _escape(d.note) + '</div>' : '');
 
   if (!d.candidates || d.candidates.length === 0) {
     el.innerHTML = noteHtml + '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">現在表示できる候補はありません</div>';
@@ -2302,179 +2302,6 @@ function _renderBriefCard(s) {
 }
 
 // ============================================================
-//  Phase 3.2: 「💡 買い候補」セクション (LINE 通知 + 指値接近)
-// ============================================================
-//
-//   limit_watchlist.json と pickup_stocks.json を統合し、買い候補を
-//   3 カテゴリに分類して表示。各カードに Gemini Search + Claude
-//   合議分析ボタンを置き、その場で売買判断を支援する。
-//
-//   ピックアップ統合: pickup_stocks.json の priority 銘柄は最上段に
-//   フラグ付きで併記 (limit_watchlist と pickup は別経路だが意味は近い)。
-
-// 候補銘柄の分析結果キャッシュ (タブ切替時に再呼び出ししない)
-window._candAICache = window._candAICache || {};
-
-function _classifyCandidate(stock) {
-  // stock.levels の最寄り (discount_pct 最小) を見て分類
-  if (!stock.levels || stock.levels.length === 0) return 'watch';
-  const notifiedLevels = stock.levels.filter(l => l.notified);
-  if (notifiedLevels.length > 0) return 'notified';
-  const closest = Math.min(...stock.levels.map(l => l.discount_pct ?? 99));
-  if (closest <= 5.0) return 'approaching';
-  return 'watch';
-}
-
-function renderCandidates(watchlist) {
-  // Phase 4.2: フィルタトグル再描画用にデータをキャッシュ
-  window._candidatesCache = {watchlist};
-  // 残金表示を更新
-  const cashAmt = document.getElementById('cashFilterAmount');
-  if (cashAmt) cashAmt.textContent = (cash || 0).toLocaleString();
-  renderCandidatesFromCache();
-}
-
-function renderCandidatesFromCache() {
-  const cache = window._candidatesCache;
-  if (!cache) return;
-  let watchlist = cache.watchlist;
-  // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
-  if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
-    watchlist = watchlist.watchlist;
-  }
-  const el = document.getElementById('dcandidates');
-  if (!Array.isArray(watchlist) || watchlist.length === 0) {
-    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">買い候補なし (limit_watchlist 未公開 or 空)</div>';
-    return;
-  }
-
-  // Phase 4.2: 残金フィルタ (チェックされていれば 100株分の必要資金 ≤ cash で絞る)
-  const cashOnly = document.getElementById('cashFilter');
-  if (cashOnly && cashOnly.checked && cash > 0) {
-    const before = watchlist.length;
-    watchlist = watchlist.filter(s => {
-      // 最も近い指値 (最低価格) で 100株買えるか判定
-      // current_price / level.price が null だと Math.min(null, ...) → NaN になり常に false で落ちるためガード
-      const prices = [];
-      if (typeof s.current_price === 'number' && s.current_price > 0) prices.push(s.current_price);
-      for (const l of (s.levels || [])) {
-        if (typeof l.price === 'number' && l.price > 0) prices.push(l.price);
-      }
-      if (prices.length === 0) return true;  // 価格不明なら除外せず通す
-      const minPrice = Math.min(...prices);
-      return minPrice * 100 <= cash;
-    });
-    if (watchlist.length === 0) {
-      el.innerHTML = '<div style="background:var(--yellow-soft);border:1px solid var(--yellow);border-radius:10px;padding:12px;font-size:12px;color:var(--text)">💰 残金 ' + cash.toLocaleString() + ' 円では <strong>100株単位で買える候補が無し</strong> (' + before + ' 件中)。残金を増やすか、買い候補の選定基準を緩めてください。</div>';
-      return;
-    }
-  }
-
-  // 分類
-  const notified = [];
-  const approaching = [];
-  const watching = [];
-  for (const s of watchlist) {
-    const c = _classifyCandidate(s);
-    if (c === 'notified') notified.push(s);
-    else if (c === 'approaching') approaching.push(s);
-    else watching.push(s);
-  }
-
-  // discount_pct 昇順 (現値に近い順) で各カテゴリ内ソート
-  const _sortByClosest = arr => arr.sort((a, b) => {
-    const da = Math.min(...((a.levels || []).map(l => l.discount_pct ?? 99)));
-    const db = Math.min(...((b.levels || []).map(l => l.discount_pct ?? 99)));
-    return da - db;
-  });
-  _sortByClosest(notified); _sortByClosest(approaching); _sortByClosest(watching);
-
-  let html = '';
-  if (notified.length) {
-    html += '<div style="font-size:11px;color:var(--red);font-weight:700;margin-bottom:6px">🚨 LINE 通知済 (' + notified.length + ' 件)</div>';
-    html += notified.map(s => _renderCandidateCard(s, 'notified')).join('');
-  }
-  if (approaching.length) {
-    html += '<div style="font-size:11px;color:var(--yellow);font-weight:700;margin:10px 0 6px">🎯 指値接近 (' + approaching.length + ' 件)</div>';
-    html += approaching.map(s => _renderCandidateCard(s, 'approaching')).join('');
-  }
-  if (watching.length) {
-    html += '<div style="font-size:11px;color:var(--t3);font-weight:700;margin:10px 0 6px">💎 待機 (' + watching.length + ' 件、深いディスカウント)</div>';
-    html += watching.map(s => _renderCandidateCard(s, 'watch')).join('');
-  }
-  el.innerHTML = html;
-}
-
-function _renderCandidateCard(s, cat) {
-  const code4 = s.code;
-  const cardId = 'aic-' + code4;
-
-  const catColor = {notified:'var(--red)', approaching:'var(--yellow)', watch:'var(--t3)'}[cat];
-
-  // ヘッダー (銘柄名・コード・rank・各種フラグ)
-  const flags = [];
-  if (s.squeeze_candidate) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--t2);font-size:9px;padding:2px 6px;border-radius:4px">🚀 売残増+出来高</span>');
-  if (s.vol_ratio && s.vol_ratio >= 2.0) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">🔥🔥 出来高×' + s.vol_ratio + '</span>');
-  else if (s.vol_ratio && s.vol_ratio >= 1.5) flags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:2px 6px;border-radius:4px">🔥 出来高×' + s.vol_ratio + '</span>');
-  // モメンタム合格バッジ
-  if (s.momentum_pass === true) flags.push('<span style="background:rgba(16,185,129,.15);color:var(--green);font-size:9px;padding:2px 6px;border-radius:4px">📈 モメンタム合格</span>');
-  else if (s.momentum_pass === false) flags.push('<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">📉 モメンタム不適合</span>');
-
-  // 次回決算日 (近いと警告)
-  let earnTag = '';
-  if (s.next_earnings) {
-    const d = new Date(s.next_earnings);
-    const today = new Date();
-    const daysLeft = Math.round((d - today) / (1000 * 60 * 60 * 24));
-    if (daysLeft >= 0 && daysLeft <= 7) {
-      earnTag = '<span style="background:rgba(239,68,68,.15);color:var(--red);font-size:9px;padding:2px 6px;border-radius:4px">📅 決算 ' + daysLeft + ' 日後</span>';
-    } else if (daysLeft >= 0 && daysLeft <= 30) {
-      earnTag = '<span style="font-size:9px;color:var(--t3)">📅 ' + s.next_earnings + '</span>';
-    }
-  }
-
-  // 指値テーブル (levels)
-  const levelsRow = (s.levels || []).map(l => {
-    const notifTag = l.notified ? '<span style="color:var(--red);font-size:9px">●通知済</span>' : '';
-    return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--s2);border-radius:6px;padding:5px 8px;margin-bottom:3px;font-size:11px">' +
-      '<span>' + _escape(l.tag || '') + '</span>' +
-      '<span style="font-family:monospace;font-weight:700">' + Math.round(l.price).toLocaleString() + '円</span>' +
-      '<span style="font-family:monospace;color:var(--t3)">-' + l.discount_pct + '%</span>' +
-      notifTag +
-      '</div>';
-  }).join('');
-
-  // 需給バッジ = 事実表示 (検証Dで売買予測力なしと確認 → 改善/悪化の予測語は付けない)
-  const supplyTags = [];
-  if (s.mr_trend_pct != null) {
-    if (s.mr_trend_pct <= -15) supplyTags.push('<span style="font-size:9px;color:var(--t2)">✨信用倍率低下 ' + s.mr_trend_pct + '%</span>');
-    else if (s.mr_trend_pct >= 25) supplyTags.push('<span style="font-size:9px;color:var(--t2)">⚠️信用倍率上昇 +' + s.mr_trend_pct + '%</span>');
-  }
-  if (s.short_balance_pct != null && s.short_balance_pct >= 1.0) {
-    supplyTags.push('<span style="font-size:9px;color:var(--yellow)">📊空売残 ' + s.short_balance_pct + '%</span>');
-  }
-
-  return '<div style="background:var(--s1);border:1px solid var(--border);border-left:3px solid ' + catColor + ';border-radius:10px;padding:12px;margin-bottom:8px">' +
-    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">' +
-    '<div><span style="font-size:14px;font-weight:700">' + _escape(s.name) + '</span><span style="font-size:10px;color:var(--t3);margin-left:6px;font-family:monospace">' + code4 + ' / rank ' + (s.rank || '-') + ' / score ' + (s.total_score || '-') + '</span></div>' +
-    '<div style="font-size:14px;font-weight:700;font-family:monospace">' + Math.round(s.current_price).toLocaleString() + '円</div>' +
-    '</div>' +
-    (flags.length ? '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">' + flags.join('') + earnTag + '</div>' : (earnTag ? '<div style="margin-bottom:6px">' + earnTag + '</div>' : '')) +
-    (supplyTags.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">' + supplyTags.join('') + '</div>' : '') +
-    '<div style="font-size:10px;color:var(--t3);margin-bottom:3px">指値候補 (現値からの割引%):</div>' +
-    levelsRow +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">' +
-    '<button onclick="toggleChart(\'' + code4 + '\')" style="background:linear-gradient(135deg,#fb923c,#f59e0b);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">📈 チャート</button>' +
-    '<button onclick="analyzeCandidate(\'' + code4 + '\')" style="background:linear-gradient(135deg,#6366f1,#a855f7);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">🤝 AI合議</button>' +
-    '<button onclick="askAISodanForCandidate(\'' + code4 + '\',\'' + s.name.replace(/'/g, "\\'") + '\')" style="background:linear-gradient(135deg,#06b6d4,#0891b2);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow)">💬 AI相談</button>' +
-    '<a href="https://www.buffett-code.com/company/' + code4 + '" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:6px;cursor:pointer;box-shadow:var(--shadow);text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center">📊 企業情報 (決算)</a>' +
-    '</div>' +
-    '<div id="chart-' + code4 + '" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden"></div>' +
-    '<div id="' + cardId + '" style="display:none;margin-top:8px;background:var(--s2);border-radius:8px;padding:10px;font-size:12px;line-height:1.8;color:var(--text);white-space:pre-wrap"></div>' +
-    '</div>';
-}
-
-// ============================================================
 //  チャート: 確実に正しい日本株チャートを開く
 //  ※ TradingView 無料埋め込みは東証(TSE)株のデータを表示できず Apple(既定銘柄)に
 //    化けてしまうため、ローソク足+出来高+需給+信用が確実に出る kabutan を新タブで開く。
@@ -2490,278 +2317,6 @@ function toggleChart(code4, prefix) {
     return;
   }
   window.open('https://kabutan.jp/stock/chart?code=' + symbol, '_blank', 'noopener');
-}
-
-async function analyzeCandidate(code4) {
-  // limit_watchlist + pickup_stocks の最新を再 fetch (キャッシュ済なら使う)
-  const panel = document.getElementById('aic-' + code4);
-  if (!panel) return;
-
-  // 既に展開済 + 結果ありなら閉じる
-  if (panel.style.display === 'block' && !panel.innerHTML.includes('合議中') && panel.innerHTML.length > 50) {
-    panel.style.display = 'none'; return;
-  }
-  // キャッシュヒット
-  if (window._candAICache[code4]) {
-    panel.style.display = 'block';
-    _renderAIResult(panel, code4);
-    return;
-  }
-
-  panel.style.display = 'block';
-  panel.textContent = '🤝 GeminiとClaudeが合議中...';
-
-  let watchlist = await _fetchJSON('limit_watchlist.json');
-  // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
-  if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
-    watchlist = watchlist.watchlist;
-  }
-  const s = (Array.isArray(watchlist) ? watchlist : []).find(w => w.code === code4);
-  if (!s) {
-    panel.textContent = '⚠️ 銘柄データが取得できませんでした (limit_watchlist 更新待ち?)';
-    return;
-  }
-
-  // プロンプト構築 (短期回転戦略 -8%/RR2 を明示)
-  const levelsTxt = (s.levels || []).map(l =>
-    '  - ' + (l.tag || '') + ' ' + Math.round(l.price) + '円 (現値-' + l.discount_pct + '%)' + (l.notified ? ' [通知済]' : '')
-  ).join('\n');
-
-  const prompt =
-    buildPersonaPrefix() +
-    '⚠️ 重要: あなたの役割は、機械スクリーニングを通った候補について、本日の値動き（チャート）と企業のファンダメンタルズ（事業内容・決算）を「調べる材料」として整理することです。需給（信用倍率・空売り残高）は事実として参照してよいが売買予測の根拠にはしない（自前の10年検証で需給に予測力なしと確認済み）。買い/見送りは断言せず、最終判断は人間が一次情報で行う前提です。\n' +
-    '必ず Google 検索を実行して以下の3点を調べてください。\n' +
-    '1. 「' + s.name + ' 事業内容」 (企業概要)\n' +
-    '2. 「' + s.name + ' 直近 決算」 (業績トレンドや決算発表予定日)\n' +
-    '3. 「' + s.name + ' 株価 本日」 (本日の値動きや材料)\n\n' +
-    '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) に基づき、前置きなしで以下の項目のみ簡潔に答えてください。**各項目50文字以内**を厳守し、結論ファーストで回答してください。\n\n' +
-    '【候補銘柄】\n' +
-    s.code + ' ' + s.name + '\n' +
-    '現値: ' + Math.round(s.current_price).toLocaleString() + '円 / ATR: ' + (s.atr || '-') + ' / MA25: ' + (s.ma25 ? Math.round(s.ma25).toLocaleString() + '円' : '-') + ' / 20日安値: ' + (s.recent_low_20d ? Math.round(s.recent_low_20d).toLocaleString() + '円' : '-') + ' / -2σ: ' + (s.minus_2sigma ? Math.round(s.minus_2sigma).toLocaleString() + '円' : '-') + '\n' +
-    '出来高比: ×' + (s.vol_ratio || '-') + ' / 信用倍率比: ' + (s.mr_trend_pct == null ? '不明' : s.mr_trend_pct + '%') + ' / 空売残: ' + (s.short_balance_pct == null ? '不明' : s.short_balance_pct + '%') + ' / 踏み上げ候補: ' + (s.squeeze_candidate ? 'YES' : 'NO') + '\n' +
-    '次回決算: ' + (s.next_earnings || '-') + '\n' +
-    '現在の余力(残金): ' + Math.round(cash).toLocaleString() + '円\n\n' +
-    '【指値ライン】\n' + levelsTxt + '\n\n' +
-    '【依頼】以下の順で出力してください（マークダウン可、挨拶不要、各項目50字以内）:\n\n' +
-    '## 【着眼点】\n' +
-    'この銘柄で注目すべき点と主なリスクを30字以内で。買い/見送りは断言しない（最終判断はあなたが一次情報で）。\n\n' +
-    '## 【ざっくり印象（事実ベース）】\n' +
-    '「ファンダ: ★☆☆」「チャート: ★★★」など事実の印象を星で。需給は★評価せず事実のみ（自前の10年検証で需給に売買予測力なしと確認済み）。売買の総合判定はしない。\n\n' +
-    '## 【事業内容・決算リスク】\n' +
-    'どんな事業か、直近の業績は良いか、直近に決算発表が控えていないか（リスク）を1行で。\n\n' +
-    '## 【チャート位置・需給の事実】\n' +
-    '現在のテクニカル位置を1行で。信用残・出来高は事実のみ記載し、優位性/チャンスとは解釈しない（需給は売買予測に使えないと検証済み）。\n\n' +
-    '## 【もし買うなら: リスク管理の目安】\n' +
-    '・想定エントリー価格帯: ◯◯円（チャート上の節目。推奨ではない）\n' +
-    '・ロット目安: ◯◯株 (余力 '+Math.round(cash).toLocaleString()+'円 で安全に買える株数)\n' +
-    '・損切りライン: ◯◯円 (買値から-8%基準)\n' +
-    '・利確目標: ◯◯円 (買値から+16%基準)\n\n' +
-    '## 【本日の材料】\n' +
-    '本日の値動きの背景を1行で。' +
-    getDriftPromptInjection() + getLossPatternInjection();  // T0-3 執行癖 + D-3 負けパターン RAG
-
-  try {
-    // analyzeCandidate: 6 セクション (本音+売買判断+エントリー+損切り+利確+材料) — 6000 tokens
-    const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null, 6000).catch(e => '⚠️ Gemini: ' + e.message),
-      callClaude(prompt, null, null, 6000).catch(e => '⚠️ Claude: ' + e.message),
-    ]);
-    const fmGem = _extractHonne(gRes);
-    const fmCld = _extractHonne(cRes);
-    const detailHTML =
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🤖 Gemini (本日の市場情報):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + md(gRes) + '</div>' +
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略・指値判断):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + md(cRes) + '</div>';
-    // Phase B-2: SBI コピーボタン用に銘柄情報と raw AI 出力もキャッシュ
-    window._candAICache[code4] = {fmGem, fmCld, detailHTML, code: code4, name: s.name, gRes, cRes};
-    _renderAIResult(panel, code4);
-  } catch (e) {
-    panel.textContent = '⚠️ ' + e.message;
-  }
-}
-
-// ============================================================
-//  Phase 3.3: 本音抽出・整形・一括比較ヘルパー
-// ============================================================
-
-// LLM 出力 (Markdown 風) から ## 【シニアFMの本音】 セクションを抜き出す
-function _extractHonne(text) {
-  if (!text) return '';
-  // 「シニアFMの本音」「本音」「結論」あたりを柔軟に拾う
-  const patterns = [
-    /##\s*【シニアFMの本音】\s*\n+([\s\S]*?)(?=\n##|\n━|$)/,
-    /##\s*【本音】\s*\n+([\s\S]*?)(?=\n##|\n━|$)/,
-    /##\s*【結論】\s*\n+([\s\S]*?)(?=\n##|\n━|$)/,
-    /シニアFMの本音[::\s]*\n*([\s\S]*?)(?=\n##|\n━|\n\n|$)/,
-  ];
-  for (const re of patterns) {
-    const m = text.match(re);
-    if (m && m[1]) return m[1].trim().split('\n')[0].slice(0, 80);
-  }
-  // フォールバック: 最初の 80 字
-  return text.trim().slice(0, 80);
-}
-
-// Phase B-2: AI 出力から推奨指値・損切り・利確を正規表現で抽出
-function _extractOrderParams(text) {
-  if (!text) return null;
-  // 「想定エントリー価格帯: 2934円」「価格の目安: 2934円」「指値 2,934 円」等
-  // (検証D後の honest ラベル: 価格の目安 / 想定エントリー価格帯 も拾う)
-  const entryMatch = text.match(/(?:推奨(?:エントリー(?:価格)?|指値|買値)|(?:想定)?エントリー価格帯?|エントリー|価格の目安|指値|買値)[\s::]*([\d,]+)\s*円/);
-  const stopMatch  = text.match(/(?:損切り?(?:ライン|価格)?|ストップ(?:ロス)?)[\s::]*([\d,]+)\s*円/);
-  const targetMatch = text.match(/(?:利確(?:目標|価格|ライン)?|第1?目標|ターゲット)[\s::]*([\d,]+)\s*円/);
-  const parse = m => m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
-  const entry = parse(entryMatch);
-  if (!entry || entry <= 0) return null;
-  return { entry, stop: parse(stopMatch), target: parse(targetMatch) };
-}
-
-// Phase B-2: SBI 用の注文情報を整形してクリップボードへ
-async function copyOrderInfo(code, name, params, shares) {
-  shares = shares || 100;
-  const lines = [
-    '📋 SBI 証券 発注情報',
-    '銘柄: ' + code + ' ' + (name || ''),
-    '株数: ' + shares + ' 株',
-    '指値: ' + params.entry.toLocaleString() + ' 円',
-  ];
-  if (params.stop)   lines.push('損切り: ' + params.stop.toLocaleString() + ' 円 (逆指値で別途設定)');
-  if (params.target) lines.push('利確目標: ' + params.target.toLocaleString() + ' 円');
-  lines.push('期間: 当日中');
-  lines.push('（生成: ' + new Date().toLocaleString('ja-JP') + '）');
-  try {
-    await navigator.clipboard.writeText(lines.join('\n'));
-    toast('📋 注文情報をコピー (' + params.entry.toLocaleString() + '円)');
-  } catch (e) {
-    toast('⚠️ コピー失敗: ' + e.message);
-  }
-}
-
-function _renderAIResult(panel, code4) {
-  const cache = window._candAICache[code4];
-  if (!cache) return;
-  const {fmGem, fmCld, detailHTML, code, name, gRes, cRes} = cache;
-  // Phase B-2: Claude 優先で注文情報を抽出 (戦略判断側を信頼)、無ければ Gemini から
-  const params = _extractOrderParams(cRes) || _extractOrderParams(gRes);
-  const orderBtn = params
-    ? '<button onclick="copyOrderInfo(\'' + code + '\',\'' + (name||'').replace(/'/g, '') + '\',{entry:' + params.entry + ',stop:' + (params.stop||0) + ',target:' + (params.target||0) + '},100)" style="width:100%;background:linear-gradient(135deg,var(--orange),var(--yellow));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer;margin-top:10px;box-shadow:var(--shadow)">📋 SBI 用 注文情報をコピー (指値 ' + params.entry.toLocaleString() + '円' + (params.stop ? ' / 損切' + params.stop.toLocaleString() : '') + ')</button>'
-    : '';
-  panel.innerHTML =
-    // ━━━ 本音を最上段に大きく表示 ━━━
-    '<div style="background:linear-gradient(135deg,var(--pink-soft),var(--purple-soft));border:2px solid var(--pink);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
-    '<div style="font-size:11px;color:var(--pink);font-weight:700;margin-bottom:8px;letter-spacing:.05em">💬 シニアFMの本音 (結論ファースト)</div>' +
-    '<div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:6px">' +
-    '<span style="font-size:10px;color:var(--gem);font-weight:700">🤖 Gemini</span> ' + md(fmGem) +
-    '</div>' +
-    '<div style="font-size:13px;color:var(--text);line-height:1.6">' +
-    '<span style="font-size:10px;color:var(--cld);font-weight:700">🧠 Claude</span> ' + md(fmCld) +
-    '</div>' +
-    orderBtn +
-    '</div>' +
-    // ━━━ 詳細セクション (折りたたみ) ━━━
-    '<details style="background:var(--s2);border-radius:10px;padding:8px 12px;border:1px solid var(--border)">' +
-    '<summary style="cursor:pointer;font-size:11px;color:var(--t2);font-weight:600;padding:4px 0">▼ 詳細分析 (売買判断 / 推奨エントリー / 損切り / 利確 / 材料・リスク)</summary>' +
-    '<div style="margin-top:10px">' + detailHTML + '</div>' +
-    '</details>';
-}
-
-// ============================================================
-//  一括比較: 複数候補から優先順位 Top 3 を選定
-// ============================================================
-async function compareCandidates() {
-  const btn = document.getElementById('compareBtn');
-  const panel = document.getElementById('comparePanel');
-  if (!panel || !btn) return;
-
-  if (panel.style.display === 'block' && panel.innerHTML.length > 100) {
-    panel.style.display = 'none'; return;
-  }
-  panel.style.display = 'block';
-  panel.innerHTML = '<div style="padding:14px;color:var(--t2);font-size:12px">🤝 GeminiとClaudeが全候補を比較中...</div>';
-
-  let watchlist = await _fetchJSON('limit_watchlist.json');
-  // スキーマ変更耐性: object 形式 {watchlist:[...]} で来た場合は配列を取り出す
-  if (watchlist && !Array.isArray(watchlist) && Array.isArray(watchlist.watchlist)) {
-    watchlist = watchlist.watchlist;
-  }
-  if (!Array.isArray(watchlist) || watchlist.length === 0) {
-    panel.innerHTML = '<div style="padding:14px;color:var(--red);font-size:12px">⚠️ 候補データが取得できませんでした</div>';
-    return;
-  }
-
-
-  // 通知済 + 接近 のみを比較対象 (待機は除外、深いディスカウントで動かない)
-  const targets = watchlist.filter(s => {
-    if (!s.levels || s.levels.length === 0) return false;
-    const closest = Math.min(...s.levels.map(l => l.discount_pct ?? 99));
-    const hasNotified = s.levels.some(l => l.notified);
-    return hasNotified || closest <= 5.0;
-  }).slice(0, 6);   // 6 銘柄 cap (3社目の内容欠落・途切れ防止)
-
-  if (targets.length === 0) {
-    panel.innerHTML = '<div style="padding:14px;color:var(--t3);font-size:12px">🤔 通知済 or 接近の候補が無いため比較対象なし</div>';
-    return;
-  }
-
-  const listTxt = targets.map((s, i) => {
-
-    const lv = (s.levels || []).map(l => Math.round(l.price) + '円(-' + l.discount_pct + '%)' + (l.notified ? '●' : '')).join(', ');
-    return (i + 1) + '. ' + s.code + ' ' + s.name + ' (rank ' + (s.rank || '-') + ', 現値 ' + Math.round(s.current_price) + '円, vol×' + (s.vol_ratio || '-') + (s.squeeze_candidate ? ', 🚀踏み上げ' : '') + ')\n' +
-      '   指値: ' + lv + '\n' +
-      '   次回決算: ' + (s.next_earnings || '-') +
-      (pick && pick.synthesis_notes ? '\n   Sonnet分析: ' + pick.synthesis_notes.slice(0, 120) : '');
-  }).join('\n\n');
-
-  const prompt =
-    buildPersonaPrefix() +
-    '⚠️ 重要: あなたの役割は、機械スクリーニングを通った候補を比較し「調べる優先順位の高い順 上位3」を整理することです。需給（信用倍率・空売り残高）は事実として参照してよいが、売買予測の根拠には使わない（自前の10年検証で需給に予測力なしと確認済み）。買いの断言はせず、最終判断は人間が一次情報で行う前提です。長文の材料まとめは不要です。\n' +
-    '必ず Google 検索を実行して、各銘柄の **本日 (' + ymdJST() + ') の場中の値動き・出来高** を取得して比較判断してください。\n\n' +
-    '短期回転戦略 (損切り-8%/RR2/数日〜数週間保有) の視点で、前置きなしで以下の項目のみ簡潔に答えてください。説明はすべて各項目1〜2行（50文字以内）で厳しく制限します。**結論ファースト**で回答してください。\n\n' +
-    '【比較対象 ' + targets.length + ' 銘柄】\n' + listTxt + '\n\n' +
-    '【依頼】以下のフォーマットで答えてください。**各項目50文字以内**を厳守:\n\n' +
-    '## 🥇 第1位: <コード> <銘柄名>\n' +
-    '- 価格の目安: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
-    '- 着眼点 (他候補と比べ調べる価値が高い理由。チャート位置・事業/決算中心、需給は事実のみ。1行で)\n' +
-    '- 本日の材料・速報 (値動きの背景、1行で)\n\n' +
-    '## 🥈 第2位: <コード> <銘柄名>\n' +
-    '- 価格の目安: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
-    '- 着眼点（チャート位置・事業/決算。需給は事実のみで予測根拠にしない） (1行で)\n\n' +
-    '## 🥉 第3位: <コード> <銘柄名>\n' +
-    '- 価格の目安: ◯◯円 (損切り◯◯円 / 目標◯◯円)\n' +
-    '- 着眼点（チャート位置・事業/決算。需給は事実のみで予測根拠にしない） (1行で)\n\n' +
-    '## 📊 全体比較サマリ\n' +
-    '残りの候補について、「コード：注目点 or 様子見の理由」を15文字以内の短い一言で1行ずつ整理してください。\n\n' +
-    '## 💬 一言\n' +
-    'この中で相対的に調べる価値が高いと感じる銘柄を1つ、理由とともに30字以内で。ただし買いの断言はせず、最終判断はあなたが一次情報で。' +
-    getDriftPromptInjection() + getLossPatternInjection();
-
-  try {
-    // compareCandidates: Top1/Top2/Top3 詳細 + 全体比較 + 本音 — 途切れ防止のため4000トークン指定
-    const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null, 4000).catch(e => '⚠️ Gemini: ' + e.message),
-      callClaude(prompt, null, null, 4000).catch(e => '⚠️ Claude: ' + e.message),
-    ]);
-    const honneG = _extractHonne(gRes);
-    const honneC = _extractHonne(cRes);
-    panel.innerHTML =
-      '<div style="background:linear-gradient(135deg,var(--pink-soft),var(--purple-soft));border:2px solid var(--pink);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow-lg)">' +
-      '<div style="font-size:11px;color:var(--pink);font-weight:700;margin-bottom:8px;letter-spacing:.05em">💬 本音 — 今日 1 銘柄選ぶなら</div>' +
-      '<div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:6px"><span style="font-size:10px;color:var(--gem);font-weight:700">🤖 Gemini</span> ' + _escape(honneG) + '</div>' +
-      '<div style="font-size:13px;color:var(--text);line-height:1.6"><span style="font-size:10px;color:var(--cld);font-weight:700">🧠 Claude</span> ' + _escape(honneC) + '</div>' +
-      '</div>' +
-      '<details open style="background:var(--s2);border-radius:10px;padding:8px 12px;border:1px solid var(--border)">' +
-      '<summary style="cursor:pointer;font-size:11px;color:var(--t2);font-weight:600;padding:4px 0">▼ Top3 詳細 + 全体比較</summary>' +
-      '<div style="margin-top:10px">' +
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🤖 Gemini (本日の市場動向 + 比較):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(gRes) + '</div>' +
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略的優先順位):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + _escape(cRes) + '</div>' +
-      '</div>' +
-      '</details>';
-  } catch (e) {
-    panel.innerHTML = '<div style="padding:14px;color:var(--red);font-size:12px">⚠️ ' + e.message + '</div>';
-  }
 }
 
 function hHTML(h, compact, idx) {
@@ -2843,6 +2398,11 @@ async function analyzeHolding(cd) {
   const pct = ((pnl / (h.bp * h.sh)) * 100).toFixed(2);
   const typeStr = typeLabel(h.type);
   const cost = h.bp * h.sh;
+  // TODAY は読み込み時の定数なので、開いたまま日付をまたぐと1日ずれる → その場で取る。
+  // 未来日・桁違いの日付 (入力ミス) は「不明」に倒す。建日が仮置き (dt_unknown) の保有は
+  // そもそも経過日数を主張しない。
+  const _hd = h.dt ? Math.floor((Date.parse(ymdJST()) - Date.parse(h.dt)) / 86400000) : NaN;
+  const heldDays = (!h.dt_unknown && Number.isFinite(_hd) && _hd >= 0 && _hd <= 3650) ? _hd : null;
 
   const prompt =
     buildPersonaPrefix() +
@@ -2854,6 +2414,11 @@ async function analyzeHolding(cd) {
     '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
     '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株） / 現在値: '+cp.toLocaleString()+'円\n'+
     '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
+    (heldDays != null
+      ? '保有開始日: '+h.dt+'（暦日で'+heldDays+'日経過。時間切れ撤退は10営業日が目安）\n'
+      : (h.dt_unknown
+          ? '保有開始日: 不明（'+h.dt+' に保有スクショから取り込んだ日付で、実際の建日ではありません。経過日数は判断材料に使わないでください）\n'
+          : '保有開始日: 不明\n'))+
     (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円 / ':'')+(h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'') +
     (h.memo?'メモ: '+h.memo+'\n':'') + '\n' +
     '【依頼】以下の順で、余計な挨拶文は一切なしで出力してください（HTMLタグは絶対禁止、マークダウンのみ可）:\n\n' +
@@ -4060,7 +3625,7 @@ function _exLinks(code4) {
 // シグナルは予測ではない (検証Dで予測力なし) ことを明記し、売買助言はしない。
 // 押し目候補 (pullback_candidates.json) に載っている銘柄なら、J-Quants 由来の
 // 実数をそのまま返す。チャート分析を「Web検索の再話」ではなく自前データの説明に
-// するための橋渡し。analyzeCandidate() が limit_watchlist の実数を渡すのと同じ作法。
+// するための橋渡し。
 function _pullbackFactsFor(code4) {
   const t = String(code4 || '').toUpperCase();
   if (!t) return null;
@@ -4688,10 +4253,14 @@ function applyHoldImport(H, items, opts) {
       if (it.shares && it.shares > 0) nextH[idx].sh = it.shares;
       if (!nextH[idx].nm && nm) nextH[idx].nm = nm;
       if (memoVal !== 'SS取込') nextH[idx].memo = memoVal;
-      if (it.buy_date) nextH[idx].dt = it.buy_date;
+      if (it.buy_date) { nextH[idx].dt = it.buy_date; nextH[idx].dt_unknown = false; }
     } else {
+      // 保有一覧のスクショ (画面A/B) には建日が無い。dt は取込日で仮置きになるので
+      // 「いつから持っているか」を事実として扱えない。bp_unknown と同じ作法で印を付け、
+      // AI プロンプト側で経過日数を主張しないようにする。
       nextH.push({cd: cd || nm, nm: nm || cd, sh, bp: bpVal, cp: cp || bpVal, sl: null, tgt: null,
-                  memo: memoVal, dt: it.buy_date || TODAY, type: t, bp_unknown: bpUnknown});
+                  memo: memoVal, dt: it.buy_date || TODAY, type: t, bp_unknown: bpUnknown,
+                  dt_unknown: !it.buy_date});
     }
   }
 
@@ -4742,7 +4311,9 @@ function applyHistImport(H, T, cash, items) {
         const ex = nextH[idx], tot = ex.sh + sh;
         nextH[idx] = {...ex, sh: tot, bp: Math.round((ex.bp * ex.sh + p * sh) / tot * 10) / 10, bp_unknown: false};
       } else {
-        nextH.push({cd: cd || nm, nm, sh, bp: p, cp: p, sl: null, tgt: null, memo: 'SS取込', dt, type});
+        // 約定履歴の取込は約定日 (dt) が読めているので、保有取込と違い建日は事実。
+        nextH.push({cd: cd || nm, nm, sh, bp: p, cp: p, sl: null, tgt: null, memo: 'SS取込', dt, type,
+                    dt_unknown: false});
       }
     } else if (idx >= 0) {
       const h = nextH[idx];
