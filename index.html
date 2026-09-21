@@ -300,8 +300,8 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <button class="btn btn-ss" id="ssAnalyzeBtn" onclick="analyzeScreenshots()" style="display:none">🤖 Geminiで一括読み取る</button>
     <div class="ss-result" id="ssResult"></div>
     <label id="histOnlyWrap" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
-      <input type="checkbox" id="histOnlyChk" checked style="width:16px;height:16px;cursor:pointer">
-      <span>📋 <b>履歴だけ</b>取り込む（保有・残金は変更しない）<br><span style="font-size:11px;color:var(--t3)">月1回まとめて約定履歴を入れるとき用。保有はスクショで別に更新します</span></span>
+      <input type="checkbox" id="histOnlyChk" style="width:16px;height:16px;cursor:pointer">
+      <span>📋 <b>履歴だけ</b>取り込む（保有・残金は変更しない）<br><span style="font-size:11px;color:var(--t3)">ふだんは<b>チェックを外したまま</b>で大丈夫です（📋約定履歴 → 📷保有銘柄 の順で撮ると、建日・損益・残金が約定から入ります）。入れるのは、先に📷保有を取り込んでしまったあとに履歴だけ足すときです</span></span>
     </label>
     <button class="btn btn-apply" id="ssApplyBtn" onclick="showImportModal()" style="display:none">✅ 上記の内容を取り込む</button>
   </div>
@@ -4287,6 +4287,7 @@ function applyHistImport(H, T, cash, items, opts) {
   let nextH = H.map(h => ({...h}));
   const nextT = T.slice();
   let nextCash = cash;
+  let cashDelta = 0;
   const skipped = [];
 
   for (const it of items) {
@@ -4330,10 +4331,13 @@ function applyHistImport(H, T, cash, items, opts) {
       else nextH[idx] = {...h, sh: h.sh - sh};
     }
     // 現金の増減はリテラルな売買 (a) で決まる (信用売建の新規売=建てる操作だが現金は増える)
-    nextCash = (a === 'buy') ? Math.max(0, nextCash - p * sh) : nextCash + p * sh;
+    // ⚠️ 1行ごとに Math.max(0, ...) で丸めると**取り込み順で答えが変わる**。
+    // 同じスクショでも「買→売」だと途中のマイナスを飲んで残金が過大になり、
+    // 「売→買」だと正しく出ていた (2026-09-21 にテストで検出)。差分を溜めて最後に1回丸める。
+    cashDelta += (a === 'buy') ? -(p * sh) : (p * sh);
     nextT.push({id: Date.now() + Math.random(), a, cd: cd || nm, nm, sh, p, dt, type, pnl});
   }
-  return {H: nextH, T: nextT, cash: nextCash, skipped};
+  return {H: nextH, T: nextT, cash: Math.max(0, nextCash + cashDelta), skipped};
 }
 
 // 損益履歴(pnl)スクショの取り込み。仕様上ここでは保有(H)を減らさない
