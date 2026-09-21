@@ -828,6 +828,14 @@ async function loadMorningReports(forceRefresh = false) {
   }
 }
 
+const HIST_PAGE = 30;          // 履歴の既定表示件数
+let _histShowAll = false;
+
+function toggleHistAll() {
+  _histShowAll = !_histShowAll;
+  rTH();
+}
+
 function matchRoundTrips(trades, opensOut) {
   // FIFO で買い/売りをペアリング (部分売却対応)
   // code+type をキーにすることで現物と信用を独立してペアリング
@@ -845,6 +853,7 @@ function matchRoundTrips(trades, opensOut) {
       if (!open_buys[key]) open_buys[key] = [];
       // tags/memo はエントリー理由の構造化記録 (P5)。export 経由で半年後の自己分析に使う
       open_buys[key].push({ shares_remaining: sh, price: p, date: dt, cd: cd, tp: tp,
+                            id: t.id,
                             tags: t.tags || [], memo: t.memo || '' });
     } else if (a === 'buy' || a === 'sell') {
       // 「決済する」操作 (信用売建は返済買=決済、それ以外は売=決済)
@@ -863,6 +872,9 @@ function matchRoundTrips(trades, opensOut) {
             sell_date: dt,
             buy_tags: lot.tags || [],
             buy_memo: lot.memo || '',
+            // 元の行 id を運ぶ。「要確認」から辿らずに直すために要る
+            // (履歴は直近30件しか描画しないので、古い行はボタンに到達できない)
+            buy_id: lot.id, sell_id: t.id,
           });
           lot.shares_remaining -= matched;
           remaining -= matched;
@@ -3279,13 +3291,91 @@ function renderJournalStatus() {
       '<div style="margin-top:6px"><button onclick="openKeyModal()" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:4px 10px;cursor:pointer">🔑 API設定を開く</button></div></div>';
   }
   if (review.length) {
-    const rows = review.map(r => _escape(r.code + ' ' + r.buy_date + '→' + r.sell_date + ' (' + r.hold_days + '日)')).join('<br>');
+    const rows = review.map(r => {
+      const sug = _suggestBuyYear(r.buy_date, r.sell_date);
+      const btns =
+        (r.buy_id != null
+          ? '<button onclick="fixReviewRow(\'' + _escape(String(r.buy_id)) + '\')" style="background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.45);border-radius:6px;color:var(--text);font-size:10px;font-weight:700;padding:3px 8px;cursor:pointer;margin-right:6px">✏️ 取得日を直す' +
+            (sug ? '（→' + _escape(sug) + '）' : '') + '</button>'
+          : '') +
+        (r.buy_id != null
+          ? '<button onclick="deleteReviewRound(\'' + _escape(String(r.buy_id)) + '\',\'' + _escape(String(r.sell_id != null ? r.sell_id : '')) + '\')" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--t3);font-size:10px;padding:3px 8px;cursor:pointer">🗑 この往復を消す</button>'
+          : '');
+      return '<div style="margin:6px 0 2px">' +
+        _escape(r.code + ' ' + r.buy_date + '→' + r.sell_date + ' (' + r.hold_days + '日)') +
+        '<div style="margin-top:3px">' + btns + '</div></div>';
+    }).join('');
     html += '<div style="background:var(--s1);border:1px solid rgba(239,68,68,.45);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6">' +
-      '⚠️ <b>要確認 ' + review.length + '件</b>（保有期間が1年を超えています。年の入力ミスの可能性）<br>' + rows +
-      '<br><span style="font-size:11px;color:var(--t3)">公開データからは外しています。下の履歴から日付を直せます。</span></div>';
+      '⚠️ <b>要確認 ' + review.length + '件</b>（保有期間が1年を超えています。年の入力ミスの可能性）' + rows +
+      '<span style="font-size:11px;color:var(--t3)">公開データと月次点検からは外しています。放置しても数字は汚れませんが、この表示は消えません。</span></div>';
   }
   el.innerHTML = html;
   if (!_pubFresh) loadPublishedFreshness().then(() => renderJournalStatus());
+}
+
+// 保有期間が365日以内におさまる**最大の取得年**を提案する (純関数)。
+// 例: 2024-06-04 → 2026-06-23 なら 2026-06-04 (19日保有)。
+// 候補が無ければ null (勝手に決めない)。
+function _suggestBuyYear(buyDate, sellDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(buyDate || ''));
+  const sm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(sellDate || ''));
+  if (!m || !sm) return null;
+  const mmdd = m[2] + '-' + m[3];
+  const sellY = parseInt(sm[1], 10), buyY = parseInt(m[1], 10);
+  for (let y = sellY; y >= buyY; y--) {
+    const cand = y + '-' + mmdd;
+    const d = new Date(cand + 'T00:00:00Z');
+    if (isNaN(d.getTime())) continue;
+    // 2月29日などで日付が繰り上がっていないか (JS は 02-30 を 03-01 にする)
+    if (d.toISOString().slice(0, 10) !== cand) continue;
+    const sd = new Date(sm[0] + 'T00:00:00Z');
+    const days = Math.round((sd - d) / 86400000);
+    if (days >= 0 && days <= MAX_PLAUSIBLE_HOLD_DAYS) return cand;
+  }
+  return null;
+}
+
+// 「要確認」からその場で取得日を直す。履歴を辿る必要がない。
+function fixReviewRow(id) {
+  const t = T.find(x => String(x.id) === String(id));
+  if (!t) { toast('⚠️ 元の記録が見つかりません'); return; }
+  const review = (window._exportNeedsReview || []).find(r => String(r.buy_id) === String(id));
+  const sug = review ? _suggestBuyYear(review.buy_date, review.sell_date) : null;
+  if (sug) {
+    const ok = confirm('取得日を直します。\n\n' +
+      (t.cd || '') + '  ' + (t.dt || '') + ' → ' + sug + '\n' +
+      '（決済 ' + (review.sell_date || '') + ' との保有期間が ' +
+      Math.round((new Date(review.sell_date + 'T00:00:00Z') - new Date(sug + 'T00:00:00Z')) / 86400000) +
+      '日 になります）\n\nこれで直しますか？\n' +
+      '「キャンセル」を押すと自分で日付を入力できます。');
+    if (ok) {
+      t.dt = sug;
+      sv(KT, T);
+      _buildHumanPaperTradesPayload();
+      rTH(); calcS(); renderJournalStatus();
+      toast('✏️ 取得日を ' + sug + ' に直しました (☁️公開で反映されます)');
+      return;
+    }
+  }
+  editTradeRow(id);          // 提案が無い / 断られたら従来の入力へ
+}
+
+// 往復 (取得の行と、対応する決済の行) をまとめて消す。
+function deleteReviewRound(buyId, sellId) {
+  const b = T.find(x => String(x.id) === String(buyId));
+  const sl = sellId ? T.find(x => String(x.id) === String(sellId)) : null;
+  if (!b) { toast('⚠️ 元の記録が見つかりません'); return; }
+  const lines = [b, sl].filter(Boolean).map(x =>
+    '・' + (x.cd || '') + ' ' + (x.a === 'buy' ? '買' : '売') + ' ' +
+    (x.dt || '') + ' ' + (x.sh || '') + '株 @' + (x.p || ''));
+  if (!confirm('この記録を消します（元に戻せません）:\n\n' + lines.join('\n') +
+               '\n\n消すと損益の集計からも外れます。よろしいですか？')) return;
+  const del = new Set([String(buyId), String(sellId || '')]);
+  T = T.filter(x => !del.has(String(x.id)));
+  sv(KT, T);
+  _buildHumanPaperTradesPayload();
+  rTH(); calcS(); rHold(); renderJournalStatus();
+  toast('🗑 ' + lines.length + '件の記録を消しました (☁️公開で反映されます)');
 }
 
 function dismissPendingExits() {
@@ -3315,8 +3405,17 @@ function editTradeRow(id) {
 }
 
 function rTH() {
+  // 直近30件だけ描画していたため、古い行 (年の入力ミス等) に編集ボタンで
+  // 到達できなかった。全件表示に切り替えられるようにする。
+  const _all = [...T].reverse();
+  const _shown = _histShowAll ? _all : _all.slice(0, HIST_PAGE);
+  const _moreBtn = (!_histShowAll && _all.length > HIST_PAGE)
+    ? '<button onclick="toggleHistAll()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:8px;color:var(--t2);font-size:11px;font-weight:600;padding:8px;cursor:pointer;margin-top:6px">▼ 残り ' + (_all.length - HIST_PAGE) + '件も表示（古い記録を直すとき）</button>'
+    : (_histShowAll && _all.length > HIST_PAGE
+        ? '<button onclick="toggleHistAll()" style="width:100%;background:none;border:1px solid var(--border);border-radius:8px;color:var(--t3);font-size:11px;padding:8px;cursor:pointer;margin-top:6px">▲ 直近' + HIST_PAGE + '件だけ表示</button>'
+        : '');
   document.getElementById('tHist').innerHTML = T.length
-    ? [...T].reverse().slice(0,30).map(tHTML).join('')
+    ? _shown.map(tHTML).join('') + _moreBtn
     : '<div class="empty"><div class="ei">📋</div>履歴なし</div>';
 }
 
