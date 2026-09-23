@@ -277,9 +277,13 @@ select.fi{appearance:none;-webkit-appearance:none;}
 <div class="page" id="page-trade">
   <div style="margin-bottom:14px">
     <div class="sec-lbl">📷 スクリーンショットから自動読み込み</div>
+    <div style="font-size:11px;color:var(--t2);background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.5">
+      売買した日は <b>①📋約定履歴 → ②💼保有銘柄</b> の順に取り込みます。<br>
+      <span style="color:var(--t3)">逆順だと、売りの損益が出ず・買った銘柄の建日が「不明」になり・残金が動きません。</span>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
-      <div class="ss-type on" id="sst-hold" onclick="setSsType('hold')">💼 保有銘柄</div>
-      <div class="ss-type" id="sst-hist" onclick="setSsType('hist')">📋 約定履歴</div>
+      <div class="ss-type on" id="sst-hist" onclick="setSsType('hist')">📋 ①約定履歴</div>
+      <div class="ss-type" id="sst-hold" onclick="setSsType('hold')">💼 ②保有銘柄</div>
       <div class="ss-type" id="sst-pnl" onclick="setSsType('pnl')">💰 損益履歴</div>
       <div class="ss-type" id="sst-watch" onclick="setSsType('watch')">👁 ウォッチ</div>
       <div class="ss-type" id="sst-cash" onclick="setSsType('cash')">💴 余力・残金</div>
@@ -301,7 +305,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="ss-result" id="ssResult"></div>
     <label id="histOnlyWrap" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2);cursor:pointer">
       <input type="checkbox" id="histOnlyChk" style="width:16px;height:16px;cursor:pointer">
-      <span>📋 <b>履歴だけ</b>取り込む（保有・残金は変更しない）<br><span style="font-size:11px;color:var(--t3)">ふだんは<b>チェックを外したまま</b>で大丈夫です（📋約定履歴 → 📷保有銘柄 の順で撮ると、建日・損益・残金が約定から入ります）。入れるのは、先に📷保有を取り込んでしまったあとに履歴だけ足すときです</span></span>
+      <span>📋 <b>履歴だけ</b>取り込む（保有・残金は変更しない）<br><span style="font-size:11px;color:var(--t3)">ふだんは<b>チェックを外したまま</b>です。入れるのは、先に💼保有を取り込んでしまったあとに履歴だけ足すときだけ</span></span>
     </label>
     <button class="btn btn-apply" id="ssApplyBtn" onclick="showImportModal()" style="display:none">✅ 上記の内容を取り込む</button>
   </div>
@@ -2303,7 +2307,11 @@ function getSkips() {
 }
 
 // P2: 👀 ショートリスト — 候補カードから「平日に指値ウォッチしてほしい銘柄」を選ぶ。
-// ☁️公開で shortlist.json として publish され、limit_watch (平日12:30/15:30) の監視対象になる。
+// ☁️公開で shortlist.json として publish され、limit_watch (**平日17:45**) の監視対象になる。
+// ⚠️ 12:30/15:30 は 2026-08-30 に廃止した (J-Quants の当日足は ~17:00 反映なので、
+//    それより前に走らせると**前営業日の足**を「今日の安値」として通知していた)。
+// ⚠️ 2026-09-23 実測: 公開リポに shortlist.json は存在せず (404)、指値レーンは
+//    kuribou 候補のみで動いている。👀ウォッチはまだ効いていない。
 // 選定ではなく人間のウォッチ意思表示 (doctrine: 最終判断は人間)。
 function getShortlist() {
   try { return JSON.parse(localStorage.getItem('tj_shortlist') || '[]'); } catch (e) { return []; }
@@ -3887,7 +3895,7 @@ function saveKeys() {
 }
 
 // スクリーンショット読み込み
-let ssType='hold', ssImageList=[], parsedItems=[];
+let ssType='hist', ssImageList=[], parsedItems=[];
 
 function setSsType(t) {
   const hw = document.getElementById('histOnlyWrap');
@@ -4281,7 +4289,7 @@ function applyHoldImport(H, items, opts) {
 // (type 込みでマッチング、現金も増減、bp_unknown を解除、株数0 で type ごと削除)。
 function applyHistImport(H, T, cash, items, opts) {
   // opts.touchHoldings=false: 取引ログ (T) だけ増やし、保有と残金は触らない。
-  // 月1回まとめて約定履歴を取り込む運用で、保有スクショで既に最新化されている
+  // 「履歴だけ」を選んだとき用。先に💼保有を取り込んでしまい、既に最新化されている
   // H と残金を二重計上しないため (2026-09-20 の方針変更)。
   const touch = !(opts && opts.touchHoldings === false);
   let nextH = H.map(h => ({...h}));
