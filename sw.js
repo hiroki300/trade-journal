@@ -1,5 +1,4 @@
 // Service Worker - Trade Journal PWA v5 (Phase C-1: Share Target 対応)
-const CACHE = 'tj-v5';
 const SHARE_CACHE = 'tj-share-v1';
 
 self.addEventListener('install', e => {

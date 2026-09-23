@@ -162,7 +162,7 @@ const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-dat
 | 用途 | 取得先 | 保存キー |
 |---|---|---|
 | 🤖 Gemini 2.5 Flash | aistudio.google.com → Get API key | `tj_gk` |
-| 🧠 Anthropic Claude Haiku 4.5 / Sonnet 4.6 | console.anthropic.com → API Keys | `tj_ck` |
+| 🧠 Anthropic Claude Sonnet 5 | console.anthropic.com → API Keys | `tj_ck` |
 
 > ブラウザから直接 Anthropic API を叩くため、`anthropic-dangerous-direct-browser-access: true` ヘッダ付き。個人運用でのみ使用。
 
@@ -170,9 +170,13 @@ const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-dat
 
 | モデル | 用途 | 単価感 |
 |---|---|---|
-| `gemini-2.5-flash` | 需給・テーマ・市場文脈 | 安価 |
-| `claude-haiku-4-5-20251001` | エントリー判断・チャット | 安価 |
-| `claude-sonnet-4-6` | 売買分析の統合戦略（v0.16〜） | 中 |
+| `gemini-2.5-flash` | `callGemini` の全用途 (需給・テーマ・市場文脈・振り返り) | $0.30 / $2.50 |
+| `claude-sonnet-5` | `callClaude` の全用途 (エントリー判断・チャット・合議) | $2 / $10 |
+
+⚠️ **用途ごとにモデルを分けてはいない。** `callGemini` / `callClaude` がそれぞれ
+1 モデルを使う。単価は 1M トークンあたりの入力 / 出力。
+`claude-sonnet-5` は `thinking:{type:'disabled'}` を明示して呼んでいる
+(省略すると adaptive thinking が既定 ON で `max_tokens` を食う)。
 
 ---
 
