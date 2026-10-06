@@ -1232,6 +1232,17 @@ function renderPullbackFromCache() {
   if (window._pullbackData) renderPullback(window._pullbackData);
 }
 
+// 日々公表・信用取引の規制 (バックエンド margin_alert_view・**表示専用**)。
+// 規制中 (先頭が ⚠️) は権利落ち警告と同じ赤系、日々公表・日証金などは黄系。
+// 文面はバックエンドが事実だけで組み立てる (方向・売買推奨の語は向こうのテストで禁止)。
+function _marginAlertHtml(text) {
+  if (!text) return '';
+  const reg = String(text).startsWith('⚠️');
+  const bg = reg ? 'rgba(239,68,68,.06)' : 'rgba(234,179,8,.08)';
+  const bd = reg ? 'rgba(239,68,68,.25)' : 'rgba(234,179,8,.3)';
+  return '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);line-height:1.5;">' + _escape(text) + '</div>';
+}
+
 function _renderPullbackCard(c) {
   const b = c.brief || {};
   const code4 = c.ticker || (c.code ? c.code.slice(0, 4) : '');
@@ -1305,11 +1316,15 @@ function _renderPullbackCard(c) {
   const exDateHtml = b.ex_date
     ? '<div style="background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);line-height:1.5;">' + _escape(b.ex_date) + '</div>' : '';
 
+  // 日々公表・信用規制 (flag MARGIN_ALERT_ENABLED が OFF の間は b.margin_alert が無く何も出ない)
+  const marginAlertHtml = _marginAlertHtml(b.margin_alert);
+
   return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;box-shadow:var(--shadow)">' +
     headerHtml +
     block('📉', '押し目の状況', b.pullback, 'var(--acc)') +
     block('⏱', '当日の動き', b.turn, '#10b981') +
     exDateHtml +
+    marginAlertHtml +
     block('📏', '値動きの大きさ', b.volatility, '#f59e0b') +
     block('📐', 'よく売買された価格帯', b.levels, '#8b5cf6') +
     block('📍', 'いまの位置 (チャートの数字)', b.position, '#0ea5e9') +

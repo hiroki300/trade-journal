@@ -24,7 +24,7 @@ function grab(name) {
 
 const sb = { console, window: {}, Date, document: { getElementById: () => null } };
 vm.createContext(sb);
-vm.runInContext([grab('_escape'), grab('_safeUrl'), grab('_renderPullbackCard'),
+vm.runInContext([grab('_escape'), grab('_safeUrl'), grab('_marginAlertHtml'), grab('_renderPullbackCard'),
                  'function isShortlisted() { return false; }'].join('\n'), sb);
 const run = c => vm.runInContext(c, sb);
 
