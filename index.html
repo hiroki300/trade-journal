@@ -914,7 +914,7 @@ function _safeUrl(u, fallback) {
 //
 // ⚠️ 2026-08-30 に実害を確認: 公開 macro_state.json が 2026-06-03 の版に
 //    毎日巻き戻っており (morning_prices が repo に commit せず、他ジョブが
-//    古い checkout で publish していた)、3 ヶ月前の日経HV・ドル円が
+//    古い checkout で publish していた)、3 ヶ月前の HV・ドル円が
 //    「現在の地合い」として表示されていた。バックエンドに鮮度ゲートを
 //    入れたうえで、表示側でも必ず日付を出して気づけるようにする。
 const MACRO_STALE_HOURS = 72;
@@ -952,7 +952,7 @@ function renderMacro(d) {
   el.innerHTML =
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
     '<span style="font-size:14px;font-weight:700;color:' + (stale ? 'var(--t3)' : regimeColor) + '">' + _escape(regime).toUpperCase() + '</span>' +
-    '<span style="font-size:10px;color:var(--t3)">日経HV ' + _escape(d.hv_20d == null ? '-' : d.hv_20d) + '% / MA25乖離 ' + _escape(d.ma25_dev == null ? '-' : d.ma25_dev) + '%</span>' +
+    '<span style="font-size:10px;color:var(--t3)">TOPIX HV ' + _escape(d.hv_20d == null ? '-' : d.hv_20d) + '% / MA25乖離 ' + _escape(d.ma25_dev == null ? '-' : d.ma25_dev) + '%</span>' +
     '</div>' +
     '<div style="font-size:11px;color:' + (stale ? 'var(--t3)' : 'var(--t2)') + ';line-height:1.5">' + _escape(d.summary || '') + '</div>' +
     asOf;
