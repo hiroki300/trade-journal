@@ -742,7 +742,7 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, date } = cached;
+        const { macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards, date } = cached;
         _reportsCacheDate = date || '';
 
         window._macroData = macro;
@@ -752,6 +752,7 @@ async function loadMorningReports(forceRefresh = false) {
         window._pullbackData = pullback;
         window._eventRadarData = eventRadar;
         window._yutaiData = yutai;
+        window._aiCardsData = aiCards;   // AI の読み取り (押し目カードの中に出す)
 
         renderMacro(macro);
         renderEventRadar(eventRadar);
@@ -783,7 +784,7 @@ async function loadMorningReports(forceRefresh = false) {
     return;
   }
   try {
-    const [macro, brief, forward, forwardHuman, pullback, eventRadar, yutai] = await Promise.all([
+    const [macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards] = await Promise.all([
       _fetchJSON('macro_state.json'),
       _fetchJSON('candidate_brief.json'),
       _fetchJSON('forward_results.json'),
@@ -791,6 +792,7 @@ async function loadMorningReports(forceRefresh = false) {
       _fetchJSON('pullback_candidates.json'),
       _fetchJSON('event_radar.json'),
       _fetchJSON('yutai_radar.json'),
+      _fetchJSON('ai_cards.json'),   // P3 (2026-10-10)。未公開の間は null で何も出ない
     ]);
 
     // window へのキャッシュ
@@ -801,11 +803,12 @@ async function loadMorningReports(forceRefresh = false) {
     window._pullbackData = pullback;  // 押し目×決算レーンのキャッシュ
     window._eventRadarData = eventRadar;  // 開示イベントレーンのキャッシュ
     window._yutaiData = yutai;            // 優待レーンのキャッシュ
+    window._aiCardsData = aiCards;        // AI の読み取り (押し目カードの中に出す)
 
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, brief, forward, forwardHuman, pullback, eventRadar, yutai,
+        macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards,
         fetchedAt: now, date: TODAY
       }));
     } catch (e) {
@@ -1243,6 +1246,53 @@ function _marginAlertHtml(text) {
   return '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);line-height:1.5;">' + _escape(text) + '</div>';
 }
 
+// ============================================================
+//  🤖 AI の読み取り (P3・2026-10-10・stock-checker ai_cards.py)
+//  LINE に載った押し目候補について、有報 (事業) と決算短信 (決算) から
+//  AI (Claude Sonnet) が抜き出した要点と短い引用。バックエンドで
+//  「引用が原文に実在・数字は本文の表記のまま・売買/株価の向きの語なし」を
+//  照合済みで、落ちた要点は来ない。**並び順・顔ぶれには一切効かない**。
+// ============================================================
+const AI_SECTION_LABELS = {
+  business: '何の会社か', risks: '会社が挙げるリスク', support: '🏛 国・自治体の支援 (補助金など)',
+  drivers: '増減の理由 (会社の説明)', notes: '⚠️ 要確認 (一時的な要因など)',
+};
+
+function _aiCardHtml(card) {
+  if (!card || (!card.profile && !card.latest)) return '';
+  const lines = (card.line || []).map(x =>
+    '<div style="line-height:1.55;margin-bottom:2px;">' + _escape(x) + '</div>').join('');
+  const part = (p) => {
+    if (!p) return '';
+    const src = p.source || {};
+    const secs = Object.entries(p.sections || {}).filter(([, items]) => items && items.length);
+    return '<div style="margin-top:8px;">' +
+      '<div style="font-size:10px;color:var(--t3);margin-bottom:4px;">📄 ' + _escape(src.title || '') +
+        (p.truncated ? '（長いので途中まで読んでいます）' : '') + '</div>' +
+      secs.map(([sec, items]) =>
+        '<div style="margin-bottom:6px;">' +
+          '<div style="font-size:10px;font-weight:700;color:var(--t2);margin-bottom:2px;">' + _escape(AI_SECTION_LABELS[sec] || sec) + '</div>' +
+          items.map(it =>
+            '<div style="display:flex;gap:6px;line-height:1.55;"><span style="color:var(--t3);flex:none;">•</span><span>' +
+              _escape(it.point || '') +
+              '<span style="display:block;font-size:10px;color:var(--t3);">「' + _escape(it.quote || '') + '」</span>' +
+            '</span></div>').join('') +
+        '</div>').join('') +
+    '</div>';
+  };
+  const missing = (card.latest_missing && !card.latest)
+    ? '<div style="font-size:10px;color:var(--t3);margin-top:6px;">決算: この候補の数字の元になった決算短信はまだ手元にありません（当日の短信は翌晩に保存されます）。</div>'
+    : '';
+  return '<div style="background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--t2);">' +
+    '<div style="font-size:10px;font-weight:700;color:var(--acc);margin-bottom:4px;">🤖 AI の読み取り</div>' +
+    lines +
+    '<details style="margin-top:4px;"><summary style="font-size:10px;color:var(--acc);cursor:pointer;">要点と原文の引用を見る</summary>' +
+      part(card.profile) + part(card.latest) + missing +
+    '</details>' +
+    '<div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4;">有報・決算短信から AI (Claude Sonnet) が抜き出した要点です。引用は原文と機械で照合済み・数字は本文の表記のまま。売買の判断・株価の予想はしていません。</div>' +
+  '</div>';
+}
+
 function _renderPullbackCard(c) {
   const b = c.brief || {};
   const code4 = c.ticker || (c.code ? c.code.slice(0, 4) : '');
@@ -1319,8 +1369,12 @@ function _renderPullbackCard(c) {
   // 日々公表・信用規制 (flag MARGIN_ALERT_ENABLED が OFF の間は b.margin_alert が無く何も出ない)
   const marginAlertHtml = _marginAlertHtml(b.margin_alert);
 
+  // AI の読み取り (ai_cards.json に載っている社だけ。無ければ何も出ない)
+  const aiHtml = _aiCardHtml((((window._aiCardsData || {}).cards) || {})[c.code]);
+
   return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;box-shadow:var(--shadow)">' +
     headerHtml +
+    aiHtml +
     block('📉', '押し目の状況', b.pullback, 'var(--acc)') +
     block('⏱', '当日の動き', b.turn, '#10b981') +
     exDateHtml +
