@@ -146,7 +146,7 @@ const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-dat
 
 | ファイル | 用途 |
 |---|---|
-| `macro_state.json` | 日経・グロース・USDJPY などのマクロ最新値 |
+| `macro_state.json` | マクロ判定の最新値 (TOPIX の HV・MA25 乖離・レジーム。2026-10-09 まで「日経HV」と誤表示していた) |
 | `macro_history.json` | マクロ指標の履歴 |
 | `latest_prices.json` | 全銘柄の最新終値 |
 | `weekly_results.json` | 週次スキャナーの推奨銘柄（S/A/B/C ランク） |
