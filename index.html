@@ -263,6 +263,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">「60日高値から浅く押した ＋ 上昇基調は維持 ＋ 直近決算が増収増益」を満たす銘柄の機械抽出です。<b>買いシグナルではありません</b>（エッジ未検証・最終判断は決算短信等の一次情報で）。<br>※ 該当数が多い日は条件がゆるく当たっている局面、少ない日は絞り込めている局面です。<b>どちらが有利かは検証していません</b>（該当数に予測力があるかは未測定）。<br>※ 📐の「◯日ぶん」は<b>その銘柄がふだん1日で動く値幅</b>を1とした距離です（¥300の株と¥35,000の株を同じ物差しで比べるため）。価格帯は<b>日足からの推計</b>（1日の出来高を高値〜安値へ均等配分）で、実際の約定分布ではありません。窓は直近100営業日なので<b>52週高安は範囲外</b>。そこで反発する/止まるという意味ではありません（予測力は未測定）。</div>
   <div id="dpullback" style="margin-bottom:14px">読み込み中…</div>
 
+  <div class="sec-lbl">🔎 👀 ウォッチの深掘り <span id="deepDiveCount"></span></div>
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">👀 に入れた会社に<b>新しい決算短信</b>が出ると、翌朝までに AI (Claude Opus) が読んで 4 つの型（要点・比較・要因とリスク・セグメント）で抜き出します。引用は原文と機械で照合済み・数字は本文の表記のまま。<b>売買の判断・株価の予想はしていません</b>（最終判断は一次情報で）。</div>
+  <div id="ddeepdive" style="margin-bottom:14px">読み込み中…</div>
+
   <div class="sec-lbl">🎁 優待の権利日 <span id="yutaiCount"></span></div>
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;line-height:1.4">登録した優待銘柄の<b>権利付最終日</b>（＝この日の引けまで持てば権利が取れる日）が近い順です。<b>おすすめ順ではありません</b>。<br>※ 翌営業日の<b>権利落ち日</b>には、配当・優待の相当額ぶん株価が機械的に下がります。優待の内容・条件は会社IRの一次情報でご確認ください。</div>
   <div id="dyutai" style="margin-bottom:14px">読み込み中…</div>
@@ -742,7 +746,7 @@ async function loadMorningReports(forceRefresh = false) {
     try {
       const cached = JSON.parse(localStorage.getItem('tj_reports_cache'));
       if (cached && cached.fetchedAt) {
-        const { macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards, date } = cached;
+        const { macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards, deepDives, date } = cached;
         _reportsCacheDate = date || '';
 
         window._macroData = macro;
@@ -753,11 +757,13 @@ async function loadMorningReports(forceRefresh = false) {
         window._eventRadarData = eventRadar;
         window._yutaiData = yutai;
         window._aiCardsData = aiCards;   // AI の読み取り (押し目カードの中に出す)
+        window._deepDivesData = deepDives;  // 👀 の深掘り (P4)
 
         renderMacro(macro);
         renderEventRadar(eventRadar);
         renderPullback(pullback);
         renderYutai(yutai);   // 2026-09-19: キャッシュ経路で優待を描画せず「読み込み中…」のままだった
+        renderDeepDives(deepDives);
         renderCandidateBrief(brief);
         renderForwardResults(forward);
         renderForwardHumanCompare(forwardHuman);
@@ -776,6 +782,7 @@ async function loadMorningReports(forceRefresh = false) {
   if (!forceRefresh && _isReportsFetched && _reportsCacheDate === TODAY) {
     // 当日キャッシュ有効: ネットを叩かず、キャッシュから再描画とローカルサマリのみ更新
     renderYutai(window._yutaiData);
+    renderDeepDives(window._deepDivesData);
     renderEventRadarFromCache();     // 開示イベント キャッシュ描画
     renderPullbackFromCache();       // 押し目×決算 キャッシュ描画
     renderCandidateBriefFromCache(); // 井村流候補キャッシュ描画
@@ -784,7 +791,7 @@ async function loadMorningReports(forceRefresh = false) {
     return;
   }
   try {
-    const [macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards] = await Promise.all([
+    const [macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards, deepDives] = await Promise.all([
       _fetchJSON('macro_state.json'),
       _fetchJSON('candidate_brief.json'),
       _fetchJSON('forward_results.json'),
@@ -793,6 +800,7 @@ async function loadMorningReports(forceRefresh = false) {
       _fetchJSON('event_radar.json'),
       _fetchJSON('yutai_radar.json'),
       _fetchJSON('ai_cards.json'),   // P3 (2026-10-10)。未公開の間は null で何も出ない
+      _fetchJSON('deep_dives.json'), // P4 (2026-10-10)。未公開の間は null で「まだ動いていない」
     ]);
 
     // window へのキャッシュ
@@ -804,11 +812,12 @@ async function loadMorningReports(forceRefresh = false) {
     window._eventRadarData = eventRadar;  // 開示イベントレーンのキャッシュ
     window._yutaiData = yutai;            // 優待レーンのキャッシュ
     window._aiCardsData = aiCards;        // AI の読み取り (押し目カードの中に出す)
+    window._deepDivesData = deepDives;    // 👀 の深掘り (P4)
 
     // localStorage へ永続化キャッシュとして保存
     try {
       localStorage.setItem('tj_reports_cache', JSON.stringify({
-        macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards,
+        macro, brief, forward, forwardHuman, pullback, eventRadar, yutai, aiCards, deepDives,
         fetchedAt: now, date: TODAY
       }));
     } catch (e) {
@@ -818,6 +827,7 @@ async function loadMorningReports(forceRefresh = false) {
     renderMacro(macro);
     renderEventRadar(eventRadar);  // 今日の開示 (観測レーン)
     renderPullback(pullback);    // ピックアップ (押し目×決算) — 主レーン
+    renderDeepDives(deepDives);  // 👀 の深掘り (AI が決算短信を読んだ要点)
     renderYutai(yutai);          // 優待の権利付最終日 (事実の通知)
     renderCandidateBrief(brief); // 井村流候補の描画
     renderForwardResults(forward);
@@ -1291,6 +1301,64 @@ function _aiCardHtml(card) {
     '</details>' +
     '<div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4;">有報・決算短信から AI (Claude Sonnet) が抜き出した要点です。引用は原文と機械で照合済み・数字は本文の表記のまま。売買の判断・株価の予想はしていません。</div>' +
   '</div>';
+}
+
+// ============================================================
+//  🔎 👀 ウォッチの深掘り (P4・2026-10-10・stock-checker deep_dive.py)
+//  👀 に入れた会社に新しい決算短信が保存されると、AI (Claude Opus) が
+//  4 つの型で読んだ要点と短い引用。バックエンドで照合済み (引用の実在・
+//  数字は本文の表記のまま・売買/株価の向きの語なし)。並びは 👀 の順のまま。
+// ============================================================
+const DEEP_DIVE_LABELS = {
+  points: '要点', compare: '前年・前四半期との比較',
+  growth: '成長・増益の要因 (会社の説明)', risks: 'リスク・減益の要因 (会社の説明)',
+  segments: 'セグメント (事業ごと)',
+};
+
+function _deepDiveHtml(row, labels) {
+  const code4 = String(row.code || '').slice(0, 4);
+  const head = '<div style="font-size:14px;font-weight:700;color:var(--text);">' + _escape(row.name || code4) +
+    '<span style="font-size:11px;color:var(--t3);margin-left:6px;font-weight:400;">(' + _escape(code4) + ')</span></div>';
+  const d = row.dive;
+  if (!d) {
+    return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;">' +
+      head + '<div style="font-size:11px;color:var(--t3);margin-top:4px;">' + _escape(row.waiting || '') + '</div></div>';
+  }
+  const src = d.source || {};
+  const secs = Object.entries(d.sections || {}).filter(([, items]) => items && items.length);
+  return '<div style="background:var(--s1);border:1px solid rgba(99,102,241,.25);border-radius:10px;padding:10px 12px;margin-bottom:8px;box-shadow:var(--shadow)">' +
+    head +
+    '<div style="font-size:10px;color:var(--t3);margin:2px 0 6px;">📄 ' + _escape(src.title || '決算短信') +
+      (src.date ? '（' + _escape(String(src.date)) + ' 開示）' : '') +
+      (d.truncated ? '（長いので途中まで読んでいます）' : '') + '</div>' +
+    (d.one_liner ? '<div style="font-size:12px;color:var(--t2);line-height:1.55;margin-bottom:4px;">🔎 ' + _escape(d.one_liner) + '</div>' : '') +
+    '<details><summary style="font-size:10px;color:var(--acc);cursor:pointer;">4 つの型と原文の引用を見る</summary>' +
+      secs.map(([sec, items]) =>
+        '<div style="margin-top:6px;">' +
+          '<div style="font-size:10px;font-weight:700;color:var(--t2);margin-bottom:2px;">' + _escape(labels[sec] || DEEP_DIVE_LABELS[sec] || sec) + '</div>' +
+          items.map(it =>
+            '<div style="display:flex;gap:6px;line-height:1.55;font-size:11px;color:var(--t2);"><span style="color:var(--t3);flex:none;">•</span><span>' +
+              _escape(it.point || '') +
+              '<span style="display:block;font-size:10px;color:var(--t3);">「' + _escape(it.quote || '') + '」</span>' +
+            '</span></div>').join('') +
+        '</div>').join('') +
+    '</details>' +
+  '</div>';
+}
+
+function renderDeepDives(d) {
+  const el = document.getElementById('ddeepdive');
+  const countEl = document.getElementById('deepDiveCount');
+  if (!el) return;
+  if (!d || !Array.isArray(d.rows) || !d.rows.length) {
+    el.innerHTML = '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:12px;color:var(--t3)">まだ深掘りはありません（👀 に入れた会社に新しい決算短信が保存されると、ここに出ます）。</div>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  const labels = d.labels || {};
+  const n = d.rows.filter(r => r.dive).length;
+  if (countEl) countEl.textContent = '(' + n + '/' + d.rows.length + '社)';
+  el.innerHTML = d.rows.map(r => _deepDiveHtml(r, labels)).join('');
 }
 
 function _renderPullbackCard(c) {
