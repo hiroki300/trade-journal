@@ -1385,6 +1385,10 @@ function _renderPullbackCard(c) {
     (codeId ? '<div id="chart_' + codeId + '" style="display:none;margin-bottom:8px"></div>' : '') +
     block('📊', '直近決算', b.earnings, '#10b981') +
     block('💰', '参考指標', b.valuation, 'var(--t3)') +
+    // 大量保有報告書 (EDINET・stock-checker large_holdings_view・2026-10-10)。**事実だけ**
+    // (提出者・保有割合・種類・日付・保有目的の原文の先頭)。直近 90 日・提出者ごとに最新。
+    // 並び順・顔ぶれには使わない。flag OFF の間は b.large_holding が空で何も出ない。
+    block('🏦', '大量保有報告書 (EDINET・直近90日)', b.large_holding, '#0891b2') +
     earnDateHtml +
     sizeHtml +
     '<div style="font-size:11px;color:var(--t3);border-top:1px dashed var(--border);padding-top:6px;line-height:1.5;">' + _escape(b.one_liner || '') + streakHtml + '</div>' +
