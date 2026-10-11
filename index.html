@@ -494,14 +494,14 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <!-- forward検証: 人間紙トレ連携 (human_paper_trades.json) -->
     <div class="key-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">👥 forward検証用 紙トレ連携</div>
-      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">取引(決済済+未決済)・見送り記録・👀ウォッチを「人間 vs 機械baseline」連携用に同期。①手動=ファイル出力、②自動=trade-journal-data へ直接 publish（手置き不要・日曜採点/平日指値ウォッチに反映）。</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:8px;line-height:1.5">取引(決済済+未決済)・見送り記録・👀ウォッチを「人間 vs 機械baseline」連携用に同期。①手動=ファイル出力、②自動=GitHub へ直接 publish（手置き不要・日曜採点/平日指値ウォッチに反映）。<b>売買記録は非公開リポ trade-journal-private</b>、👀ウォッチ (銘柄名だけ) は公開リポ trade-journal-data へ。</div>
       <button onclick="exportHumanPaperTrades()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-weight:600;padding:8px;cursor:pointer;margin-bottom:8px">📤 ① ファイルに出力</button>
       <input id="hptGhPat" type="password" autocomplete="off" placeholder="GitHub PAT（保存済みなら空欄でOK）" style="width:100%;box-sizing:border-box;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:7px;margin-bottom:6px">
       <button onclick="publishHumanPaperTrades()" style="width:100%;background:linear-gradient(135deg,#0e4d3a,#1e3a5f);border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:700;padding:8px;cursor:pointer">☁️ ② 公開して自動連携 (publish)</button>
       <button onclick="testGhConnection()" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;font-weight:600;padding:7px;cursor:pointer;margin-top:6px">🔌 接続テスト（PATの期限・権限を確認）</button>
       <div id="pubStatus" style="margin-top:6px"></div>
       <button onclick="clearGhPat()" style="width:100%;background:none;border:1px solid var(--border);border-radius:7px;color:var(--t3);font-size:10px;font-weight:600;padding:6px;cursor:pointer;margin-top:6px">🗑 保存したPATをこの端末から消去</button>
-      <div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4">※PATは<b>平文(暗号化なし)</b>でこの端末のブラウザ(localStorage)に保存されます。<b>fine-grained・trade-journal-data の Contents (Read and write) のみ</b>／<b>有効期限は短め(30〜90日)を推奨</b>。共用端末では使わず、使い終えたら上の「消去」を。</div>
+      <div style="font-size:9px;color:var(--t3);margin-top:6px;line-height:1.4">※PATは<b>平文(暗号化なし)</b>でこの端末のブラウザ(localStorage)に保存されます。<b>fine-grained・trade-journal-data と trade-journal-private の 2 つだけ・Contents (Read and write)</b>／<b>有効期限は短め(30〜90日)を推奨</b>。共用端末では使わず、使い終えたら上の「消去」を。</div>
     </div>
     <button class="key-save-btn" onclick="saveKeys()">✅ 保存してスタート</button>
     <span class="key-skip" onclick="closeKeyModal()">あとで設定する</span>
@@ -2670,8 +2670,14 @@ function clearGhPat() {
 // BUG-1: sha 取得は no-store (キャッシュ由来の古い sha を避ける)。200=既存(sha必須)/
 //        404=新規(sha不要)/それ以外=一過性失敗の可能性 → sha 欠落のまま PUT すると既存ファイルが
 //        422 で失敗するので、中断して冪等リトライを促す。
-async function _ghPutJson(pat, filename, obj, message) {
-  const apiUrl = 'https://api.github.com/repos/hiroki300/trade-journal-data/contents/' + filename;
+// 売買記録 (human_paper_trades.json) は非公開リポへ (D・2026-10-12)。実際の銘柄・建値・株数を
+// 公開リポに置かないため。👀ウォッチ (shortlist.json・銘柄名だけ) は公開リポのまま
+// (bot の limit_watch / disclosure_watch / deep_dive が鍵なしで読む)。
+const GH_PUBLIC_REPO = 'hiroki300/trade-journal-data';
+const GH_PRIVATE_REPO = 'hiroki300/trade-journal-private';
+
+async function _ghPutJson(pat, filename, obj, message, repo) {
+  const apiUrl = 'https://api.github.com/repos/' + (repo || GH_PUBLIC_REPO) + '/contents/' + filename;
   const headers = { 'Authorization': 'Bearer ' + pat, 'Accept': 'application/vnd.github+json' };
   let sha;
   const getR = await fetch(apiUrl + '?ref=main', { headers, cache: 'no-store' });
@@ -2728,11 +2734,18 @@ function _jstShort(iso) {
          String(j.getUTCMinutes()).padStart(2, '0');
 }
 
-// 公開済みデータを見て「いつのものか」を確かめる (PAT は不要・読むだけ)
+// 公開済みの売買記録を見て「いつのものか」を確かめる (読むだけ)。
+// 非公開リポにあるので、この端末に保存した PAT で読む (D・2026-10-12)。
 async function loadPublishedFreshness(force) {
   if (_pubFresh && !force) return _pubFresh;
+  const pat = (localStorage.getItem('tj_ghpat') || '').trim();
+  if (!pat) { _pubFresh = { err: 'この端末に PAT が無い (売買記録は非公開リポなので鍵が要る)' }; return _pubFresh; }
   try {
-    const r = await fetch(PUB_BASE + '/human_paper_trades.json', { cache: 'no-store' });
+    const r = await fetch('https://api.github.com/repos/' + GH_PRIVATE_REPO +
+                          '/contents/human_paper_trades.json?ref=main',
+                          { headers: { 'Authorization': 'Bearer ' + pat,
+                                       'Accept': 'application/vnd.github.raw+json' },
+                            cache: 'no-store' });
     if (!r.ok) { _pubFresh = { err: 'HTTP ' + r.status }; return _pubFresh; }
     const d = await r.json();
     const trades = Array.isArray(d.trades) ? d.trades : [];
@@ -2749,47 +2762,48 @@ async function loadPublishedFreshness(force) {
 }
 
 // PAT を実際に当てて切り分ける。推測せず HTTP で言い切る。
+// 2 つのリポ (非公開 = 売買記録 / 公開 = 👀ウォッチ) をそれぞれ確かめる。
+// ⚠️ GitHub は PAT に権限の無い**非公開**リポに 404 を返す (403 ではない) → 404 は「鍵に入っていない」。
+// ファイルではなくリポ自体を見る (非公開リポは初回の公開まで売買記録のファイルが無く、404 と紛れるため)。
+function _ghRepoTestLine(name, status) {
+  if (status === 200) return '✅ ' + name + ': 見えています';
+  if (status === 401) return '❌ ' + name + ': PAT が無効か期限切れ (401)';
+  if (status === 403) return '❌ ' + name + ': 権限が足りません (403)。Contents = Read and write が必要';
+  if (status === 404) return '❌ ' + name + ': 見えません (404)。PAT の「Repository access」にこのリポが入っていない可能性が高い';
+  if (status === 0) return '❌ ' + name + ': 通信できませんでした (圏外・回線のブロックの可能性)';
+  return '⚠️ ' + name + ': 予期しない応答 (HTTP ' + status + ')。時間をおいて再実行してください';
+}
+
 async function testGhConnection() {
   const patEl = document.getElementById('hptGhPat');
   const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
   if (!pat) {
     alert('この端末に PAT が保存されていません。\n\nGitHub で fine-grained PAT を作り\n' +
-          '（対象リポジトリ: trade-journal-data / 権限: Contents = Read and write）\n' +
+          '（対象リポジトリ: trade-journal-data と trade-journal-private / 権限: Contents = Read and write）\n' +
           '上の入力欄に貼って「☁️ 公開して自動連携」を1回押してください。');
     return;
   }
-  let r;
-  try {
-    r = await fetch('https://api.github.com/repos/hiroki300/trade-journal-data/contents/human_paper_trades.json?ref=main',
-                    { headers: { 'Authorization': 'Bearer ' + pat,
-                                 'Accept': 'application/vnd.github+json' },
-                      cache: 'no-store' });
-  } catch (e) {
-    alert('通信できませんでした: ' + ((e && e.message) ? e.message : e) +
-          '\n(圏外・機内モード・回線のブロックの可能性)');
-    return;
+  const headers = { 'Authorization': 'Bearer ' + pat, 'Accept': 'application/vnd.github+json' };
+  let exp = '';
+  const statuses = [];
+  for (const repo of [GH_PRIVATE_REPO, GH_PUBLIC_REPO]) {
+    let st = 0;
+    try {
+      const r = await fetch('https://api.github.com/repos/' + repo, { headers, cache: 'no-store' });
+      st = r.status;
+      exp = exp || r.headers.get('github-authentication-token-expiration') || '';
+    } catch (e) { st = 0; }
+    statuses.push(st);
   }
-  const exp = r.headers.get('github-authentication-token-expiration') || '';
-  let msg;
-  if (r.status === 200) {
-    msg = '✅ 接続できました。書き込み先も見えています。';
-    if (exp) msg += '\n\nこの PAT の有効期限: ' + exp;
-    else msg += '\n\n(有効期限はサーバから返っていません。classic PAT の可能性)';
-  } else if (r.status === 401) {
-    msg = '❌ PAT が無効か、有効期限が切れています (401)。\n\n' +
-          'GitHub で新しい fine-grained PAT を作り直して、上の入力欄に貼り直してください。';
-  } else if (r.status === 403) {
-    msg = '❌ 権限が足りません (403)。\n\nPAT の権限に ' +
-          'trade-journal-data の Contents = Read and write が必要です。' +
-          (exp ? '\n有効期限: ' + exp : '');
-  } else if (r.status === 404) {
-    msg = '❌ 対象が見つかりません (404)。\n\nPAT の「Repository access」に ' +
-          'trade-journal-data が入っていない可能性が高いです。';
-  } else {
-    msg = '⚠️ 予期しない応答 (HTTP ' + r.status + ')。時間をおいて再実行してください。';
-  }
-  setPubState({ at: new Date().toISOString(), ok: r.status === 200,
-                status: r.status, expires: exp, test: true });
+  const ok = statuses.every(st => st === 200);
+  let msg = (ok ? '✅ 接続できました。2 つのリポとも見えています。' : '❌ 見えないリポがあります。') + '\n\n' +
+    _ghRepoTestLine('売買記録 (非公開・trade-journal-private)', statuses[0]) + '\n' +
+    _ghRepoTestLine('👀ウォッチ (公開・trade-journal-data)', statuses[1]);
+  if (exp) msg += '\n\nこの PAT の有効期限: ' + exp;
+  else if (ok) msg += '\n\n(有効期限はサーバから返っていません。classic PAT の可能性)';
+  const worst = statuses.find(st => st !== 200);
+  setPubState({ at: new Date().toISOString(), ok: ok,
+                status: ok ? 200 : worst, expires: exp, test: true });
   renderPubStatus();
   renderJournalStatus();
   alert(msg);
@@ -2824,7 +2838,8 @@ function renderPubStatus() {
   if (!_pubFresh) loadPublishedFreshness().then(() => renderPubStatus());
 }
 
-// ② 自動: trade-journal-data に直接 publish → forward_score が公開版を自動取得 (手置き不要)。
+// ② 自動: GitHub に直接 publish → bot が自動取得 (手置き不要)。売買記録は非公開リポ
+//    trade-journal-private (bot は読み取り専用の鍵 PRIVATE_DATA_TOKEN で読む)、👀ウォッチは公開リポ。
 //    PAT はこの端末のブラウザ(localStorage)に平文で保存。fine-grained・当該repo Contents 権限のみ・短期expiry推奨。
 //    P2/P5: 紙トレ (trades+skips) に加えて 👀ショートリスト (shortlist.json=平日 limit_watch の
 //    監視対象) も同じボタンで publish する (1ボタンで同期完結)。
@@ -2846,7 +2861,7 @@ async function publishHumanPaperTrades(opts) {
   const patEl = document.getElementById('hptGhPat');
   const pat = ((patEl && patEl.value.trim()) || localStorage.getItem('tj_ghpat') || '').trim();
   if (!pat) {
-    if (!auto) alert('GitHub PAT を入力してください\n(fine-grained / trade-journal-data: Contents = Read and write)。');
+    if (!auto) alert('GitHub PAT を入力してください\n(fine-grained / trade-journal-data と trade-journal-private: Contents = Read and write)。');
     return;
   }
   const payload = _buildHumanPaperTradesPayload();
@@ -2857,7 +2872,8 @@ async function publishHumanPaperTrades(opts) {
   localStorage.setItem('tj_ghpat', pat);  // 次回は空欄のまま再公開可
   try {
     const r1 = await _ghPutJson(pat, 'human_paper_trades.json', payload,
-      '📤 human_paper_trades update (' + payload.trades.length + '件+見送り' + payload.skips.length + ') [skip ci]');
+      '📤 human_paper_trades update (' + payload.trades.length + '件+見送り' + payload.skips.length + ') [skip ci]',
+      GH_PRIVATE_REPO);
     if (!r1.ok) {
       setPubState({ at: new Date().toISOString(), ok: false, status: r1.status,
                     detail: (r1.detail || '').slice(0, 120), expires: r1.expires || '' });
@@ -2875,7 +2891,7 @@ async function publishHumanPaperTrades(opts) {
         updated_at: new Date().toISOString(),
         _note: '👀 平日 limit_watch の監視対象 (PWA 候補カードから選択)。選定ではなく人間のウォッチ意思表示。',
         codes: sl,
-      }, '👀 shortlist update (' + sl.length + '銘柄) [skip ci]');
+      }, '👀 shortlist update (' + sl.length + '銘柄) [skip ci]', GH_PUBLIC_REPO);
       slMsg = r2.ok ? ' / 👀' + sl.length + '銘柄' : ' / ⚠️ウォッチ公開は失敗 (再実行を)';
     }
     setPubState({ at: new Date().toISOString(), ok: true, status: r1.status,
