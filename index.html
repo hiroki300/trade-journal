@@ -2819,11 +2819,11 @@ function renderPubStatus() {
   if (f && !f.err && f.at) {
     const d = f.days;
     const warn = (d != null && d >= PUB_STALE_DAYS);
-    bits.push((warn ? '⚠️ ' : '') + '公開データ: ' + _jstShort(f.at) +
+    bits.push((warn ? '⚠️ ' : '') + '連携した売買記録 (非公開): ' + _jstShort(f.at) +
               (d != null ? '（' + d + '日前）' : '') +
               '・取引' + f.n + '件（未決済' + f.openN + '件）');
   } else if (f && f.err) {
-    bits.push('公開データを読めませんでした (' + _escape(f.err) + ')');
+    bits.push('連携した売買記録 (非公開リポ) を読めませんでした (' + _escape(f.err) + ')');
   }
   if (st) {
     bits.push((st.ok ? '✅' : '❌') + ' 最後の' + (st.test ? '接続テスト' : '公開') +
@@ -3446,7 +3446,7 @@ function renderJournalStatus() {
     const head = (st && st.ok === false)
       ? '☁️ <b>自動連携が失敗しています</b>（HTTP ' + (st.status || '?') + '・' +
         _jstShort(st.at) + '）'
-      : '☁️ <b>公開データが ' + f.days + '日前のままです</b>（' + _jstShort(f.at) + '）';
+      : '☁️ <b>連携した売買記録が ' + f.days + '日前のままです</b>（' + _jstShort(f.at) + '）';
     const why = (st && st.ok === false)
       ? 'PAT の有効期限切れがいちばん多い原因です。'
       : 'この間に売買していれば、毎晩の出口チェックは古い建玉を見ています。';
@@ -3472,7 +3472,7 @@ function renderJournalStatus() {
     }).join('');
     html += '<div style="background:var(--s1);border:1px solid rgba(239,68,68,.45);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6">' +
       '⚠️ <b>要確認 ' + review.length + '件</b>（保有期間が1年を超えています。年の入力ミスの可能性）' + rows +
-      '<span style="font-size:11px;color:var(--t3)">公開データと月次点検からは外しています。放置しても数字は汚れませんが、この表示は消えません。</span></div>';
+      '<span style="font-size:11px;color:var(--t3)">連携データと月次点検からは外しています。放置しても数字は汚れませんが、この表示は消えません。</span></div>';
   }
   el.innerHTML = html;
   if (!_pubFresh) loadPublishedFreshness().then(() => renderJournalStatus());
