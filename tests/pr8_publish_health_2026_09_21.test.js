@@ -56,10 +56,11 @@ sb.window = sb;
 vm.createContext(sb);
 vm.runInContext([
   constLine('PUB_BASE'), constLine('PUB_STATE_KEY'), constLine('PUB_STALE_DAYS'),
+  constLine('GH_PUBLIC_REPO'), constLine('GH_PRIVATE_REPO'),
   'let _pubFresh = null;',
   grab('_escape'),
   grab('getPubState'), grab('setPubState'), grab('_daysAgo'), grab('_jstShort'),
-  grabAsync('loadPublishedFreshness'), grabAsync('testGhConnection'),
+  grab('_ghRepoTestLine'), grabAsync('loadPublishedFreshness'), grabAsync('testGhConnection'),
   grab('renderPubStatus'),
   'function renderJournalStatus(){ sb_called = (typeof sb_called === "undefined" ? 1 : sb_called + 1); }',
   'var sb_called = 0;',
@@ -81,8 +82,10 @@ chk(run('_daysAgo("でたらめ")') === null, '壊れた日付は null');
 chk(run('_jstShort("2026-09-11T10:43:38.575Z")') === '9/11 19:43', 'JST に直して出す');
 chk(run('_jstShort(null)') === '—', '無ければダッシュ');
 
-console.log('--- 公開データの鮮度 (PAT 不要で読むだけ) ---');
-sb.fetch = async () => ({
+console.log('--- 売買記録の鮮度 (2026-10-12〜 非公開リポを PAT で読む) ---');
+let lastReq = null;
+store['tj_ghpat'] = 'github_pat_dummy';
+sb.fetch = async (url, opt) => (lastReq = { url, opt }, {
   ok: true,
   json: async () => ({
     _generated_at: new Date(Date.now() - 10 * 86400000).toISOString(),
@@ -96,6 +99,16 @@ let f = null;
   f = await run('loadPublishedFreshness()');
   chk(f.days === 10, `10日前と分かる (${f.days})`);
   chk(f.n === 3 && f.openN === 2, `件数と未決済を数える (${f.n}/${f.openN})`);
+  chk(lastReq.url.includes('/repos/hiroki300/trade-journal-private/contents/human_paper_trades.json'),
+      '非公開リポを読む (公開リポではない)');
+  chk(lastReq.opt.headers.Authorization === 'Bearer github_pat_dummy', 'PAT を付けて読む');
+  delete store['tj_ghpat'];
+  run('_pubFresh = null;');
+  const nf = await run('loadPublishedFreshness()');
+  chk(nf.err && nf.err.includes('PAT が無い'), 'PAT が無ければ読みに行かず理由を出す');
+  run('_pubFresh = null;');
+  store['tj_ghpat'] = 'github_pat_dummy';
+  await run('loadPublishedFreshness()');
 
   console.log('--- 🔑API設定 の状態表示 ---');
   els['pubStatus'] = { innerHTML: '' };
@@ -106,26 +119,31 @@ let f = null;
   chk(h.includes('❌') && h.includes('401'), '失敗と HTTP を出す');
   chk(h.includes('2026-09-10'), 'PAT の有効期限を出す');
 
-  console.log('--- 接続テストが原因を切り分ける ---');
+  console.log('--- 接続テストが 2 つのリポを別々に切り分ける ---');
+  // [非公開, 公開] の応答 → 先頭の印・文言・記録する HTTP
   const cases = [
-    [200, '✅', '接続できました'],
-    [401, '❌', '有効期限が切れて'],
-    [403, '❌', '権限が足りません'],
-    [404, '❌', '見つかりません'],
-    [500, '⚠️', '予期しない応答'],
+    [[200, 200], '✅', '2 つのリポとも見えています', 200],
+    [[401, 401], '❌', '期限切れ (401)', 401],
+    [[403, 403], '❌', '権限が足りません', 403],
+    [[404, 200], '❌', '売買記録 (非公開・trade-journal-private): 見えません (404)', 404],
+    [[500, 200], '❌', '予期しない応答', 500],
   ];
   store['tj_ghpat'] = 'github_pat_dummy';
-  for (const [status, mark, frag] of cases) {
-    sb.fetch = async () => ({
-      status,
+  for (const [[sPriv, sPub], mark, frag, rec] of cases) {
+    const seen = [];
+    sb.fetch = async (url) => (seen.push(url), {
+      status: url.endsWith('trade-journal-private') ? sPriv : sPub,
       headers: { get: k => (k === 'github-authentication-token-expiration' ? '2026-12-31' : null) },
     });
     sb._lastAlert = '';
     await run('testGhConnection()');
     const m = sb._lastAlert || '';
-    chk(m.startsWith(mark) && m.includes(frag), `HTTP ${status} → ${frag}`);
-    chk(run('getPubState().status') === status, `HTTP ${status} を記録する`);
+    chk(m.startsWith(mark) && m.includes(frag), `${sPriv}/${sPub} → ${frag}`);
+    chk(run('getPubState().status') === rec, `${sPriv}/${sPub} → HTTP ${rec} を記録する`);
+    chk(seen.length === 2 && seen.every(u => /\/repos\/hiroki300\/trade-journal-(private|data)$/.test(u)),
+        'ファイルではなくリポ自体を見る (非公開リポは初回の公開まで売買記録が無いため)');
   }
+  chk(sb._lastAlert.includes('👀ウォッチ (公開・trade-journal-data): 見えています'), '公開リポの結果も並べる');
 
   console.log('--- PAT が無いときは推測しない ---');
   delete store['tj_ghpat'];
