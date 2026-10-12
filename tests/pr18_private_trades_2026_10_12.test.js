@@ -68,6 +68,10 @@ vm.runInContext([
   console.log('--- 説明文 ---');
   chk(HTML.includes('trade-journal-data と trade-journal-private の 2 つだけ'), 'PAT の説明に 2 つのリポ');
   chk(HTML.includes('売買記録は非公開リポ trade-journal-private'), '書き先を画面に書く');
+  // 2026-10-12 見直し: 非公開にした売買記録を「公開データ」と呼ぶと、まだ公開されていると読める
+  chk(!all.includes("'公開データ: '") && !all.includes('公開データが ') && !all.includes('公開データを読めませんでした'),
+      '売買記録を「公開データ」と呼ばない');
+  chk(all.includes('連携した売買記録 (非公開)'), '非公開の売買記録だと分かる表示');
 
   console.log(bad ? `\n❌ ${bad} 件 NG` : '\n✅ すべて OK');
   process.exit(bad ? 1 : 0);

@@ -166,7 +166,7 @@ let f = null;
   chk(HTML.includes('onclick="testGhConnection()"') && HTML.includes('🔌 接続テスト'),
       '接続テストのボタンがある');
   const rjs = grab('renderJournalStatus');
-  chk(rjs.includes('自動連携が失敗しています') && rjs.includes('公開データが'),
+  chk(rjs.includes('自動連携が失敗しています') && rjs.includes('連携した売買記録が'),
       '売買タブにも警告を出す');
 
   console.log('--- 構文 ---');
