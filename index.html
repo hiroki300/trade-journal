@@ -357,10 +357,10 @@ select.fi{appearance:none;-webkit-appearance:none;}
 
   <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
     <div class="sec-lbl">🔍 今日の振り返り</div>
-    <div class="cost-note"><span>🤖 Gemini: 情報収集　🧠 Claude: 戦略分析</span></div>
+    <div class="cost-note"><span>🧠 Claude: 調べ物 + AI の目安 (未検証)・あなたの鍵で 1 回 約 $0.1〜0.2</span></div>
     <button class="rev-btn" id="revBtn" onclick="doRev()">
       今日の振り返りを開始する<br>
-      <span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>
+      <span style="font-size:11px;opacity:.75">📰 今日の材料 + 🎯 AI の目安 (Claude)</span>
     </button>
     <div id="revOut"></div>
   </div>
@@ -386,9 +386,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <div class="mode-row" style="padding:0;border:none;flex:1;margin-right:12px">
-        <button class="mode-btn on" id="modeGC" onclick="setMode('gc')">🤝 合議</button>
+        <button class="mode-btn" id="modeGC" onclick="setMode('gc')">🤝 両方</button>
         <button class="mode-btn" id="modeG" onclick="setMode('g')">🤖 Gemini</button>
-        <button class="mode-btn" id="modeC" onclick="setMode('c')">🧠 Claude</button>
+        <button class="mode-btn on" id="modeC" onclick="setMode('c')">🧠 Claude</button>
       </div>
       <button onclick="clearChatHistory()" style="background:none;border:none;color:var(--t3);font-size:11px;cursor:pointer;flex-shrink:0">💬 履歴クリア</button>
     </div>
@@ -597,19 +597,19 @@ function checkSlCloseWarning() {
 }
 
 // Phase A-2: AI ペルソナ動的切替 (マクロ regime に応じて口調を変える)
+// AI への前置き (2026-10-18): 以前はベテランの運用者の役を演じさせ、地合いが悪い日は全部売るよう
+// 「命令」させていた。役で権威を足さず、地合いは事実とアプリのルールとして渡す。
+// 売買の目安の考え方は AI_GUIDANCE_PRINCIPLES (下の「AI の売買の目安」) が正本。
 function buildPersonaPrefix() {
   const m = window._macroData;
   const regime = m && m.regime;
-  if (regime === 'halt') {
-    return 'あなたは徹底したリスク管理至上主義のシニアFMです。マクロ環境は HALT（取引停止水準）。少しでも疑念があれば「すべて手仕舞え」「新規買いは中止」と命じてください。\n\n';
-  }
-  if (regime === 'storm') {
-    return 'あなたはディフェンシブ運用に切り替えたシニアFMです。マクロ環境は STORM（急変動）。ポジションサイズは通常の 50% 以下、損切り幅も狭めに。慎重な判断を最優先。\n\n';
-  }
-  if (regime === 'caution') {
-    return 'あなたは警戒モードのシニアFMです。マクロ環境は CAUTION。攻めすぎず、明確な根拠のあるエントリーのみ推奨。\n\n';
-  }
-  return 'あなたは運用歴25年の日本株シニアファンドマネージャーです。\n\n';
+  const rule = {
+    halt: '新規は見送り',
+    storm: '新規は反発を確認してから・建玉の大きさは 50%',
+    caution: '新規は慎重に・1 銘柄のリスクを絞る',
+  }[regime] || '';
+  return 'あなたは日本株スイングトレードの調査アシスタントです。数字は渡したものと出典にあるものだけを使い、確かめられないことは「未確認」と書きます。' +
+    (regime ? '地合いの区分 (事実): ' + regime + (rule ? ' — アプリのルールでは「' + rule + '」' : '') + '。' : '') + '\n\n';
 }
 
 function saveCash() { cash = parseFloat(document.getElementById('cashIn').value) || 0; sv(KC, cash); calcS(); }
@@ -2217,6 +2217,9 @@ function hHTML(h, compact, idx) {
   if (h.sl && cp <= h.sl) al = '<div class="abar as">🚨 損切りライン到達</div>';
   else if (h.tgt && cp >= h.tgt) al = '<div class="abar ag">🎯 利確目標到達</div>';
   else if (toS && parseFloat(toS) <= 3) al = '<div class="abar aw">⚠️ 損切りまで残り' + toS + '%</div>';
+  if (h.unseen_since) {
+    al = '<div class="abar aw">⚠️ ' + _escape(h.unseen_since) + ' の保有スクショに写っていません。売った株なら 🗑 削除を (残っていると建玉チェックが毎日警告します)</div>' + al;
+  }
   // idx 未指定 (古い呼び出し互換) なら cd で逆引き
   const i = (typeof idx === 'number') ? idx : H.findIndex(x => x.cd === h.cd && (x.type||'spot') === (h.type||'spot'));
   const pnlDisplay = bpValid ? ((pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString()) : '<span style="color:var(--t3);font-size:11px">取得単価未確認</span>';
@@ -2263,7 +2266,9 @@ function tHTML(t) {
     '<div class="tpnl ' + (t.pnl==null?'':(t.pnl>=0?'up':'dn')) + '">' + ps + '</div></div>';
 }
 
-// 個別銘柄AI分析（Gemini+Claude合議）
+// 🤝 売買判断 (2026-10-18 作り直し): ① ルールの線 (計算) → ② 調べ物 (AI の検索のまとめ・未照合)
+// → ③ AI の目安 (Claude・未検証) → ④ ルールと食い違えば ⚠️。目安は ai_calls に記録する。
+// 以前は Gemini と Claude の「合議」で、別々の目安が 2 つ出ていた (どちらも数字を自分で作っていた)。
 async function analyzeHolding(cd) {
   const h = H.find(h => h.cd===cd);
   if (!h) return;
@@ -2278,75 +2283,51 @@ async function analyzeHolding(cd) {
     panel.innerHTML = '<div style="background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:var(--t2)">🎁 この銘柄は<strong>優待目的（分析除外）</strong>として登録されているため、AI売買判断の対象外です。</div>';
     return;
   }
-  panel.textContent = '🤝 GeminiとClaudeが合議中...';
-
+  const today = ymdJST();
   const cp = h.cp || h.bp;
-  const pnl = positionPnl(h, cp);
-  const pct = ((pnl / (h.bp * h.sh)) * 100).toFixed(2);
-  const typeStr = typeLabel(h.type);
-  const cost = h.bp * h.sh;
-  // TODAY は読み込み時の定数なので、開いたまま日付をまたぐと1日ずれる → その場で取る。
-  // 未来日・桁違いの日付 (入力ミス) は「不明」に倒す。建日が仮置き (dt_unknown) の保有は
-  // そもそも経過日数を主張しない。
-  const _hd = h.dt ? Math.floor((Date.parse(ymdJST()) - Date.parse(h.dt)) / 86400000) : NaN;
-  const heldDays = (!h.dt_unknown && Number.isFinite(_hd) && _hd >= 0 && _hd <= 3650) ? _hd : null;
+  const rule = aiRuleLines(h, cp, today);
+  panel.style.whiteSpace = 'normal';
+  panel.innerHTML = aiRuleBoxHTML(h, rule) +
+    '<div class="aih-res" style="margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:10px;background:#fff;font-size:12px;line-height:1.7">🔎 調べ物を読み込み中… (約10〜20秒)</div>' +
+    '<div class="aih-call"></div>';
+  const resEl = panel.querySelector('.aih-res'), callEl = panel.querySelector('.aih-call');
 
-  const prompt =
-    buildPersonaPrefix() +
-    '⚠️ 重要: あなたの役割は、保有銘柄について、本日の値動き（チャート）と決算発表などの状況をもとに、doctrine の出口規律（-8%損切り / +2R利確 / 時間切れ撤退）に照らした「継続 / 利確 / 損切り」の目安を整理することです。需給（信用倍率・空売り残高）は事実として参照してよいが売買予測の根拠にはしない（自前の10年検証で需給に予測力なしと確認済み）。ナンピン（買い増し）は短期回転では損失拡大なので勧めない。売買は断言せず、最終判断は人間が一次情報で行う前提です。\n' +
-    '回答にはHTMLタグ（<h3>, <ul>, <li>, <br>など）を絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用してください。\n' +
-    '必ず Google 検索を実行して「' + h.nm + ' 株価 本日」「' + h.nm + ' 直近 決算」などで **当日 (' + ymdJST() + ') の場中の最新の値動き・決算状況** を取得して判断してください。\n\n' +
-    '短期回転戦略 (損切り-8%/RR2/保有数日〜数週間) に基づき、前置きなしで以下の項目のみ簡潔に答えてください。結論ファーストで回答してください。\n\n' +
-    '【保有銘柄】\n'+
-    '銘柄: '+h.cd+' '+h.nm+' ('+typeStr+')\n'+
-    '取得金額: '+cost.toLocaleString()+'円（'+h.bp.toLocaleString()+'円 × '+h.sh+'株） / 現在値: '+cp.toLocaleString()+'円\n'+
-    '含み損益: '+(pnl>=0?'+':'')+Math.round(pnl).toLocaleString()+'円 ('+( pct>=0?'+':'')+pct+'%)\n'+
-    (heldDays != null
-      ? '保有開始日: '+h.dt+'（暦日で'+heldDays+'日経過。時間切れ撤退は10営業日が目安）\n'
-      : (h.dt_unknown
-          ? '保有開始日: 不明（'+h.dt+' に保有スクショから取り込んだ日付で、実際の建日ではありません。経過日数は判断材料に使わないでください）\n'
-          : '保有開始日: 不明\n'))+
-    (h.sl?'現在の損切り設定: '+h.sl.toLocaleString()+'円 / ':'')+(h.tgt?'現在の目標設定: '+h.tgt.toLocaleString()+'円\n':'') +
-    (h.memo?'メモ: '+h.memo+'\n':'') + '\n' +
-    '【依頼】以下の順で、余計な挨拶文は一切なしで出力してください（HTMLタグは絶対禁止、マークダウンのみ可）:\n\n' +
-    '## 【出口の目安（doctrine: -8%損切り / +2R利確 / 時間切れ撤退）】\n'+
-    '現在値と損切り・目標・経過日数から「継続 / 利確 / 損切り」のどれが近いかを目安として1行で（チャート位置を根拠に。需給は予測根拠にしない）。最終判断はあなた。\n\n'+
-    '## 【事業内容・直近決算の状況】\n' +
-    '企業の主要事業と、直近の決算発表（業績が伸びているか、悪化しているか）について、2〜3行（100〜150文字程度）で分かりやすく要約してください。\n\n' +
-    '## 【チャート分析（テクニカル）】\n' +
-    '移動平均線やボリンジャーバンド、出来高から見た現在のチャート位置の評価を2〜3行で説明してください。\n\n' +
-    '## 【需給の事実】\n' +
-    '信用倍率・空売り残高・出来高を事実として記載（チャンス/優位性とは解釈しない＝自前の10年検証で需給に売買予測力なしと確認済み）。2〜3行で。\n\n' +
-    '## 【推奨損切り・利確目標】\n'+
-    '・推奨損切りライン: ◯◯円 (取得単価から-8%基準、現在値からの下落率も併記)\n'+
-    '・推奨利確目標: ◯◯円 (取得単価から+16%基準)\n\n'+
-    '## 【本日の材料・近接リスク】\n'+
-    '本日の株価の動きの背景と、最大の懸念点（決算発表日が近いなど）を2〜3行で説明してください。\n\n'+
-    '## 【一言（補助）】\n'+
-    'この建玉を見るときの要点を30字以内で。売買は断言せず、最終判断はあなたが出口規律と一次情報で。' +
-    '';
-
+  let research = '';
   try {
-    // analyzeHolding: 5 セクション — 途切れ防止のため4000トークン指定
-    const [gRes, cRes] = await Promise.all([
-      callGemini(prompt, null, null, 4000).catch(e => '⚠️ Gemini: '+e.message),
-      callClaude(prompt, null, null, 4000).catch(e => '⚠️ Claude: '+e.message),
-    ]);
+    research = await callResearch(aiHoldingResearchPrompt(h, today), null, null, 5000);
+    resEl.innerHTML = '<div style="font-size:11px;color:var(--t2);margin-bottom:4px">🔎 調べ物 (AI の検索のまとめ・原文と照合していない)</div>' + md(research);
+  } catch (e) {
+    resEl.textContent = '⚠️ 調べ物: ' + e.message;
+  }
 
-    panel.innerHTML =
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🤖 Gemini (本日の市場情報):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;margin-bottom:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + md(gRes) + '</div>' +
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px">🧠 Claude (戦略・指値判断):</div>' +
-      '<div style="background:#fff;border-radius:8px;padding:10px;white-space:pre-wrap;font-size:12px;line-height:1.7;color:var(--text);border:1px solid var(--border)">' + md(cRes) + '</div>';
-  } catch(e) {
-    panel.textContent = '⚠️ ' + e.message;
+  if (!CK) {
+    callEl.innerHTML = '<div style="margin-top:8px;font-size:12px">⚠️ Claude のキーが未設定のため、AI の目安は出せません (🔑API設定)。</div>';
+    return;
+  }
+  callEl.innerHTML = '<div style="margin-top:8px;font-size:12px;color:var(--t2)">🧠 AI の目安を考えています…</div>';
+  try {
+    const macro = window._macroData && window._macroData.summary;
+    const out = await callClaude(aiExitPrompt(h, rule, research, today, macro), AI_GUIDANCE_SYSTEM, null, 8000,
+                                 {effort: 'medium', schema: AI_EXIT_SCHEMA});
+    const call = aiNormalizeCall(out && out.call);
+    callEl.innerHTML = aiCallHTML(call || String((out && out.call) || '?'), out && out.reasons, out && out.risk,
+                                  aiRuleConflict(call, rule));
+    if (call) {
+      recordAiCall({date: today, code: aiCode5(h.cd), kind: 'exit', call, price: rule ? rule.price : cp,
+                    price_at: h.cp_at || null, rule: rule ? rule.states.map(s => s.key) : [],
+                    model: CLAUDE_MODEL, v: AI_GUIDANCE_VERSION});
+    }
+  } catch (e) {
+    callEl.innerHTML = '<div style="margin-top:8px;font-size:12px">⚠️ AI の目安: ' + _escape(e.message) + '</div>';
   }
 }
 
+// 現値の手入力。いつの値かを cp_at に残す (AI の目安に「現値の時点」として渡す)。
 function uCP(idx, v) {
   const h = H[idx];
   if (!h) return;
   h.cp = parseFloat(v) || h.bp;
+  h.cp_at = ymdJST();
   sv(KH, H); calcS();
 }
 function uBP(idx, v) {
@@ -2376,6 +2357,7 @@ function delH(idx) {
   H.splice(idx, 1);
   sv(KH, H); rHold(); calcS(); rDash();
   toast('削除しました');
+  maybeAutoPublish();   // 建玉チェック (ボット) に今夜から反映する
 }
 function tYutaiH(idx, checked) {
   const h = H[idx];
@@ -2612,6 +2594,7 @@ function _buildHumanPaperTradesPayload() {
     exit_price: null,
     shares: h.sh || null,
     entry_date_is_import_day: !!h.dt_unknown,   // 保有スクショ由来 = 建日ではない
+    ...(h.unseen_since ? {unseen_since: h.unseen_since} : {}),   // 保有スクショに写っていない日
     note: typeLabel(h.type) + (h.sh ? ' ' + h.sh + '株' : '') + ' 未決済'
       + _noteReasonSuffix(h.tags, h.memo),
   }));
@@ -2624,6 +2607,8 @@ function _buildHumanPaperTradesPayload() {
     trades: closed.concat(open),
     skips: getSkips(),
     pending_exits: getPendingExits(),
+    // AI の売買の目安の記録 (2026-10-18〜)。30 件たまったら「目安どおりなら」を採点する (設計は後で)。
+    ai_calls: getAiCalls(),
     needs_review: split.review.map(r => ({code: code5(r.code), entry_date: r.buy_date,
                                           exit_date: r.sell_date, hold_days: r.hold_days})),
   };
@@ -3203,9 +3188,9 @@ async function doChat() {
   try {
     const pf = pfS(); // 安全化されたポートフォリオ取得
     // 検証D準拠の方針: 需給/テクニカルは事実扱い・予測断定に使わない (会話の有用性は維持)。
-    const disc = '\n【方針】需給・テクニカル指標(信用倍率・出来高・移動平均・ゴールデンクロス等)は「事実」として扱い、「だから上がる/下がる」という断定的な予測の根拠にはしないでください(自前の10年検証で売買予測力が確認できていないため)。買い/売りの最終判断は人間が一次情報で行います。テーマ・地合い・事業内容の調査や、リスク管理(損切り・ロット)の助言は歓迎します。';
+    const disc = '\n【方針】需給・テクニカル指標(信用倍率・出来高・移動平均・ゴールデンクロス等)は「事実」として扱い、「だから上がる/下がる」という断定的な予測の根拠にはしないでください(自前の10年検証で売買予測力が確認できていないため)。買い/売りの最終判断は人間が一次情報で行います。売買の目安を聞かれたら、次の考え方の土台に沿い、「ルールでは / データでは / AI の意見では (未検証)」を分けて答えてください。損切りライン・株数などの数字は自分で計算せず、ポートフォリオにある値だけを使います。\n' + AI_GUIDANCE_PRINCIPLES;
     const gemSys = buildPersonaPrefix() + 'Google検索を用いて対象企業の【事業内容】や【直近の決算結果】などの最新情報を確認しながら回答してください。回答にはHTMLタグ（<h3>, <ul>, <li>, <br>など）を絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用してください。現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\nポートフォリオ: ' + pf + disc;
-    const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\n回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウンのみを使用してください。率直・具体的にアドバイスしてください。' + disc;
+    const cldSys = buildPersonaPrefix() + 'ポートフォリオ: ' + pf + '\n現在の余力(残金)は'+Math.round(cash).toLocaleString()+'円です。\n回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウンのみを使用してください。' + disc;
 
     if (chatMode==='g') {
       gemHist.push({role:'user',parts:[{text:sendTxt}]});
@@ -3618,74 +3603,147 @@ function pfS() {
   }
 }
 
-// 振り返り (Phase A-2: ペルソナを buildPersonaPrefix() に統一、調査ドメインを末尾で明示)
-const GEM_STEPS = [
-  {icon:'🌍', title:'世界情勢・マクロ経済', color:'var(--gem)',
-   p: pf => buildPersonaPrefix() + 'Google検索で今日の最新情報を調べてから答えてください。\nポートフォリオ: ' + pf +
-     '\n以下を**具体名と数値で**調査し、明日の日本市場への影響を述べてください:\n' +
-     '・米国株 (S&P500 / NASDAQ の前日終値と変化率)\n' +
-     '・為替 (ドル円・ユーロ円の現値、当日の高安)\n' +
-     '・原油 / コモディティ (WTI / NY 金の現値変化)\n' +
-     '・米国金利 (10 年債利回り)\n' +
-     '・地政学イベント (戦争・選挙・FOMC・要人発言など、最低 3 件具体的に)'},
-  {icon:'📰', title:'日本株ニュース・個別材料', color:'var(--gem)',
-   p: pf => buildPersonaPrefix() + 'Google検索で今日の最新情報を調べてください。\n保有銘柄: ' + pf +
-     '\n以下を**保有銘柄ごとに**整理してください:\n' +
-     '・各保有銘柄の本日の個別ニュース・適時開示 (TDnet / 会社発表)\n' +
-     '・日経平均 / TOPIX / グロース 250 の引け値と変化率\n' +
-     '・明日の重要指標 (決算発表予定・経済指標・SQ 等)\n' +
-     '・セクター動向 (保有銘柄が属する業種の本日のパフォーマンス)'},
-  {icon:'📱', title:'SNS・YouTube・X話題', color:'var(--gem)',
-   p: pf => buildPersonaPrefix() + 'あなたは市場センチメント分析の専門家でもあります。Google検索で以下を調査:\n保有銘柄: ' + pf +
-     '\n・X (旧 Twitter) で話題の日本株 (ハッシュタグ、急上昇銘柄、トレンドキーワード)\n' +
-     '・投資系 YouTube の本日アップロード動画 (注目テーマ・解説銘柄)\n' +
-     '・個人投資家センチメント (信用評価損益率・SNS の強気/弱気バランス)\n' +
-     '・保有銘柄が SNS で言及されているか、ポジティブ/ネガティブどちらが優勢か'},
-];
-const CLD_STEP = {
-  icon:'🎯', title:'振り返り・明日の戦略', color:'var(--cld)',
-  p: pf => buildPersonaPrefix() + '【ポートフォリオ】\n' + pf +
-    '\n前置きや時候の挨拶は一切不要です。以下の内容を、余計な長文を省き簡潔に数字と具体価格で答えてください。説明は各項目2行（100文字）以内に制限します。**結論ファースト**で回答してください。:\n' +
-    '1. 今日の振り返り: チャート面から見た全体損益の変化、勝因/敗因を2行以内で（需給は事実のみ・予測根拠にしない）。\n' +
-    '2. 保有銘柄ごとの出口の目安: 銘柄ごとに doctrine（-8%損切り / +2R利確 / 時間切れ撤退）に照らし「継続 / 利確 / 損切り」のどれが近いかを目安として示し、具体的な損切り価格・利確目標（円）とチャート位置上の理由を**1行（50文字以内）**で。最終判断は人間。\n' +
-    '3. 残金メモ: 調べる価値のある候補があれば「コード・価格の目安（円）・株数」を材料として提示（買い断言ではない）、なければ「待機」。1行以内で。\n' +
-    '4. 明日の行動計画: 寄付前のチェック項目2つ、引け前の判断ポイント2つ（それぞれ1行以内で）。\n' +
-    '5. シニアFMとしての一言: 30字以内で本音。'
+// 振り返り (2026-10-18 作り直し)
+// - 調べ物は 1 回 (保有銘柄の今日の材料)。調べ物の AI は Claude + Web 検索 (比較の結果) になり、
+//   1 回ごとに費用がかかるので、以前の 3 枚 (世界情勢・個別材料・SNS) を 1 枚にまとめた。
+//   前夜の海外市場は朝チェック (LINE・照合済み) が受け持つ。SNS の話題株は [8] (売買のしすぎ) と
+//   照合できなさから外した。
+// - 🎯 は Claude の「売買の目安」(未検証): 保有ごとの目安と、機械の候補 (押し目) の中から 0〜2 件。
+//   候補の株数・損切り価格はボットの計算 (size_if_entered) をそのまま出し、AI には計算させない。
+const REV_RESEARCH = {
+  icon:'📰', title:'保有銘柄の今日の材料 (調べ物・未照合)',
+  p: pf => buildPersonaPrefix() + '今日は ' + ymdJST() + ' です。Web 検索で調べ、出典のあることだけを保有銘柄ごとに短くまとめてください。売買の判断・目安は書きません。\n' +
+    '保有銘柄: ' + pf + '\n' +
+    '・各保有銘柄の今日のニュース・適時開示。無ければ「見つからず」\n' +
+    '・各保有銘柄の次の決算発表の予定日 (分かるものだけ)\n' +
+    '・日経平均と TOPIX の今日の終値と前日比\n' +
+    '前夜の海外市場は朝チェックが受け持つので書かない。HTML タグは使わず、マークダウンだけ。'
 };
+
+// 振り返りに渡す機械の候補 (純関数)。押し目レーンの公開 JSON の先頭 n 件 (ボットの並び順のまま)。
+function aiCandidatesForReview(pullbackData, n) {
+  const arr = ((pullbackData || {}).candidates) || [];
+  return arr.slice(0, n || 10).map(c => ({
+    code4: String(c.ticker || String(c.code || '').slice(0, 4)),
+    name: c.name || '',
+    price: c.price,
+    as_of: c.as_of || (pullbackData || {}).as_of_date || '',
+    next_earnings: c.next_earnings || '',
+    text: String(c.text || '').slice(0, 500),
+    size: c.size_if_entered || null,
+  })).filter(c => /^[0-9A-Za-z]{4}$/.test(c.code4));
+}
+
+// 振り返りの 🎯 の頼み (純関数)。hs = [{h, rule}]、cands = aiCandidatesForReview の結果。
+function aiReviewPrompt(hs, cands, research, today, macroSummary) {
+  const L = ['今日: ' + today, '【地合い】' + (macroSummary || '不明'), '【保有】'];
+  if (!hs.length) L.push('なし');
+  hs.forEach(({h, rule}) => {
+    L.push('- ' + h.cd + ' ' + (h.nm || '') + '・' + typeLabel(h.type) + '・' + h.sh + '株・買値 ' + h.bp + '円・現値 ' +
+      (rule ? rule.price : (h.cp || h.bp)) + '円 (時点: ' + (h.cp_at || '不明') + ')');
+    if (rule) {
+      L.push('  ルールの線: −8% の線 ' + rule.stop + '円 / +1R ' + rule.r1 + '円 / +2R ' + rule.r2 + '円 / 今は ' + rule.rNow +
+        'R / 保有 ' + (rule.heldBd == null ? '不明' : rule.heldBd + ' 営業日 (概算)'));
+      L.push('  ルールの状態: ' + (rule.states.length ? rule.states.map(s => s.label).join(' / ') : 'ルールに触れていない'));
+    } else {
+      L.push('  ルールの線: 買値が未確認のため計算できない');
+    }
+  });
+  L.push('【機械の候補 (押し目レーン・ボットの並び順。新しい候補はこの中からだけ)】');
+  if (!cands.length) L.push('なし');
+  cands.forEach(c => {
+    L.push('- ' + c.code4 + ' ' + c.name + '・' + c.price + '円 (' + c.as_of + ')・次の決算 ' + (c.next_earnings || '不明'));
+    L.push('  ' + c.text.replace(/\n/g, ' / '));
+  });
+  L.push('【調べ物 (AI の検索のまとめ・原文と照合していない。断定の根拠にしない)】\n' + (research ? String(research).slice(0, 3000) : 'なし'));
+  L.push('【頼み】考え方の土台の順番で、保有ごとに目安 (継続 / 一部利確 / 利確 / 損切り) と理由 2〜3 個を holdings に。' +
+    '機械の候補の中で、今入るなら条件がそろっているものがあれば 0〜2 件を candidates に (コードと理由 2〜3 個。株数・価格は書かない)。' +
+    '迷うなら candidates は空にして、note に「待機」の理由を 1〜2 文で。');
+  return L.join('\n');
+}
+
+// 🎯 の答えを点検する (純関数)。持っていない銘柄・機械の候補に無い銘柄は落とし、目安の言葉をそろえる。
+function aiFilterReview(out, holdingCodes, candCodes) {
+  const norm = (c) => String(c || '').trim().slice(0, 4);
+  const hs = new Set(holdingCodes.map(norm)), cs = new Set(candCodes.map(norm));
+  const rs = (x) => (Array.isArray(x && x.reasons) ? x.reasons : []).slice(0, 3).map(String);
+  const holdings = ((out && out.holdings) || []).map(x => ({code: norm(x && x.code), call: aiNormalizeCall(x && x.call), reasons: rs(x)}))
+    .filter(x => hs.has(x.code) && x.call);
+  const rawC = (out && out.candidates) || [];
+  const candidates = rawC.map(x => ({code: norm(x && x.code), reasons: rs(x)})).filter(x => cs.has(x.code)).slice(0, 2);
+  return {holdings, candidates, dropped: rawC.length - candidates.length, note: String((out && out.note) || '')};
+}
+
+function revCard(icon, title, pill) {
+  const card = document.createElement('div'); card.className = 'rcard';
+  card.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + icon + '</span>' +
+    '<span style="font-size:12px;font-weight:700;color:var(--cld)">' + _escape(title) + '</span>' +
+    '<span class="ai-pill pill-c" style="margin-left:auto">' + _escape(pill) + '</span></div>' +
+    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>考え中...</span></div></div>';
+  return card;
+}
 
 async function doRev() {
   const btn = document.getElementById('revBtn');
   btn.disabled = true; btn.textContent = '🔄 分析中...';
   const out = document.getElementById('revOut'); out.innerHTML = '';
   const pf = pfS();
-  const gemCards = GEM_STEPS.map(s => {
-    const card = document.createElement('div'); card.className = 'rcard';
-    card.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + s.icon + '</span>' +
-      '<span style="font-size:12px;font-weight:700;color:' + s.color + '">' + s.title + '</span>' +
-      '<span class="ai-pill pill-g" style="margin-left:auto">🤖 Gemini</span></div>' +
-      '<div class="rbody"><div class="ldg"><div class="spin"></div><span>調査中...</span></div></div>';
-    out.appendChild(card); return card;
-  });
-  const cldCard = document.createElement('div'); cldCard.className = 'rcard';
-  cldCard.innerHTML = '<div class="rhdr"><span style="font-size:15px">' + CLD_STEP.icon + '</span>' +
-    '<span style="font-size:12px;font-weight:700;color:' + CLD_STEP.color + '">' + CLD_STEP.title + '</span>' +
-    '<span class="ai-pill pill-c" style="margin-left:auto">🧠 Claude</span></div>' +
-    '<div class="rbody"><div class="ldg"><div class="spin"></div><span>精査中...</span></div></div>';
-  out.appendChild(cldCard);
-  // doRev (今日の振り返り): GEM_STEPS は各 6000 トークン (調査項目 4-5 件を網羅)
-  //                          CLD_STEP は 8000 トークン (銘柄ごと損切/利確円表示 + 寄前/引前計画 + 戦略総括)
-  const gemPs = GEM_STEPS.map((s, i) =>
-    callGemini(s.p(pf), null, null, 6000).then(txt => { gemCards[i].querySelector('.rbody').textContent = txt; })
-      .catch(e => { gemCards[i].querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; })
-  );
-  const cldP = callClaude(CLD_STEP.p(pf), null, null, 4000).then(txt => { cldCard.querySelector('.rbody').textContent = txt; })
-    .catch(e => { cldCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + e.message + '</span>'; });
-  await Promise.all([...gemPs, cldP]);
-  btn.disabled = false; btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">🤖Gemini×3 + 🧠Claude×戦略</span>';
+  const today = ymdJST();
+  const resCard = revCard(REV_RESEARCH.icon, REV_RESEARCH.title, RESEARCH_PROVIDER === 'claude' ? '🧠 Claude' : '🤖 Gemini');
+  const aiCard = revCard('🎯', 'AI の目安 (Claude・未検証)', '🧠 Claude');
+  out.appendChild(resCard); out.appendChild(aiCard);
+  let research = '';
+  try {
+    research = await callResearch(REV_RESEARCH.p(pf), null, null, 6000);
+    resCard.querySelector('.rbody').innerHTML = md(research);
+  } catch (e) {
+    resCard.querySelector('.rbody').innerHTML = '<span style="color:var(--red)">⚠️ ' + _escape(e.message) + '</span>';
+  }
+  const aiBody = aiCard.querySelector('.rbody');
+  try {
+    if (!CK) throw new Error('Claude のキーが未設定です (🔑API設定)');
+    const hs = H.filter(h => h && h.cd && !h.yutai).map(h => ({h, rule: aiRuleLines(h, h.cp || h.bp, today)}));
+    const cands = aiCandidatesForReview(window._pullbackData, 10);
+    const macro = window._macroData && window._macroData.summary;
+    const raw = await callClaude(aiReviewPrompt(hs, cands, research, today, macro), AI_GUIDANCE_SYSTEM, null, 12000,
+                                 {effort: 'medium', schema: AI_REVIEW_SCHEMA});
+    const f = aiFilterReview(raw, hs.map(x => x.h.cd), cands.map(c => c.code4));
+    let html = '';
+    f.holdings.forEach(x => {
+      const it = hs.find(y => String(y.h.cd).slice(0, 4) === x.code);
+      if (!it) return;
+      html += '<div style="font-weight:700;margin-top:6px">' + _escape(it.h.cd + ' ' + (it.h.nm || '')) + '</div>' +
+        aiRuleBoxHTML(it.h, it.rule) + aiCallHTML(x.call, x.reasons, '', aiRuleConflict(x.call, it.rule));
+      recordAiCall({date: today, code: aiCode5(it.h.cd), kind: 'exit', call: x.call, price: it.rule ? it.rule.price : (it.h.cp || it.h.bp),
+                    price_at: it.h.cp_at || null, rule: it.rule ? it.rule.states.map(s => s.key) : [], model: CLAUDE_MODEL, v: AI_GUIDANCE_VERSION});
+    });
+    f.candidates.forEach(x => {
+      const c = cands.find(y => y.code4 === x.code);
+      if (!c) return;
+      const sz = c.size && c.size.viable !== false
+        ? '<div style="font-size:12px">🧮 ボットの計算 (−8% で入る場合): ' + c.size.shares + '株・' + Number(c.size.invest_amount).toLocaleString() +
+          '円・損切り ' + Number(c.size.stop_price).toLocaleString() + '円・最大損失 ' + Number(c.size.actual_risk_yen).toLocaleString() + '円 (資産の ' + c.size.actual_risk_pct + '%)</div>'
+        : '';
+      const rs = x.reasons.map(r => '<li>' + _escape(r) + '</li>').join('');
+      html += '<div style="margin-top:10px;border:1px dashed var(--border);border-radius:8px;padding:10px">' +
+        '<div style="font-size:11px;color:var(--t2)">🔎 機械の候補から AI が挙げたもの (未検証)</div>' +
+        '<div style="font-weight:700">' + _escape(c.code4 + ' ' + c.name) + '・' + _escape(String(c.price)) + '円 (' + _escape(c.as_of) + ')</div>' +
+        (rs ? '<ul style="margin:4px 0 4px 16px;padding:0;font-size:12px;line-height:1.7">' + rs + '</ul>' : '') + sz + '</div>';
+      recordAiCall({date: today, code: aiCode5(c.code4), kind: 'candidate', call: '候補', price: c.price, price_at: c.as_of || null,
+                    rule: [], model: CLAUDE_MODEL, v: AI_GUIDANCE_VERSION});
+    });
+    if (!f.candidates.length) html += '<div style="margin-top:10px;font-size:12px">🔎 新しい候補: 待機' + (f.note ? ' — ' + _escape(f.note) : '') + '</div>';
+    else if (f.note) html += '<div style="margin-top:6px;font-size:12px">' + _escape(f.note) + '</div>';
+    if (f.dropped > 0) html += '<div style="font-size:10px;color:var(--t3)">機械の候補に無い銘柄を ' + f.dropped + ' 件外しました。</div>';
+    aiBody.innerHTML = (html || '保有も候補もありません。') +
+      '<div style="font-size:10px;color:var(--t3);margin-top:8px">' + _escape(AI_UNVERIFIED_NOTE) + '</div>';
+  } catch (e) {
+    aiBody.innerHTML = '<span style="color:var(--red)">⚠️ ' + _escape(e.message) + '</span>';
+  }
+  btn.disabled = false; btn.innerHTML = '🔄 再分析する<br><span style="font-size:11px;opacity:.75">📰 今日の材料 + 🎯 AI の目安 (Claude)</span>';
 }
-
 // チャット
-let chatMode = 'gc', gemHist = [], cldHist = [], chatHistory = ld('tj_chat_hist_list', []);
+let chatMode = 'c', gemHist = [], cldHist = [], chatHistory = ld('tj_chat_hist_list', []);
 function setMode(m) {
   chatMode = m;
   ['modeGC','modeG','modeC'].forEach(id => document.getElementById(id).classList.remove('on'));
@@ -3733,7 +3791,7 @@ async function askAISodanForCandidate(code4, name) {
   panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:10px"><div class="spin"></div><span>💬 Google検索で事業内容と直近決算を読み込み中... (約10〜15秒)</span></div>';
 
   const prompt = buildPersonaPrefix() +
-    'あなたはプロの投資アシスタントです。Google検索を実行して「' + name + ' 事業内容」「' + name + ' 直近 決算」「' + name + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
+    'Web 検索を実行して「' + name + ' 事業内容」「' + name + ' 直近 決算」「' + name + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
     '回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用し、段落や箇条書きを用いて読みやすく出力してください。\n\n' +
     '【対象銘柄】\n' + code4 + ' ' + name + '\n' +
     '現在の余力(残金): ' + Math.round(cash).toLocaleString() + '円\n\n' +
@@ -3746,11 +3804,11 @@ async function askAISodanForCandidate(code4, name) {
     '（現在の株価位置、サポートラインやレジスタンスライン、移動平均線との関係）\n\n' +
     '### ■ 需給の事実\n' +
     '（信用倍率・空売り残高・出来高を事実として記載。買い手の優位性などの予測解釈はしない＝自前の10年検証で需給に売買予測力なしと確認済み）\n\n' +
-    '### ■ もし買うなら: リスク管理の目安（売買は断言しない）\n' +
-    '（買い/見送りは断言せず最終判断は人間が一次情報で。参考の価格帯と、余力 ' + Math.round(cash).toLocaleString() + ' 円に応じた安全なロット数・損切り・利確目標価格を目安として）';
+    '### ■ 一次情報で確かめること\n' +
+    '（決算短信・適時開示のどこを読むか、主なリスク。売買の目安・ロット数・損切り価格は書かない (目安は 🤝 売買判断で Claude が出す)）';
 
   try {
-    const res = await callGemini(prompt, null, null, 5000);
+    const res = await callResearch(prompt, null, null, 5000);
     panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">💬 AI詳細相談結果 (' + name + ')</div>' +
       '<div class="ai-sodan-content" style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
       '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'aic-' + code4 + '\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
@@ -3838,8 +3896,8 @@ async function examineChartAnalysis() {
     ? '【自前データ（J-Quants実測・' + (facts.asOf || '直近') + ' 終値時点）】\n' +
       facts.lines.map(x => '- ' + x).join('\n') + '\n' +
       'この数値をそのまま使って説明してください。これに反する数値や、ここに無い数値の創作は禁止です。\n' +
-      '不足する情報（支持線/抵抗線、5日線と25日線のクロスの有無）だけ Google検索で補い、その分は「検索由来」と明記してください。\n\n'
-    : '【自前データ】この銘柄の自前データはありません。Google検索で「' + name + ' 株価 チャート テクニカル」「' + name + ' 移動平均 ゴールデンクロス デッドクロス」「' + name + ' 株価 トレンド 出来高」を調べ、**すべての数値に「検索由来」と明記**してください。\n\n';
+      '不足する情報（支持線/抵抗線、5日線と25日線のクロスの有無）だけ Web 検索で補い、その分は「検索由来」と明記してください。\n\n'
+    : '【自前データ】この銘柄の自前データはありません。Web 検索で「' + name + ' 株価 チャート テクニカル」「' + name + ' 移動平均 ゴールデンクロス デッドクロス」「' + name + ' 株価 トレンド 出来高」を調べ、**すべての数値に「検索由来」と明記**してください。\n\n';
 
   const prompt = buildPersonaPrefix() +
     'あなたはチャートの「形」を説明する調査アシスタントです。売買の助言はしません。いまのチャートの形を事実として簡潔に説明してください。\n\n' +
@@ -3860,14 +3918,14 @@ async function examineChartAnalysis() {
     '6. HTMLタグ禁止。マークダウン（**太字**）と箇条書きで5〜8行程度に簡潔に。\n\n' +
     '【対象】' + code4 + ' ' + name;
   try {
-    const res = await callGemini(prompt, null, null, 4000);
+    const res = await callResearch(prompt, null, null, 4000);
     panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">📊 チャートの状態 (' + name + ')</div>' +
       '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">「今の形」の説明です。シグナルは予測ではありません（最終判断は一次情報で）。<br>' + _escape(sourceNote) + '</div>' +
       '<div style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
       chartBtns +
       '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'exChart\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
   } catch (e) {
-    panel.innerHTML = '<div style="color:var(--red);padding:10px 6px">⚠️ AI分析の取得に失敗しました: ' + e.message + '（AI設定で Gemini キーを確認）</div>' + chartBtns;
+    panel.innerHTML = '<div style="color:var(--red);padding:10px 6px">⚠️ AI分析の取得に失敗しました: ' + e.message + '（🔑API設定のキーを確認）</div>' + chartBtns;
   }
 }
 async function examineAI() {
@@ -3880,7 +3938,7 @@ async function examineAI() {
   panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);padding:6px">' +
     '<div class="spin"></div><span>🧠 事業内容と一次情報の見どころを調べています… (約10〜15秒)</span></div>';
   const prompt = buildPersonaPrefix() +
-    'あなたは投資の「調査」アシスタントです。売買の助言はしません。Google検索で「' + name + ' 事業内容」「' + name + ' 直近 決算」「' + name + ' 最新 ニュース」を調べ、最新情報をもとに【自分で判断するための材料】を整理してください。\n\n' +
+    'あなたは投資の「調査」アシスタントです。売買の助言はしません。Web 検索で「' + name + ' 事業内容」「' + name + ' 直近 決算」「' + name + ' 最新 ニュース」を調べ、最新情報をもとに【自分で判断するための材料】を整理してください。\n\n' +
     '厳守する制約:\n' +
     '1. 売買推奨を書かない（「買うべき/見送るべき」「推奨買値」等は禁止）。最終判断は人間が一次情報で行う。\n' +
     '2. 需給（出来高・信用倍率・空売り）を「買い手優位」等の予測材料にしない。事実のみ述べ、解釈は人間に委ねる（自前の10年バックテストで需給に売買予測力なしと確認済み）。\n' +
@@ -3894,13 +3952,13 @@ async function examineAI() {
     '### ■ 一次情報で確認すべきこと\n（決算短信・IR・適時開示のどこを読むか、主なリスク要因）\n\n' +
     '### ■ この銘柄を見るときの注意点\n（決算またぎ・流動性・テーマの賞味期限など、事実ベースの注意）';
   try {
-    const res = await callGemini(prompt, null, null, 5000);
+    const res = await callResearch(prompt, null, null, 5000);
     panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">🧠 AI定性メモ (' + name + ')</div>' +
       '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">調べるための材料です。買い／売りの助言ではありません。</div>' +
       '<div class="ai-sodan-content" style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
       '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'exAI\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
   } catch (e) {
-    panel.innerHTML = '<div style="color:var(--red);padding:10px">⚠️ 取得エラー: ' + e.message + '（AI設定で Gemini キーを確認してください）</div>';
+    panel.innerHTML = '<div style="color:var(--red);padding:10px">⚠️ 取得エラー: ' + e.message + '（🔑API設定のキーを確認してください）</div>';
   }
 }
 async function askAISodanForHolding(cd, nm) {
@@ -3921,7 +3979,7 @@ async function askAISodanForHolding(cd, nm) {
   const typeStr = h ? typeLabel(h.type) : '現物';
 
   const prompt = buildPersonaPrefix() +
-    'あなたはプロの投資アシスタントです。Google検索を実行して「' + nm + ' 事業内容」「' + nm + ' 直近 決算」「' + nm + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
+    'Web 検索を実行して「' + nm + ' 事業内容」「' + nm + ' 直近 決算」「' + nm + ' 最新 ニュース」などを調べ、最新の情報を読み込んだ上で、以下の構成で具体的に回答してください。\n' +
     '回答にはHTMLタグを絶対に使用しないでください。装飾にはマークダウン（**太字**など）のみを使用し、段落や箇条書きを用いて読みやすく出力してください。\n\n' +
     '【保有銘柄】\n' +
     '銘柄: ' + cd + ' ' + nm + ' (' + typeStr + ')\n' +
@@ -3933,15 +3991,15 @@ async function askAISodanForHolding(cd, nm) {
     '（主な事業、強みや市場での立ち位置について分かりやすく解説してください）\n\n' +
     '### ■ 直近の決算状況と業績予測\n' +
     '（直近の決算発表の結果、前年比の業績、次回決算発表予定日とそれにかかる決算ギャップリスクについて）\n\n' +
-    '### ■ チャート・テクニカル現在位置と今後の見通し\n' +
-    '（現在の株価位置、今後のサポートラインやレジスタンスライン、目標値と損切り価格の妥当性について）\n\n' +
+    '### ■ チャートの今の形\n' +
+    '（移動平均線との位置・直近の高値と安値。この先の向きは予想しない）\n\n' +
     '### ■ 需給の事実\n' +
     '（信用倍率・空売り残高・出来高を事実として記載。優位性/パワーバランスなどの予測解釈はしない＝自前の10年検証で需給に売買予測力なしと確認済み）\n\n' +
-    '### ■ 出口の目安（doctrine: -8%損切り / +2R利確 / 時間切れ撤退）\n' +
-    '（現在値と損切り・目標・経過から「継続 / 利確 / 損切り」のどれが近いかを目安として、価格の目安とともに。ナンピン（難平）は短期回転では損失拡大なので勧めない。売買は断言せず最終判断は人間が一次情報で）';
+    '### ■ 一次情報で確かめること\n' +
+    '（決算短信・適時開示のどこを読むか、主なリスク。売買の目安・損切り価格は書かない (目安は 🤝 売買判断で Claude が出す)）';
 
   try {
-    const res = await callGemini(prompt, null, null, 5000);
+    const res = await callResearch(prompt, null, null, 5000);
     panel.innerHTML = '<div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;font-weight:700;color:var(--acc);font-size:13px">💬 AI詳細相談結果 (' + nm + ')</div>' +
       '<div class="ai-sodan-content" style="font-size:12px;line-height:1.8;color:var(--text)">' + md(res) + '</div>' +
       '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'ai-' + cd + '\').style.display=\'none\'" style="background:var(--s3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--t2);cursor:pointer">閉じる</button></div>';
@@ -3997,15 +4055,32 @@ function md(s) {
   return html;
 }
 
-// Gemini API
-// maxTokens 省略時は 4096 (旧 1500 から大幅増、振り返り・合議で途切れ防止)。
-// 振り返りなど超長文を期待する場合は呼び出し側で 8000 等を渡す。
+// ============================================================
+//  AI を呼ぶところ (2026-10-18 に作り直し)
+//  - 売買の目安は Claude 1 か所だけ (🤝 売買判断・振り返りの 🎯)。Gemini は調べ物とスクショの読み取り。
+//  - 調べ物のモデルは stock-checker の比較 (scripts/compare_ai_earnings.py・run 39104579325・2026-10-18) で決めた。
+//    測る前の決め: 「引用が原文にあるか」で 1 件でも不一致が出た Gemini は調べ物に使わず、Claude にする。
+//    結果 (決算短信 3 社): 原文と合わない引用は Gemini 2.5 Flash 11 件 / 3.8 Flash 1 件 / 4 Argon 1 件 /
+//    Sonnet 5.5・Opus 5.5 は 0 件 → 決めたとおり Claude。⚠️ 3.8 Flash・4 Argon の 1 件は PDF のページ下の文字が
+//    文の途中に挟まったためで、作り話ではなかった (原文で確認)。それでも基準は測った後に変えない。
+//    もう 1 つの理由: Gemini の検索の出典は「題と転送用 URL」だけで、原文の抜き出しも日付も無い (同じ run で 8 件とも)。
+//    Claude の検索は原文の抜き出しが返るので、出典を並べて自分で確かめられる。
+//  - スクショの読み取り (doImport) は自分の目で確かめてから取り込む作りなので、今回は 2.5 Flash のまま。
+//  - チャットの 🤖 Gemini は自分で選んで使うもの。新しい 3.8 Flash にした。
+// ============================================================
+const CLAUDE_MODEL = 'claude-sonnet-5-5';   // ボットの AI カード・朝チェックと同じ
+const GEMINI_MODEL = 'gemini-3.8-flash';    // チャットの 🤖。2.5 Flash は公式に「新規には非推奨」
+const RESEARCH_PROVIDER = 'claude';         // 比較 (2026-10-18・run 39104579325) で決めた。下の説明を参照
+
+// Gemini API (Google 検索つき)
+// maxTokens 省略時は 4096。新しい Gemini は思考のトークンも出力の上限に数えるので、長い調べ物は 8000 等を渡す。
 async function callGemini(prompt, sys, history, maxTokens) {
+  if (!GK) throw new Error('Gemini のキーが未設定です (🔑API設定)');
   const contents = [];
   if (history && history.length > 0) contents.push(...history.slice(0, -1));
   contents.push({role:'user', parts:[{text: sys ? sys + '\n\n' + prompt : prompt}]});
-  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens: maxTokens || 4096}};
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GK,
+  const body = {contents, tools:[{googleSearch:{}}], generationConfig:{maxOutputTokens: Math.max(maxTokens || 0, 8000)}};
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + GK,
     {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
   const d = await r.json();
@@ -4013,24 +4088,239 @@ async function callGemini(prompt, sys, history, maxTokens) {
 }
 
 // Claude API
-// maxTokens 省略時は 4096 (旧 1500 から大幅増)。振り返りなど超長文は 8000 等を渡す。
-async function callClaude(prompt, sys, history, maxTokens) {
+// opts.effort: 'low' (チャット・調べ物) / 'medium' (売買の目安・ボットと同じ)。
+// opts.schema を渡すと決まった形の JSON で答えさせ、パースした値を返す (ボットの ai_cards.call_model と同じ
+// output_config.format)。opts.search で Web 検索を使い、出典を末尾に並べる (朝チェックと同じ基本版の検索)。
+// ⚠️ Sonnet 5.5 は thinking を {type:'disabled'} にすると 400 (STATUS §4 G)。ボットと同じ adaptive にし、
+//    思考も上限に数えるので max_tokens は 8000 以上にする (課金は使った分だけ・キーはユーザー自身のもの)。
+async function callClaude(prompt, sys, history, maxTokens, opts) {
+  if (!CK) throw new Error('Claude のキーが未設定です (🔑API設定)');
+  opts = opts || {};
   const msgs = history ? [...history.slice(0,-1), {role:'user',content:prompt}] : [{role:'user',content:prompt}];
-  // ⚠️ Sonnet 5 は thinking を省略すると adaptive thinking が既定 ON になる。
-  //    思考が max_tokens (4000〜5000) を食って答えが途中で切れるうえ、出力トークンが
-  //    増えて課金が上がる (キーはユーザー自身のもの) ので明示的に無効化しておく。
-  //    思考させたいときは {type:'adaptive'} にして max_tokens も一緒に上げること。
-  const body = {model:'claude-sonnet-5', max_tokens: maxTokens || 4096, messages:msgs,
-                thinking:{type:'disabled'}};
+  const oc = {effort: opts.effort || 'low'};
+  if (opts.schema) oc.format = {type:'json_schema', schema: opts.schema};
+  const body = {model: CLAUDE_MODEL, max_tokens: Math.max(maxTokens || 0, 8000), messages: msgs,
+                thinking: {type:'adaptive'}, output_config: oc};
   if (sys) body.system = sys;
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-api-key':CK,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify(body)
-  });
-  if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
-  const d = await r.json();
-  return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim() || '応答なし';
+  if (opts.search) body.tools = [{type:'web_search_20250305', name:'web_search', max_uses: 2,   // 1 回 ~1.5 万 tok
+    user_location: {type:'approximate', country:'JP', city:'Tokyo', region:'Tokyo', timezone:'Asia/Tokyo'}}];
+  let d = null;
+  for (let turn = 0; turn < 3; turn++) {   // 検索の途中で止まったら (pause_turn) 続きを頼む
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':CK,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify(body)
+    });
+    if (!r.ok) { const e=await r.json().catch(()=>({})); throw new Error(e.error?.message || 'HTTP ' + r.status); }
+    d = await r.json();
+    if (d.stop_reason !== 'pause_turn') break;
+    body.messages = body.messages.concat([{role:'assistant', content: d.content}]);
+  }
+  if (d.stop_reason === 'refusal') throw new Error('AI が答えませんでした');
+  if (d.stop_reason === 'max_tokens') throw new Error('答えが長すぎて途中で切れました');
+  const blocks = (d.content||[]).filter(b=>b.type==='text');
+  const text = blocks.map(b=>b.text).join('\n').trim();
+  if (opts.schema) {
+    try { return JSON.parse(text); } catch (e) { throw new Error('AI の答えを読めませんでした'); }
+  }
+  return (text || '応答なし') + (opts.search ? aiCitationsText(blocks) : '');
+}
+
+// Claude の Web 検索の出典 (citations) を「出典:」の行にする (純関数)。原文の抜き出しも 60 字まで添える。
+function aiCitationsText(blocks) {
+  const seen = new Set(), lines = [];
+  (blocks || []).forEach(b => (b.citations || []).forEach(c => {
+    if (!c || !c.url || seen.has(c.url)) return;
+    seen.add(c.url);
+    lines.push('- ' + (c.title || c.url) + ' (' + c.url + ')' + (c.cited_text ? ' 「' + String(c.cited_text).slice(0, 60) + '」' : ''));
+  }));
+  return lines.length ? '\n\n出典:\n' + lines.slice(0, 6).join('\n') : '';
+}
+
+// 調べ物 (会社・決算・材料)。どの AI を使うかは RESEARCH_PROVIDER (比較の結果) で決める。
+async function callResearch(prompt, sys, history, maxTokens) {
+  if (RESEARCH_PROVIDER === 'claude') return callClaude(prompt, sys, history, maxTokens, {effort: 'low', search: true});
+  return callGemini(prompt, sys, history, maxTokens);
+}
+
+// ============================================================
+//  AI の売買の目安 (2026-10-18・ユーザー決定「今すぐ出す (未検証と明記)」)
+//  考え方の正本: stock-checker の docs/notebooklm/09_AIの売買の目安の考え方.md (版 = AI_GUIDANCE_VERSION)。
+//  投資の基本 (オニールの 7〜8% ルール・Odean 1998・Barber & Odean 2000・Asness 2011・R と期待値) と、
+//  ユーザーの NotebookLM (スイングトレードの道筋 ほか) と、このアプリの実測をそろえた。
+//  - 数字はコード、意見は AI。ルールの線はここで計算し、AI には計算させない。
+//  - ルールの状態を AI の意見の上に必ず出す。食い違えば ⚠️。
+//  - 目安は全部 ai_calls に記録して非公開リポへ書き出す → 30 件たまったら「目安どおりなら」を採点 (設計は後で)。
+//  - 以前 AI (2 世代前) に候補を選ばせた記録 (検証C) は勝率 28%・−0.25R。画面にも「未検証」と出す。
+// ============================================================
+const AI_GUIDANCE_VERSION = 'v1';
+const RULE_STOP_PCT = 0.08;       // ボットの config と同じ −8%
+const RULE_TIME_STOP_BD = 10;     // 10 営業日 (+0.5R 以上なら延長可)
+const AI_CALLS_KEY = 'tj_ai_calls';
+const AI_CALLS_MAX = 500;
+const AI_UNVERIFIED_NOTE = 'AI の意見・未検証 (以前 AI に選ばせた記録は勝率 28%)・外れることがあります。決めるのは自分です。';
+const AI_GUIDANCE_PRINCIPLES =
+  '【考え方の土台 ' + AI_GUIDANCE_VERSION + ' (上ほど強い)】\n' +
+  '[1] 損を小さく: ルールの状態に「−8% の線に到達」か「自分の損切りに到達」があれば、目安は必ず「損切り」。損切りラインを遠ざけない・ナンピンしない (−8% は +8.7% で戻るが −15% は +17.6% 要る)。\n' +
+  '[2] 買った根拠 (上昇の流れ・押し目の形・決算の裏付け) が崩れた事実があれば、−8% の前でも撤退を考える。\n' +
+  '[3] 利を伸ばす: +1R 以上なら損切りは買値へ、+2R で一部利確、勢いが続く間は残りを持つ。早すぎる小さな利確を避ける。\n' +
+  '[4] 10 営業日たっても伸びなければ (+0.5R 未満) 撤退を考える。\n' +
+  '[5] 決算・権利落ちが近ければ、そのリスクを書く (窓が開くと −8% で切れない)。\n' +
+  '[6] 地合いが caution 以上なら新規は控えめに、halt は新規なし。\n' +
+  '[7] 勝率より期待値 (R で考える)。勝率 50% でも損益比 1:2 なら資産は増える。\n' +
+  '[8] 逆張り・売買のしすぎをしない。迷ったら見送る。新しい候補は渡した機械の候補の中からだけ。\n' +
+  '[9] 事実と意見を分ける。数字は渡したものだけを使い、計算し直さない。渡していない株価・日付・ニュースを作らない。';
+const AI_GUIDANCE_SYSTEM =
+  'あなたは日本株スイングトレード (損切り −8%・損益比 1:2・保有は数日〜数週間) の「売買の目安」を出す AI です。' +
+  'あなたの目安は未検証の意見で、最終判断はユーザーです。「必ず」「確実」のような外れない前提の言い方はしません。\n' +
+  AI_GUIDANCE_PRINCIPLES + '\n' +
+  '理由はそれぞれ 1 文で、先頭に根拠の番号を [1] のように付けます。';
+const AI_EXIT_SCHEMA = {type:'object', additionalProperties:false, required:['call','reasons','risk'],
+  properties:{call:{type:'string'}, reasons:{type:'array', items:{type:'string'}}, risk:{type:'string'}}};
+const AI_REVIEW_SCHEMA = {type:'object', additionalProperties:false, required:['holdings','candidates','note'],
+  properties:{
+    holdings:{type:'array', items:{type:'object', additionalProperties:false, required:['code','call','reasons'],
+      properties:{code:{type:'string'}, call:{type:'string'}, reasons:{type:'array', items:{type:'string'}}}}},
+    candidates:{type:'array', items:{type:'object', additionalProperties:false, required:['code','reasons'],
+      properties:{code:{type:'string'}, reasons:{type:'array', items:{type:'string'}}}}},
+    note:{type:'string'}}};
+
+// 目安の言葉を 4 つのどれかにそろえる (純関数)。どれでもなければ空文字 (記録しない)。
+function aiNormalizeCall(s) {
+  const t = String(s || '').trim();
+  const exact = ['継続', '一部利確', '利確', '損切り'].find(w => t === w);
+  if (exact) return exact;
+  return ['一部利確', '損切り', '利確', '継続'].find(w => t.indexOf(w) >= 0) || '';
+}
+
+// 建日の翌日から今日までの平日の数 (純関数・祝日は数えていない概算)。不正な日付は null。
+function aiWeekdaysBetween(fromYmd, toYmd) {
+  const a = Date.parse(fromYmd), b = Date.parse(toYmd);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a || b - a > 3650 * 86400000) return null;
+  let n = 0;
+  for (let t = a + 86400000; t <= b; t += 86400000) {
+    const w = new Date(t).getUTCDay();
+    if (w !== 0 && w !== 6) n++;
+  }
+  return n;
+}
+
+// ルールの線 (純関数・ボットの建玉チェックと同じ物差し)。−8% の線・+1R・+2R は買値から。
+// 自分で入れた損切り (sl) は別に見る。+1R に終値で届いたか (建値ストップ) は終値の履歴が要るので
+// ここでは判定せず、夜の建玉チェック (LINE) を正とする。買値が未確認なら null。
+function aiRuleLines(h, cp, today) {
+  const bp = Number(h && h.bp) || 0;
+  if (!h || h.bp_unknown || !(bp > 0)) return null;
+  const dir = ((h.type || 'spot') === 'margin_short') ? -1 : 1;
+  const r = bp * RULE_STOP_PCT;
+  const price = Number(cp) > 0 ? Number(cp) : bp;
+  const stop = Math.round(bp - dir * r), r1 = Math.round(bp + dir * r), r2 = Math.round(bp + dir * 2 * r);
+  const sl = Number(h.sl) > 0 ? Number(h.sl) : null;
+  const rNow = Math.round((price - bp) * dir / r * 100) / 100;
+  const heldBd = (!h.dt_unknown && h.dt) ? aiWeekdaysBetween(h.dt, today) : null;
+  const below = (line) => dir > 0 ? price <= line : price >= line;
+  const above = (line) => dir > 0 ? price >= line : price <= line;
+  const states = [];
+  if (below(stop)) states.push({key: 'stop', label: '🛑 −8% の線に到達 (ルールでは損切り)'});
+  else if (sl && below(sl)) states.push({key: 'sl', label: '🛑 自分の損切り (' + sl + '円) に到達'});
+  if (above(r2)) states.push({key: 'r2', label: '🎯 +2R に到達 (ルールでは一部利確)'});
+  else if (above(r1)) states.push({key: 'r1', label: '🔒 +1R 以上 (損切りを買値へ。終値で届いたかは夜の LINE が正)'});
+  if (heldBd != null && heldBd >= RULE_TIME_STOP_BD && rNow < 0.5) {
+    states.push({key: 'time', label: '⏰ ' + heldBd + ' 営業日 (伸びなければ撤退を検討)'});
+  }
+  if (!states.length && Math.abs(price - stop) / price <= 0.02) {
+    states.push({key: 'near', label: '⚠️ −8% の線まであと ' + (Math.abs(price - stop) / price * 100).toFixed(1) + '%'});
+  }
+  return {bp, price, stop, r1, r2, sl, rNow, heldBd, states};
+}
+
+// ルールと AI の目安の食い違い (純関数)。損切りの位置なのに損切り以外・+2R なのに継続。
+function aiRuleConflict(call, rule) {
+  if (!rule || !call) return '';
+  const keys = rule.states.map(s => s.key);
+  if ((keys.indexOf('stop') >= 0 || keys.indexOf('sl') >= 0) && call !== '損切り') {
+    return '⚠️ ルールでは損切りの位置ですが、AI の目安は「' + call + '」です。−8% を超えて持つと負けが大きくなりやすい (これまでの大きな負けはここから出ています)。';
+  }
+  if (keys.indexOf('r2') >= 0 && call === '継続') return '⚠️ +2R に届いています。ルールでは一部利確です。';
+  return '';
+}
+
+// 目安の記録を足す (純関数)。同じ日・同じ銘柄・同じ種類は最後の 1 件だけ残し、最大 max 件。
+function aiUpsertCall(list, entry, max) {
+  const key = (e) => e.date + '|' + e.code + '|' + e.kind;
+  const out = (Array.isArray(list) ? list : []).filter(e => e && key(e) !== key(entry));
+  out.push(entry);
+  return out.slice(-(max || 500));
+}
+
+function aiCode5(cd) {
+  const c = String(cd || '').trim();
+  return /^[0-9A-Za-z]{4}$/.test(c) ? c + '0' : c;
+}
+function getAiCalls() { return ld(AI_CALLS_KEY, []); }
+function recordAiCall(entry) { sv(AI_CALLS_KEY, aiUpsertCall(getAiCalls(), entry, AI_CALLS_MAX)); }
+
+// 🤝 売買判断の頼み (純関数)。数字は計算済みのものだけを渡す。
+function aiExitPrompt(h, rule, research, today, macroSummary) {
+  // 建日: 保有スクショだけで入った建玉の dt は「取込日」で建日ではない (dt_unknown)。経過日数を主張させない。
+  const since = h.dt_unknown
+    ? '不明 (' + h.dt + ' は保有スクショの取込日で、実際の建日ではありません。経過日数は判断に使わないでください)'
+    : (h.dt ? h.dt : '不明');
+  const L = ['今日: ' + today,
+    '【保有】' + h.cd + ' ' + (h.nm || '') + '・' + typeLabel(h.type) + '・' + h.sh + '株・買値 ' + h.bp + '円・建日 ' + since,
+    '【現値】' + (rule ? rule.price : (h.cp || h.bp)) + '円 (時点: ' + (h.cp_at || '不明 (保有スクショの取込か手入力の日)') + ')'];
+  if (rule) {
+    L.push('【ルールの線 (計算済み・この数字を使う)】−8% の線 ' + rule.stop + '円 / +1R ' + rule.r1 + '円 / +2R ' + rule.r2 +
+      '円 / 自分の損切り ' + (rule.sl ? rule.sl + '円' : '未入力') + ' / 今は ' + rule.rNow + 'R / 保有 ' +
+      (rule.heldBd == null ? '不明' : rule.heldBd + ' 営業日 (土日を除いた概算)'));
+    L.push('【ルールの状態】' + (rule.states.length ? rule.states.map(s => s.label).join(' / ') : 'ルールに触れていない'));
+  } else {
+    L.push('【ルールの線】買値が未確認のため計算できない');
+  }
+  L.push('【地合い】' + (macroSummary || '不明'));
+  L.push('【調べ物 (AI の検索のまとめ・原文と照合していない。断定の根拠にしない)】\n' + (research ? String(research).slice(0, 3000) : 'なし'));
+  L.push('【頼み】考え方の土台の順番で、この建玉の目安を「継続 / 一部利確 / 利確 / 損切り」から 1 つ選び (call)、' +
+    '理由を 2〜3 個 (reasons)、いちばん気をつけるリスクを 1 文 (risk) で答えてください。');
+  return L.join('\n');
+}
+
+// 保有 1 件の調べ物の頼み (純関数)。売買の目安は書かせない (目安は Claude 1 か所)。
+function aiHoldingResearchPrompt(h, today) {
+  return buildPersonaPrefix() +
+    '今日は ' + today + ' です。Web 検索で次を調べ、出典のあることだけを短くまとめてください。売買の判断・目安は書きません。\n' +
+    '【対象】' + h.cd + ' ' + (h.nm || '') + '\n' +
+    '1. どんな会社か (1〜2 行)\n' +
+    '2. 直近の決算 (前年比の増減と会社の説明) と、次の決算発表の予定日\n' +
+    '3. ここ数日の材料 (適時開示・ニュース)。見つからなければ「見つからず」\n' +
+    'HTML タグは使わず、マークダウン (**太字**・箇条書き) だけ。数字は出典にあるものだけ。';
+}
+
+// 表示 (DOM の文字列だけ作る)。AI の文は必ずエスケープする。
+function aiRuleBoxHTML(h, rule) {
+  if (!rule) {
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px">📏 ルールの線: 買値が未確認のため計算できません (買値を入れてください)</div>';
+  }
+  const f = (n) => Number(n).toLocaleString() + '円';
+  const st = rule.states.length ? rule.states.map(s => _escape(s.label)).join('<br>') : 'ルールに触れていません';
+  return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--s1);font-size:12px;line-height:1.7">' +
+    '<div style="font-size:11px;color:var(--t2)">📏 ルールの線 (計算・夜の建玉チェックと同じ物差し)</div>' +
+    '<div>−8% の線 <b>' + f(rule.stop) + '</b> ／ +1R ' + f(rule.r1) + ' ／ +2R ' + f(rule.r2) +
+    (rule.sl ? ' ／ 自分の損切り ' + f(rule.sl) : '') + '</div>' +
+    '<div>現値 ' + f(rule.price) + ' (' + (rule.rNow >= 0 ? '+' : '') + rule.rNow + 'R・時点 ' + _escape(h.cp_at || '取込か手入力の日') + ')' +
+    (rule.heldBd != null ? ' ／ 保有 ' + rule.heldBd + ' 営業日 (概算)' : '') + '</div>' +
+    '<div style="margin-top:4px;font-weight:700">' + st + '</div></div>';
+}
+
+function aiCallHTML(call, reasons, risk, conflict) {
+  const color = {'損切り': 'var(--red)', '利確': 'var(--acc)', '一部利確': 'var(--acc)'}[call] || 'var(--text)';
+  const rs = (Array.isArray(reasons) ? reasons : []).slice(0, 3).map(x => '<li>' + _escape(String(x)) + '</li>').join('');
+  return '<div style="margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:10px;background:#fff">' +
+    '<div style="font-size:11px;color:var(--t2)">🧠 AI の目安 (Claude)</div>' +
+    '<div style="font-size:16px;font-weight:700;color:' + color + ';margin:2px 0 4px">' + _escape(call) + '</div>' +
+    (rs ? '<ul style="margin:0 0 4px 16px;padding:0;font-size:12px;line-height:1.7">' + rs + '</ul>' : '') +
+    (risk ? '<div style="font-size:12px">⚠️ リスク: ' + _escape(String(risk)) + '</div>' : '') +
+    (conflict ? '<div class="abar as" style="margin-top:6px">' + _escape(conflict) + '</div>' : '') +
+    '<div style="font-size:10px;color:var(--t3);margin-top:6px">' + _escape(AI_UNVERIFIED_NOTE) + '</div></div>';
 }
 
 // トースト
@@ -4393,6 +4683,14 @@ function startVoiceInput(idx) {
 // opts.removeMissing:true のときはスクショに写った type の中で、
 // 写っていない既存ポジションを removed[] に集めて返す
 // (呼び出し側が確認ダイアログを出してから削除するため、ここでは削除を確定させない)。
+// 保有スクショに写らなかった建玉に「写っていない日」(unseen_since) を付ける (純関数)。
+// 前から付いている日は上書きしない (いちばん古い日を残す)。次に写れば applyHoldImport が消す。
+function markUnseen(H, removed, today) {
+  const keys = new Set((removed || []).map(h => (h.cd || '') + ':' + (h.type || 'spot')));
+  return (H || []).map(h => keys.has((h.cd || '') + ':' + (h.type || 'spot'))
+    ? {...h, unseen_since: h.unseen_since || today} : h);
+}
+
 function applyHoldImport(H, items, opts) {
   opts = opts || {};
   const nextH = H.map(h => ({...h}));
@@ -4416,7 +4714,8 @@ function applyHoldImport(H, items, opts) {
     const idx = nextH.findIndex(h => h.cd === (cd || nm) && (h.type || 'spot') === t);
     if (idx >= 0) {
       // 再取込: OCR の値を信頼して上書き (買値が初回 OCR で誤っていた場合の修正手段)
-      if (cp) nextH[idx].cp = cp;
+      if (cp) { nextH[idx].cp = cp; nextH[idx].cp_at = TODAY; }
+      delete nextH[idx].unseen_since;   // スクショに写った = まだ持っている
       if (it.buy_price && it.buy_price > 0) { nextH[idx].bp = it.buy_price; nextH[idx].bp_unknown = false; }
       if (it.shares && it.shares > 0) nextH[idx].sh = it.shares;
       if (!nextH[idx].nm && nm) nextH[idx].nm = nm;
@@ -4428,7 +4727,7 @@ function applyHoldImport(H, items, opts) {
       // AI プロンプト側で経過日数を主張しないようにする。
       nextH.push({cd: cd || nm, nm: nm || cd, sh, bp: bpVal, cp: cp || bpVal, sl: null, tgt: null,
                   memo: memoVal, dt: it.buy_date || TODAY, type: t, bp_unknown: bpUnknown,
-                  dt_unknown: !it.buy_date});
+                  dt_unknown: !it.buy_date, cp_at: cp ? TODAY : null});
     }
   }
 
@@ -4614,9 +4913,11 @@ function doImport() {
       const ok = confirm('📸 スクショから ' + checked.length + ' 銘柄を読み取りました。\n' +
         'このうち、以前登録されていて今回のスクショには写っていない銘柄が ' + wetRun.removed.length + ' 件あります:\n・' + names +
         '\n\n売却済みとして保有から削除しますか？\n(キャンセルすると削除せず追加/更新だけ行います)');
-      H = ok ? wetRun.H : dryRun.H;
+      H = ok ? wetRun.H : markUnseen(dryRun.H, wetRun.removed, TODAY);
       // 消した建玉 = 売ったはず。約定履歴を取り込むまで「決済の記録待ち」で覚える
       // (これが無いと負けだけが記録から抜ける)。
+      // キャンセルした建玉は「写っていない日」を付けて保有タブに ⚠️ を出す (2026-10-18: 売った 2 社が
+      // 1 年以上保有に残り、建玉チェックの警告 5 件中 4 件がその 2 社の毎日の 🛑⏰ だった)。
       if (ok) addPendingExits(wetRun.removed, TODAY);
     } else {
       H = dryRun.H;

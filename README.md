@@ -161,22 +161,27 @@ const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-dat
 
 | 用途 | 取得先 | 保存キー |
 |---|---|---|
-| 🤖 Gemini 2.5 Flash | aistudio.google.com → Get API key | `tj_gk` |
-| 🧠 Anthropic Claude Sonnet 5 | console.anthropic.com → API Keys | `tj_ck` |
+| 🤖 Gemini (3.8 Flash・スクショ読み取りは 2.5 Flash) | aistudio.google.com → Get API key | `tj_gk` |
+| 🧠 Anthropic Claude Sonnet 5.5 | console.anthropic.com → API Keys | `tj_ck` |
 
 > ブラウザから直接 Anthropic API を叩くため、`anthropic-dangerous-direct-browser-access: true` ヘッダ付き。個人運用でのみ使用。
 
-### 使用モデル
+### 使用モデル (2026-10-18)
 
 | モデル | 用途 | 単価感 |
 |---|---|---|
-| `gemini-2.5-flash` | `callGemini` の全用途 (需給・テーマ・市場文脈・振り返り) | $0.30 / $2.50 |
-| `claude-sonnet-5` | `callClaude` の全用途 (エントリー判断・チャット・合議) | $2 / $10 |
+| `claude-sonnet-5-5` | **売買の目安** (🤝 売買判断・振り返りの 🎯・未検証と明記) / **調べ物** (Web 検索つき・出典の原文を並べる) / チャットの 🧠 | $2 / $10 + 検索 $10 / 1,000 回 |
+| `gemini-3.8-flash` | チャットの 🤖 (自分で選んだときだけ) | $0.75 / $3.75 (12/31 まで) |
+| `gemini-2.5-flash` | スクショの読み取り (取り込む前に自分で確かめる) | $0.30 / $2.50 |
 
-⚠️ **用途ごとにモデルを分けてはいない。** `callGemini` / `callClaude` がそれぞれ
-1 モデルを使う。単価は 1M トークンあたりの入力 / 出力。
-`claude-sonnet-5` は `thinking:{type:'disabled'}` を明示して呼んでいる
-(省略すると adaptive thinking が既定 ON で `max_tokens` を食う)。
+- 売買の目安は Claude 1 か所。考え方の正本は stock-checker の `docs/notebooklm/09_AIの売買の目安の考え方.md` (版は `AI_GUIDANCE_VERSION`)。
+  数字 (−8% の線・+1R・+2R・株数) はコードが計算し、AI には計算させない。目安は `tj_ai_calls` に記録して非公開リポへ書き出す。
+- 調べ物を Claude にしたのは、stock-checker の比較 (2026-10-18) で「引用が原文にあるか」の不一致が Gemini は 2.5 Flash 11 件・
+  3.8 Flash 1 件・4 Argon 1 件、Claude は 0 件だったため (測る前の決め: 1 件でも不一致なら Claude)。Gemini の検索の出典は
+  題と転送用 URL だけで原文の抜き出しも日付も無い。
+- `claude-sonnet-5-5` は `thinking:{type:'adaptive'}` (ボットと同じ)。`{type:'disabled'}` は 400 になる。思考も `max_tokens` を
+  使うので上限は 8000 以上。1 回の 🤝 売買判断で Claude を 2 回 (調べ物・目安) 呼ぶ (あなたの鍵で 約 $0.1〜0.2)。
+  ⚠️ ボットと同じ Anthropic の組織の鍵なら、Console の月の上限 (ボットの P3・P4・朝チェックと共用) を食う。
 
 ---
 
@@ -193,6 +198,9 @@ const DATA_BASE = "https://raw.githubusercontent.com/hiroki300/trade-journal-dat
 | `tj_az` | 銘柄分析結果（最大 30 日） |
 | `tj_gk` | Gemini API キー |
 | `tj_ck` | Anthropic API キー |
+| `tj_ai_calls` | AI の売買の目安の記録 (日付・銘柄・種類・目安・その時の値・ルールの状態・モデル・版。最大 500 件・非公開リポへ `ai_calls` として書き出す) |
+
+保有 (`tj_h5`) の各建玉には、現値の時点 `cp_at` と、保有スクショに写っていない日 `unseen_since` (取込の「削除しますか?」をキャンセルしたとき) も入る。
 
 morning.html 側は IndexedDB を併用（チャット履歴・売買分析アーカイブ）。
 

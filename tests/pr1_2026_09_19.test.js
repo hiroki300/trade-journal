@@ -99,9 +99,10 @@ chk(grab('renderMacro').includes('_fmtEvalAt(d.evaluated_at)'), 'renderMacro が
 
 // ════════════════════════════════════════════════════════════
 console.log('--- 🤝売買判断に保有開始日を渡す ---');
-const ah = grab('analyzeHolding');
-chk(ah.includes("'保有開始日: '+h.dt"), 'プロンプトに保有開始日を入れる');
-chk(ah.includes('保有開始日: 不明'), '開始日が無いときは「不明」と明示する (黙って落とさない)');
+// 2026-10-18: 🤝 は「ルールの線 (計算) → 調べ物 → Claude の目安」に作り直した。頼みの文は aiExitPrompt。
+const ep = grab('aiExitPrompt');
+chk(ep.includes("円・建日 ' + since"), 'プロンプトに保有開始日 (建日) を入れる');
+chk(ep.includes("(h.dt ? h.dt : '不明')"), '開始日が無いときは「不明」と明示する (黙って落とさない)');
 
 // ════════════════════════════════════════════════════════════
 //  レビュー指摘の修正: 保有スクショの dt は「取込日」であって建日ではない
@@ -124,11 +125,15 @@ const r4 = run("applyHistImport([], [], 0, [{code:'8136', action:'buy', shares:1
 chk(r4.H[0].dt === '2026-09-02' && r4.H[0].dt_unknown === false, '約定履歴からの建玉は dt が事実');
 
 const ah2 = grab('analyzeHolding');
-chk(ah2.includes('ymdJST()') && !ah2.includes('Date.parse(TODAY)'),
+chk(ah2.includes('const today = ymdJST()') && !ah2.includes('Date.parse(TODAY)'),
     '経過日数は読み込み時の TODAY でなく、その場の JST 日付で数える');
-chk(ah2.includes('_hd >= 0') && ah2.includes('_hd <= 3650'), '未来日・桁違いの日付は経過日数にしない');
-chk(ah2.includes('!h.dt_unknown'), 'dt_unknown の保有は経過日数を主張しない');
-chk(ah2.includes('実際の建日ではありません'), '取込日であることを AI に明示する');
+vm.runInContext(['const RULE_STOP_PCT = 0.08, RULE_TIME_STOP_BD = 10;',
+                 grab('aiWeekdaysBetween'), grab('aiRuleLines')].join('\n'), sb);
+chk(run("aiWeekdaysBetween('2026-10-20', '2026-10-18')") === null &&
+    run("aiWeekdaysBetween('2010-01-01', '2026-10-18')") === null, '未来日・桁違いの日付は経過日数にしない');
+chk(run("aiRuleLines({bp:1000, sh:100, dt:'2026-10-01', dt_unknown:true}, 1000, '2026-10-18').heldBd") === null,
+    'dt_unknown の保有は経過日数を主張しない');
+chk(ep.includes('実際の建日ではありません'), '取込日であることを AI に明示する');
 
 // ════════════════════════════════════════════════════════════
 //  井村流セクションの鮮度表示 (このレーンだけ日付が出ていなかった)
