@@ -1180,6 +1180,25 @@ function _breadthLine(b) {
     _escape(txt) + '</div>';
 }
 
+// 市場全体の予定 (stock-checker swing_facts・2026-10-24)。日銀・FOMC・米国の雇用統計・CPI・SQ を
+// 「日本の何日の寄り付き/場中に効くか」で並べた 1 枚。全候補に共通なのでカードごとには出さない。
+// 文はバックエンドが組み立てる (pullback_candidates.json の market_schedule.pwa)。flag OFF の間は
+// market_schedule が無く何も出さない。表が期間に届かないときは warn (「予定表は ○/○ まで」)。
+function _marketScheduleHtml(s) {
+  const p = s && s.pwa;
+  if (!p || !p.title) return '';
+  const lines = (p.lines || []).map(t =>
+    '<div style="display:flex;gap:6px;line-height:1.55;"><span style="color:var(--t3);flex:none;">•</span><span>' + _escape(t) + '</span></div>'
+  ).join('');
+  return '<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:var(--t2);">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--acc);margin-bottom:4px;">' + _escape(p.title) + '</div>' +
+    lines +
+    (p.empty ? '<div style="line-height:1.55;">' + _escape(p.empty) + '</div>' : '') +
+    (p.warn ? '<div style="margin-top:4px;color:#dc2626;line-height:1.5;">' + _escape(p.warn) + '</div>' : '') +
+    (p.note ? '<div style="margin-top:4px;font-size:10px;color:var(--t3);line-height:1.5;">' + _escape(p.note) + '</div>' : '') +
+  '</div>';
+}
+
 function renderPullback(d) {
   const el = document.getElementById('dpullback');
   const countEl = document.getElementById('pullbackCount');
@@ -1196,7 +1215,7 @@ function renderPullback(d) {
   }
 
   const asOf = d.as_of_date ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px;padding:0 4px;">📅 ' + _escape(d.as_of_date) + ' の終値時点 / 母集団 ' + _escape(String(d.universe_size || '—')) + '銘柄 → 押し目 ' + _escape(String(d.pullback_passed || 0)) + '銘柄 → 決算通過 ' + _escape(String(d.candidate_count || 0)) + '銘柄</div>' : '';
-  const breadth = _breadthLine(d.breadth);
+  const breadth = _breadthLine(d.breadth) + _marketScheduleHtml(d.market_schedule);
   const sortHtml =
     '<div style="display:flex;gap:6px;margin-bottom:8px;padding:0 4px;">' +
       '<button onclick="togglePullbackSort()" style="background:none;border:1px dashed var(--border);border-radius:8px;color:var(--t3);font-size:11px;font-weight:600;padding:6px 12px;cursor:pointer;">' +
@@ -1448,6 +1467,10 @@ function _renderPullbackCard(c) {
     block('⏱', '当日の動き', b.turn, '#10b981') +
     exDateHtml +
     marginAlertHtml +
+    // 業種と比べた動き・寄り付きの飛び (stock-checker swing_facts・2026-10-24)。**事実だけ**。
+    // 並び順・顔ぶれには使わない。flag OFF の間は b.sector_move / b.gap_risk が無く何も出ない。
+    block('🏭', '業種と比べた動き (この5営業日・事実だけ・効くかは未検証)', b.sector_move, '#64748b') +
+    block('⚡', '寄り付きの飛び (直近100日)', b.gap_risk, '#dc2626') +
     block('📏', '値動きの大きさ', b.volatility, '#f59e0b') +
     block('📐', 'よく売買された価格帯', b.levels, '#8b5cf6') +
     block('📍', 'いまの位置 (チャートの数字)', b.position, '#0ea5e9') +
@@ -2396,7 +2419,8 @@ function tYutaiH(idx, checked) {
   rHold();
   rDash();
 }
-function rHold() { document.getElementById('hList').innerHTML = H.length ? H.map((h,i)=>hHTML(h,false,i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
+// 保有があるときだけ、いちばん上に市場全体の予定 (押し目の候補のデータの market_schedule・2026-10-24)。
+function rHold() { document.getElementById('hList').innerHTML = H.length ? _marketScheduleHtml((window._pullbackData || {}).market_schedule) + H.map((h,i)=>hHTML(h,false,i)).join('') : '<div class="empty"><div class="ei">💼</div>保有銘柄なし</div>'; }
 
 // ============================================================
 //  Phase A-1: 損切り一括設定モーダル + ハードロック
