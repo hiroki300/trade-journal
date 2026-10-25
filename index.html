@@ -213,11 +213,16 @@ select.fi{appearance:none;-webkit-appearance:none;}
     <div class="sb"><div class="sl">実現損益</div><div class="sv" id="sr">¥0</div><div class="ss" id="stc">0件</div></div>
   </div>
   <div id="dh"></div><div id="dt" style="margin-top:8px"></div>
-  <!-- ========= Phase 3 朝会レポート (Mon 05:00 JST 自動更新) ========= -->
 </div>
 
 <div class="page" id="page-market">
-  <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span class="mr-gen" style="opacity:.6"></span>
+  <div class="sec-lbl">🌅 朝チェック
+    <button onclick="loadMorningCheck(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 取り直す</button>
+  </div>
+  <div style="font-size:11px;color:var(--t3);margin:0 4px 8px;line-height:1.4">毎朝 LINE に届く朝チェックと<b>同じ中身</b>です（平日の朝 7:15 ごろ・土日祝は届きません）。数字は機械が取り、文は AI (Claude) が記事を読んで書きました。<b>売買の判断はしていません</b>。</div>
+  <div id="dmorningcheck" style="margin-bottom:14px">読み込み中…</div>
+
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📥 ボットのデータ <span class="mr-gen" style="opacity:.6"></span>
     <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
   </div>
 
@@ -252,7 +257,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div style="font-size:10px;color:var(--t3);margin:0 4px 14px;line-height:1.4">※ チャート分析は「今の形」の説明です。ゴールデンクロス等のシグナルは自前の10年検証で予測力が確認できていないため、売買判断ではなく形の把握に使い、最終判断は決算・IR等の一次情報で。</div>
   <div style="border-top:1px solid var(--border);margin-bottom:12px"></div>
 
-  <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📅 朝会レポート <span class="mr-gen" style="opacity:.6"></span>
+  <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📥 ボットのデータ <span class="mr-gen" style="opacity:.6"></span>
     <button onclick="loadMorningReports(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 再取得</button>
   </div>
 
@@ -550,6 +555,7 @@ function go(id) {
     p.classList.toggle('on', active);
   });
   if (id==='dash')  rDash();
+  if (id==='market') loadMorningCheck();   // 今日の分が届くまでは取り直す (5 分に 1 回まで)
   if (id==='hold')  rHold();
   if (id==='trade') { rTH(); checkMacroWarning(); }  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
   if (id==='watchchat') rWatch();
@@ -717,12 +723,12 @@ function rDash() {
   const te = document.getElementById('dt');
   const rec = [...T].reverse().slice(0, 3);
   te.innerHTML = rec.length ? '<div class="sec-lbl">直近の売買</div>' + rec.map(tHTML).join('') : '';
-  // Phase 3: 朝会レポートを毎回読み直し (タブ切替時にも最新表示)
+  // ボットのデータ (公開 JSON) と 🌅 朝チェックを読み直す (タブ切替時にも最新表示)
   loadMorningReports();
   checkSlCloseWarning(); // 損切り接近警告のチェック
 }
 
-// ========= Phase 3 朝会レポート (stock-checker バックエンド連携) =========
+// ========= 📥 ボットのデータ (stock-checker が公開リポに出す JSON・旧「朝会レポート」) =========
 const PUB_BASE = 'https://raw.githubusercontent.com/hiroki300/trade-journal-data/main';
 
 async function _fetchJSON(name) {
@@ -733,7 +739,7 @@ async function _fetchJSON(name) {
   } catch { return null; }
 }
 
-// 朝会レポートの「当日」キャッシュ。朝に1回取得したら、その日は再取得せず即表示
+// ボットのデータの「当日」キャッシュ。朝に1回取得したら、その日は再取得せず即表示
 // (タブ切替・PWA 再起動でも GitHub raw を叩かない)。日付が変わったら翌朝1回だけ取得。
 // 夕方以降に出る更新 (押し目 20:00 / 開示 21:00 の予定、実際は数時間遅れがち) は「🔄 再取得」で強制更新。
 let _isReportsFetched = false;
@@ -741,7 +747,8 @@ let _reportsCacheDate = '';   // この値が TODAY と一致する間は再取�
 
 async function loadMorningReports(forceRefresh = false) {
   const now = Date.now();
-  
+  loadMorningCheck(forceRefresh);   // 🌅 朝チェックは別の取り方 (その日 1 回のキャッシュに乗せない)
+
   // 初回呼び出し時、localStorage からキャッシュを即座に読み込んで表示 (チラつき排除)
   if (!_isReportsFetched) {
     try {
@@ -844,6 +851,171 @@ async function loadMorningReports(forceRefresh = false) {
       document.querySelectorAll('.mr-gen').forEach(e => e.textContent = '(取得失敗)');
     }
   }
+}
+
+// ========= 🌅 朝チェック (2026-10-25・stock-checker の morning_check.py / private_publish.py) =========
+//  毎朝 LINE に届く朝チェックと同じ中身を 🌍 市場のいちばん上に出す。置き場は非公開リポ
+//  trade-journal-private の morning_check.json (建玉の銘柄名と損益・指数の値・記事の抜き書きが入るので
+//  公開リポに置かない)。売買記録と同じ鍵 (tj_ghpat) で読む。
+//  ⚠️ loadMorningReports の「その日 1 回だけ取得」に乗せない — 7:15 より前に開いた日に昨日の分のまま
+//     固まる。今日の分が届くまでは、開いたとき・タブを切り替えたときに取り直す (MC_RETRY_MS に 1 回まで)。
+//  ⚠️ 文は bot が作った LINE の吹き出しをそのまま出す (画面で言葉を作り直さない)。今日の分でなければ
+//     「まだ届いていない」と書き、前回の分は畳む (古い朝チェックを今朝のものとして読ませない)。
+const MC_FILE = 'morning_check.json';
+const MC_CACHE_KEY = 'tj_morning_check';
+const MC_RETRY_MS = 5 * 60 * 1000;
+const MC_OUTLOOK_LABEL = '(AI の推測・外れることがあります)';
+let _mc = null;      // {payload, fetchedAt, err, status, triedAt}
+let _mcBusy = null;
+
+async function _fetchMorningCheck(pat) {
+  const api = 'https://api.github.com/repos/' + GH_PRIVATE_REPO;
+  const auth = { 'Authorization': 'Bearer ' + pat };
+  let r;
+  try {
+    r = await fetch(api + '/contents/' + MC_FILE + '?ref=main',
+                    { headers: { ...auth, 'Accept': 'application/vnd.github.raw+json' }, cache: 'no-store' });
+  } catch (e) { return { err: 'net' }; }
+  if (r.status === 200) {
+    try {
+      const p = await r.json();
+      return (p && Array.isArray(p.bubbles)) ? { payload: p } : { err: 'json' };
+    } catch (e) { return { err: 'json' }; }
+  }
+  if (r.status === 401) return { err: 'auth' };
+  if (r.status === 404) {
+    // GitHub は鍵に権限の無い非公開リポにも 404 を返す → リポ自体を見て「まだ無い」と「見えない」を分ける
+    try {
+      const rr = await fetch(api, { headers: { ...auth, 'Accept': 'application/vnd.github+json' }, cache: 'no-store' });
+      if (rr.status === 200) return { err: 'none_yet' };
+      if (rr.status === 401) return { err: 'auth' };
+      return { err: 'repo' };
+    } catch (e) { return { err: 'net' }; }
+  }
+  return { err: 'http', status: r.status };
+}
+
+async function loadMorningCheck(force = false) {
+  if (!_mc) {
+    _mc = {};
+    try {
+      const c = JSON.parse(localStorage.getItem(MC_CACHE_KEY) || 'null');
+      if (c && c.payload) { _mc.payload = c.payload; _mc.fetchedAt = c.fetchedAt; }
+    } catch (e) {}
+  }
+  const pat = (localStorage.getItem('tj_ghpat') || '').trim();
+  if (!pat) { _mc.err = 'nopat'; renderMorningCheck(); return; }
+  if (_mc.err === 'nopat') _mc.err = null;
+  const fresh = !!_mc.payload && _mc.payload.date === ymdJST();
+  const recent = !!_mc.triedAt && Date.now() - _mc.triedAt < MC_RETRY_MS;
+  if (!force && ((fresh && !_mc.err) || recent)) { renderMorningCheck(); return; }
+  if (_mcBusy) return _mcBusy;
+  if (_mc.payload) renderMorningCheck();
+  _mcBusy = (async () => {
+    _mc.triedAt = Date.now();
+    const res = await _fetchMorningCheck(pat);
+    if (res.payload) {
+      Object.assign(_mc, { payload: res.payload, fetchedAt: Date.now(), err: null, status: null });
+      try {
+        localStorage.setItem(MC_CACHE_KEY, JSON.stringify({ payload: res.payload, fetchedAt: _mc.fetchedAt }));
+      } catch (e) {}
+    } else {
+      Object.assign(_mc, { err: res.err, status: res.status || null });
+    }
+    renderMorningCheck();
+  })();
+  try { await _mcBusy; } finally { _mcBusy = null; }
+}
+
+function _mcErrText(err, status) {
+  switch (err) {
+    case 'nopat': return '🔑 この端末に GitHub の鍵 (PAT) が無いので、朝チェックを読めません。画面右上の「🔑 API設定」に、売買記録の公開と同じ鍵を入れてください。';
+    case 'auth': return '❌ 鍵 (PAT) が無効か期限切れです (401)。「🔑 API設定」の「🔌 接続テスト」で確かめてください。';
+    case 'repo': return '❌ 鍵 (PAT) から非公開リポ trade-journal-private が見えません。鍵の「Repository access」にこのリポが入っているか確かめてください。';
+    case 'none_yet': return 'まだ一度も届いていません。ボットがアプリ用に書き始めると、平日の朝 7:15 ごろからここに出ます。';
+    case 'net': return '通信できませんでした (圏外の可能性)。';
+    case 'json': return '届いたファイルを読めませんでした (形が崩れています)。';
+    default: return '読めませんでした (HTTP ' + (status || '?') + ')。時間をおいて「🔄 取り直す」を押してください。';
+  }
+}
+
+// "2026-10-26T07:17+09:00" → "10/26(月) 07:17" (bot が日本時間で書く)。日付だけなら "10/26(月)"
+function _mcWhen(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(String(iso || ''));
+  if (!m) return '—';
+  const wd = '日月火水木金土'[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()];
+  return (+m[2]) + '/' + (+m[3]) + '(' + wd + ')' + (m[4] ? ' ' + m[4] + ':' + m[5] : '');
+}
+
+// 1 行。[n] は出典の記事へのリンク。【今日の見通し】には推測のラベルを必ず付ける (bot が付けるが、無ければ足す)
+function _mcLineHtml(line, i, srcs) {
+  let t = String(line);
+  const outlook = t.startsWith('【今日の見通し】');
+  if (outlook && !t.includes('AI の推測')) t += MC_OUTLOOK_LABEL;
+  const h = _escape(t).replace(/\[(\d{1,2})\]/g, (m, n) => {
+    const s = srcs.find(x => x && Number(x.n) === Number(n));
+    const u = s ? _safeUrl(s.url, '') : '';
+    return u ? '<a href="' + _escape(u) + '" target="_blank" rel="noopener" style="color:var(--acc);text-decoration:none;font-size:10px;vertical-align:super">[' + n + ']</a>' : m;
+  });
+  if (i === 0) return '<div style="font-weight:700;color:var(--text);margin-bottom:4px">' + h + '</div>';
+  if (t.startsWith('【')) return '<div style="font-weight:700;margin-top:8px;color:' + (outlook ? '#b45309' : 'var(--text)') + '">' + h + '</div>';
+  if (t.startsWith('※')) return '<div style="font-size:10px;color:var(--t3);line-height:1.5">' + h + '</div>';
+  return '<div>' + h + '</div>';
+}
+
+const _MC_CARD = 'background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px;line-height:1.6;color:var(--t2);word-break:break-word';
+
+function _mcBubbleHtml(b, srcs) {
+  const lines = String((b && b.text) || '').split('\n');
+  return '<div style="' + _MC_CARD + '">' + lines.map((l, i) => _mcLineHtml(l, i, srcs)).join('') + '</div>';
+}
+
+function _mcSourcesHtml(srcs) {
+  if (!srcs.length) return '';
+  return '<div style="' + _MC_CARD + '"><div style="font-weight:700;color:var(--text);margin-bottom:2px">📎 出典 (記事)</div>' +
+    srcs.map(s => {
+      const u = _safeUrl(s.url, '');
+      const label = _escape(s.name || '出典') + (s.title ? ' — ' + _escape(s.title) : '');
+      return '<div style="margin-top:6px">[' + _escape(s.n) + '] ' +
+        (u ? '<a href="' + _escape(u) + '" target="_blank" rel="noopener" style="color:var(--acc)">' + label + ' ↗</a>' : label) +
+        (s.cited_text
+          ? '<details style="margin-top:2px"><summary style="font-size:10px;color:var(--t3);cursor:pointer">記事の該当箇所 (原文の抜き書き)</summary>' +
+            '<div style="font-size:11px;color:var(--t3);white-space:pre-wrap;background:var(--s2);border-radius:6px;padding:6px 8px;margin-top:4px">' + _escape(s.cited_text) + '</div></details>'
+          : (s.cited_hidden
+            ? '<div style="font-size:10px;color:var(--t3)">(抜き書きに売買をすすめる語や目標株価などが入っていたので出していません。記事はリンク先で読めます)</div>'
+            : '')) +
+        '</div>';
+    }).join('') +
+    '<div style="font-size:10px;color:var(--t3);margin-top:6px">※ 文は AI の要約です。合っているかは記事の原文で確かめてください</div></div>';
+}
+
+function renderMorningCheck() {
+  const el = document.getElementById('dmorningcheck');
+  if (!el) return;
+  const st = _mc || {};
+  const p = st.payload;
+  const errMsg = st.err ? _mcErrText(st.err, st.status) : '';
+  if (!p || !Array.isArray(p.bubbles)) {
+    el.innerHTML = '<div style="' + _MC_CARD + ';color:' + (st.err && st.err !== 'none_yet' ? 'var(--red)' : 'var(--t3)') + '">' +
+      _escape(errMsg || '読み込み中…') + '</div>';
+    return;
+  }
+  const srcs = Array.isArray(p.sources) ? p.sources : [];
+  const body = p.bubbles.map(b => _mcBubbleHtml(b, srcs)).join('') + _mcSourcesHtml(srcs);
+  const when = _mcWhen(p.generated_at) + ' に作成' + (p.trigger === 'manual' ? ' (手で作り直した分)' : '');
+  const errLine = errMsg
+    ? '<div style="font-size:11px;color:var(--red);line-height:1.5;margin:0 4px 8px">最新を読めませんでした: ' + _escape(errMsg) +
+      (st.fetchedAt ? ' 下は ' + _escape(_jstShort(new Date(st.fetchedAt).toISOString())) + ' に読んだ分です。' : '') + '</div>'
+    : '';
+  const today = ymdJST();
+  if (String(p.date || '') < today) {
+    el.innerHTML = errLine +
+      '<div style="background:var(--yellow-soft);border:1px solid var(--yellow);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12px;line-height:1.6;color:var(--t2)">' +
+      '⚠️ <b>今日 (' + _escape(_mcWhen(today)) + ') の朝チェックはまだ届いていません。</b>平日の朝 7:15 ごろに届きます (土日・祝日は届きません)。</div>' +
+      '<details><summary style="font-size:11px;color:var(--t3);cursor:pointer;margin:0 4px 8px">前回の分を見る (' + _escape(when) + ')</summary>' + body + '</details>';
+    return;
+  }
+  el.innerHTML = errLine + '<div style="font-size:10px;color:var(--t3);margin:0 4px 6px">📅 ' + _escape(when) + '</div>' + body;
 }
 
 const HIST_PAGE = 30;          // 履歴の既定表示件数
@@ -5056,7 +5228,7 @@ async function handleSharedFiles() {
 
 // 初期化
 calcS(); rTH(); rWatch();
-rDash();            // 朝会レポートの初回ロードは rDash 経由 (これが無いと市場/発掘が読み込み中のまま)
+rDash();            // ボットのデータと朝チェックの初回ロードは rDash 経由 (これが無いと市場/発掘が読み込み中のまま)
 handleSharedFiles();
 if(!GK||!CK) document.getElementById('keyModal').style.display='flex';
 </script>
