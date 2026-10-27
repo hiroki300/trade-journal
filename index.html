@@ -219,7 +219,7 @@ select.fi{appearance:none;-webkit-appearance:none;}
   <div class="sec-lbl">🌅 朝チェック
     <button onclick="loadMorningCheck(true)" style="background:none;border:none;color:var(--acc);font-size:11px;cursor:pointer;margin-left:6px">🔄 取り直す</button>
   </div>
-  <div style="font-size:11px;color:var(--t3);margin:0 4px 8px;line-height:1.4">毎朝 LINE に届く朝チェックと<b>同じ中身</b>です（平日の朝 7:15 ごろ・土日祝は届きません）。数字は機械が取り、文は AI (Claude) が記事を読んで書きました。<b>売買の判断はしていません</b>。</div>
+  <div style="font-size:11px;color:var(--t3);margin:0 4px 8px;line-height:1.4">毎朝 LINE に届く朝チェックを、ここで詳しく読めます（平日の朝 7:15 ごろ・土日祝は届きません）。数字は機械が取り、文は AI (Claude) が記事を読んで書きました。<b>売買の判断はしていません</b>。</div>
   <div id="dmorningcheck" style="margin-bottom:14px">読み込み中…</div>
 
   <div style="font-size:11px;color:var(--t3);margin-bottom:8px">📥 ボットのデータ <span class="mr-gen" style="opacity:.6"></span>
@@ -859,8 +859,11 @@ async function loadMorningReports(forceRefresh = false) {
 //  公開リポに置かない)。売買記録と同じ鍵 (tj_ghpat) で読む。
 //  ⚠️ loadMorningReports の「その日 1 回だけ取得」に乗せない — 7:15 より前に開いた日に昨日の分のまま
 //     固まる。今日の分が届くまでは、開いたとき・タブを切り替えたときに取り直す (MC_RETRY_MS に 1 回まで)。
-//  ⚠️ 文は bot が作った LINE の吹き出しをそのまま出す (画面で言葉を作り直さない)。今日の分でなければ
+//  ⚠️ 文は bot が作った吹き出しをそのまま出す (画面で言葉を作り直さない)。今日の分でなければ
 //     「まだ届いていない」と書き、前回の分は畳む (古い朝チェックを今朝のものとして読ませない)。
+//  2026-10-27 (stock-checker の morning_line・flag MORNING_LINE_V2_ENABLED): LINE は要点だけになり、
+//     ここには LINE より詳しい版 (+ 📅 予定と気づき = kind 'notices') が届く。'notices' がある朝は
+//     「LINE は要点だけ・ここが詳しい版」と添える (無い朝は LINE と同じ中身)。
 const MC_FILE = 'morning_check.json';
 const MC_CACHE_KEY = 'tj_morning_check';
 const MC_RETRY_MS = 5 * 60 * 1000;
@@ -1015,7 +1018,17 @@ function renderMorningCheck() {
       '<details><summary style="font-size:11px;color:var(--t3);cursor:pointer;margin:0 4px 8px">前回の分を見る (' + _escape(when) + ')</summary>' + body + '</details>';
     return;
   }
-  el.innerHTML = errLine + '<div style="font-size:10px;color:var(--t3);margin:0 4px 6px">📅 ' + _escape(when) + '</div>' + body;
+  el.innerHTML = errLine + '<div style="font-size:10px;color:var(--t3);margin:0 4px 6px">📅 ' + _escape(when) + '</div>' +
+    _mcKindNote(p) + body;
+}
+
+// LINE との関係の 1 行。📅 予定と気づき (kind 'notices') が届く朝は、LINE は要点だけでここが詳しい版。
+function _mcKindNote(p) {
+  const detailed = (p.bubbles || []).some(b => b && b.kind === 'notices');
+  return '<div style="font-size:10px;color:var(--t3);margin:0 4px 6px;line-height:1.5">' +
+    (detailed
+      ? '📱 LINE には要点だけが届きます。ここが詳しい版です (数字の全部・会社の話題の全部・AI のまとめの出典)。'
+      : 'LINE と同じ中身です。') + '</div>';
 }
 
 const HIST_PAGE = 30;          // 履歴の既定表示件数

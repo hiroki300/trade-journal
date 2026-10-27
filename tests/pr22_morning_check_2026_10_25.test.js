@@ -63,7 +63,7 @@ vm.runInContext([
   'let _mc = null; let _mcBusy = null;',
   grab('_escape'), grab('_safeUrl'), grab('_jstShort'),
   grab('_fetchMorningCheck', 'async '), grab('loadMorningCheck', 'async '), grab('_mcErrText'),
-  grab('_mcWhen'), grab('_mcLineHtml'), grab('_mcBubbleHtml'), grab('_mcSourcesHtml'), grab('renderMorningCheck'),
+  grab('_mcWhen'), grab('_mcLineHtml'), grab('_mcBubbleHtml'), grab('_mcSourcesHtml'), grab('_mcKindNote'), grab('renderMorningCheck'),
 ].join('\n'), sb);
 const run = c => vm.runInContext(c, sb);
 const reset = () => { run('_mc = null; _mcBusy = null;'); calls.length = 0; el.innerHTML = '';
