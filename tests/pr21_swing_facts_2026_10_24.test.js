@@ -26,7 +26,7 @@ function grab(name) {
 const els = {};
 const sb = { console, window: {}, Date, document: { getElementById: id => els[id] || null } };
 vm.createContext(sb);
-vm.runInContext([grab('_escape'), grab('_safeUrl'), grab('_marginAlertHtml'), grab('_breadthLine'),
+vm.runInContext([grab('_escape'), grab('_safeUrl'), grab('_marginAlertHtml'), grab('_dropFactsHtml'), grab('_breadthLine'),
                  grab('_marketScheduleHtml'),
                  'const AI_SECTION_LABELS = {};', grab('_aiCardHtml'), grab('_renderPullbackCard'),
                  'let _pullbackSort = "turn", _pullbackShowAll = false; const PULLBACK_SHOW_LIMIT = 10;',

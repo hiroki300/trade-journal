@@ -1453,6 +1453,25 @@ function renderPullbackFromCache() {
 // 日々公表・信用取引の規制 (バックエンド margin_alert_view・**表示専用**)。
 // 規制中 (先頭が ⚠️) は権利落ち警告と同じ赤系、日々公表・日証金などは黄系。
 // 文面はバックエンドが事実だけで組み立てる (方向・売買推奨の語は向こうのテストで禁止)。
+// なぜ下げたか・どう下げたか・注目の印 (stock-checker drop_facts・2026-10-30)。**事実だけ**。
+// バックエンドが行の配列を作る (1 行目が見出し・最後の行が「未検証」の断り書き)。並び順・顔ぶれには
+// 使わない。flag DROP_FACTS_ENABLED が OFF の間は b.drop_facts が無く何も出ない。
+function _dropFactsHtml(lines) {
+  if (!Array.isArray(lines) || !lines.length) return '';
+  const last = lines.length - 1;
+  const body = lines.map((ln, i) => {
+    const t = _escape(String(ln || '').trim());
+    if (!t) return '';
+    if (i === last && /^※/.test(String(ln))) {
+      return '<div style="font-size:10px;color:var(--t3);margin-top:4px;line-height:1.5;">' + t + '</div>';
+    }
+    const head = /^(🔎|📉|📣)/.test(String(ln).trim());
+    return '<div style="font-size:' + (head ? '11px;font-weight:700;color:#0f766e' : '12px;color:var(--t2)') +
+      ';line-height:1.55;' + (head ? 'margin-top:2px;' : 'padding-left:10px;') + '">' + t + '</div>';
+  }).join('');
+  return '<div style="background:var(--s2);border-radius:8px;padding:8px 10px;margin-bottom:8px;">' + body + '</div>';
+}
+
 function _marginAlertHtml(text) {
   if (!text) return '';
   const reg = String(text).startsWith('⚠️');
@@ -1656,6 +1675,8 @@ function _renderPullbackCard(c) {
     // 並び順・顔ぶれには使わない。flag OFF の間は b.sector_move / b.gap_risk が無く何も出ない。
     block('🏭', '業種と比べた動き (この5営業日・事実だけ・効くかは未検証)', b.sector_move, '#64748b') +
     block('⚡', '寄り付きの飛び (直近100日)', b.gap_risk, '#dc2626') +
+    // なぜ・どう下げたか (stock-checker drop_facts・2026-10-30・事実だけ・効くかは未検証)
+    _dropFactsHtml(b.drop_facts) +
     block('📏', '値動きの大きさ', b.volatility, '#f59e0b') +
     block('📐', 'よく売買された価格帯', b.levels, '#8b5cf6') +
     block('📍', 'いまの位置 (チャートの数字)', b.position, '#0ea5e9') +
