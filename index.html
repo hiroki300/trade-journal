@@ -285,6 +285,20 @@ select.fi{appearance:none;-webkit-appearance:none;}
 </div>
 
 <div class="page" id="page-trade">
+  <div style="margin-bottom:14px;background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:10px 12px">
+    <div class="sec-lbl" style="margin-top:0">🧮 買う前の確認</div>
+    <div style="font-size:11px;color:var(--t3);line-height:1.5;margin-bottom:6px">コードを入れると、計画の株数・損切り・SBI に写す値段・期限・買った後の上限を計算します。値段が空なら前の営業日の終値を使います。</div>
+    <div class="frow">
+      <div><label class="fl">証券コード</label><input class="fi" id="pcCode" type="text" inputmode="text" placeholder="3778" maxlength="5" style="margin-bottom:0" oninput="renderPretrade()"></div>
+      <div><label class="fl">買う値段（円）</label><input class="fi" id="pcPrice" type="text" inputmode="decimal" placeholder="買う値段" style="margin-bottom:0" oninput="renderPretrade()"></div>
+    </div>
+    <div class="frow" style="margin-top:8px">
+      <div><label class="fl">株数（空なら計画の株数）</label><input class="fi" id="pcShares" type="number" inputmode="numeric" placeholder="計画の株数" style="margin-bottom:0" oninput="renderPretrade()"></div>
+      <div><label class="fl">買う日</label><input class="fi" id="pcDate" type="date" style="margin-bottom:0" oninput="renderPretrade()"></div>
+    </div>
+    <div id="pcStatus" style="font-size:10px;color:var(--t3);margin-top:6px;line-height:1.5"></div>
+    <div id="pcOut" style="margin-top:8px;font-size:12px;color:var(--t1)"></div>
+  </div>
   <div style="margin-bottom:14px">
     <div class="sec-lbl">📷 スクリーンショットから自動読み込み</div>
     <div style="font-size:11px;color:var(--t2);background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.5">
@@ -557,7 +571,7 @@ function go(id) {
   if (id==='dash')  rDash();
   if (id==='market') loadMorningCheck();   // 今日の分が届くまでは取り直す (5 分に 1 回まで)
   if (id==='hold')  rHold();
-  if (id==='trade') { rTH(); checkMacroWarning(); }  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
+  if (id==='trade') { rTH(); checkMacroWarning(); loadPretrade(); }  // 🧮 買う前の確認の値段 (30 分に 1 回まで)  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
   if (id==='watchchat') rWatch();
 }
 
@@ -3477,6 +3491,252 @@ async function doChat() {
   } finally {
     document.getElementById('csend').disabled = false;
   }
+}
+
+// ========= 🧮 買う前の確認 (2026-10-30・stock-checker の pretrade_facts.py / private_publish.py) =========
+//  コードを入れると、計画の株数・損切り・保険の逆指値・建値の目安・目標・期限の日付・買った後の銘柄数と
+//  資産に対する合計・同じ業種の保有・期間中の決算と権利落ちを出し、自分で決めた上限を超えるなら ⚠️。
+//  値段・業種・ルールの値・祝日は非公開リポの pretrade.json (毎晩の押し目のジョブが書く・売買記録と同じ鍵)。
+//  無い銘柄・鍵が無いときは値段を手で入れる。
+//  ⚠️ 算術とルールの照合だけ。売買をすすめる言葉・株価の向きの予想は出さない (tests/pr23 で固定)。
+//  ⚠️ 株数は stock-checker の position_sizer と同じ式: 資産 × 1.5% ÷ 8% を 1 銘柄 40% で頭打ち・100 株単位で切り下げ。
+//  ⚠️ SBI に入れる値段は呼値 (値段ごとの刻み・TOPIX500 以外の表) にそろえ、買値に近い側へ丸める
+//     (保険の逆指値は -15% より深くならず、利確は +16% より遠くならない)。TOPIX500 の細かい刻みでも有効な値段。
+const PC_FILE = 'pretrade.json';
+const PC_CACHE_KEY = 'tj_pretrade';
+const PC_REFRESH_MS = 30 * 60 * 1000;
+const PC_DEFAULT_RULES = { capital_jpy: 2500000, risk_per_trade_pct: 0.015, stop_loss_pct: 0.08,
+  safety_stop_pct: 0.15, target_rr: 2, breakeven_trigger_rr: 1, time_stop_days: 10, max_positions: 5,
+  max_position_pct: 0.4, max_total_exposure_pct: 1.0, lot_size: 100 };
+let _pc = null;
+let _pcBusy = null;
+
+// 呼値の刻み (TOPIX500 以外の銘柄の表)。この刻みの値段は TOPIX500 の細かい刻みでも有効。
+function pcTick(p) {
+  const T = [[3000, 1], [5000, 5], [30000, 10], [50000, 50], [300000, 100], [500000, 500],
+             [3000000, 1000], [5000000, 5000], [30000000, 10000], [50000000, 50000]];
+  for (const [hi, t] of T) if (p <= hi) return t;
+  return 100000;
+}
+// 呼値にそろえ、買値 (entry) に近い側へ丸める
+function pcToward(x, entry) {
+  const t = pcTick(x);
+  return x < entry ? Math.ceil(x / t - 1e-9) * t : Math.floor(x / t + 1e-9) * t;
+}
+function pcCode5(cd) {
+  const c = String(cd || '').trim().toUpperCase();
+  return /^[0-9A-Z]{4}$/.test(c) ? c + '0' : c;
+}
+// 東証の営業日 (土日・祝日・12/31〜1/3 を除く)。hol は bot の祝日の一覧 (YYYY-MM-DD)
+function pcIsBiz(iso, hol) {
+  const w = new Date(iso + 'T00:00:00Z').getUTCDay();
+  return w !== 0 && w !== 6 && !(hol || []).includes(iso) && !/-(12-31|01-0[1-3])$/.test(iso);
+}
+function pcAddBiz(iso, n, hol) {
+  let t = new Date(iso + 'T00:00:00Z').getTime(), k = 0;
+  while (k < n) {
+    t += 86400000;
+    if (pcIsBiz(new Date(t).toISOString().slice(0, 10), hol)) k++;
+  }
+  return new Date(t).toISOString().slice(0, 10);
+}
+function pcYen(v) { return Math.round(v).toLocaleString('ja-JP') + '円'; }
+function pcMd(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso + 'T00:00:00Z');
+  return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + '(' + '日月火水木金土'[d.getUTCDay()] + ')';
+}
+
+// 純関数: 入力 → 計算の結果。o = {price, shares?, code5, buyDate, rules?, holidays?, sector?, facts?,
+//   holdings: [{code5, name, value, sector}]}
+function pcPlan(o) {
+  const r = Object.assign({}, PC_DEFAULT_RULES, o.rules || {});
+  const cap = r.capital_jpy, lot = r.lot_size, p = o.price;
+  const planJpy = Math.min(cap * r.risk_per_trade_pct / r.stop_loss_pct, cap * r.max_position_pct);
+  const planShares = Math.floor(planJpy / (p * lot) + 1e-9) * lot;
+  const shares = o.shares > 0 ? o.shares : (planShares || lot);
+  const cost = shares * p;
+  const stop = Math.round(p * (1 - r.stop_loss_pct));
+  const held = o.holdings || [];
+  const codes = new Set(held.map(h => h.code5));
+  const nAfter = codes.size + (codes.has(o.code5) ? 0 : 1);
+  const totalAfter = held.reduce((s, h) => s + (h.value || 0), 0) + cost;
+  const singleAfter = held.filter(h => h.code5 === o.code5).reduce((s, h) => s + (h.value || 0), 0) + cost;
+  const pct = v => Math.round(v / cap * 100);
+  const checks = [
+    { ok: nAfter <= r.max_positions, text: '銘柄数 ' + nAfter + ' (上限 ' + r.max_positions + ')' },
+    { ok: totalAfter <= cap * r.max_total_exposure_pct + 1e-6,
+      text: '合計 ' + pcYen(totalAfter) + ' = 資産の ' + pct(totalAfter) + '% (上限 ' + Math.round(r.max_total_exposure_pct * 100) + '%)' },
+    { ok: singleAfter <= cap * r.max_position_pct + 1e-6,
+      text: '1銘柄 資産の ' + pct(singleAfter) + '% (上限 ' + Math.round(r.max_position_pct * 100) + '%)' },
+    { ok: planShares > 0 && cost <= planJpy + 1e-6,
+      text: planShares > 0 ? (cost <= planJpy + 1e-6 ? '計画の大きさ以内' : '計画の大きさ ' + pcYen(planJpy) + ' を超えています')
+                           : '1単元 (' + lot + '株) でも計画の大きさ ' + pcYen(planJpy) + ' を超えています' },
+  ];
+  const deadline = pcAddBiz(o.buyDate, r.time_stop_days, o.holidays);
+  const inWin = d => !!d && d >= o.buyDate && d <= deadline;
+  const f = o.facts || null;
+  return {
+    rules: r, capital: cap, planJpy, planShares, shares, cost, costPct: pct(cost),
+    riskJpy: shares * (p - stop), riskPct: Math.round(shares * (p - stop) / cap * 1000) / 10,
+    stop, safety: pcToward(p * (1 - r.safety_stop_pct), p),
+    breakeven: Math.round(p * (1 + r.stop_loss_pct * r.breakeven_trigger_rr)),
+    target: pcToward(p * (1 + r.stop_loss_pct * r.target_rr), p),
+    deadline, checks, over: checks.filter(c => !c.ok).length,
+    sameSector: o.sector ? held.filter(h => h.sector === o.sector && h.code5 !== o.code5) : [],
+    earnings: f && f.next_earnings ? { date: f.next_earnings, inWindow: inWin(f.next_earnings) } : null,
+    ex: f && f.ex ? Object.assign({ inWindow: inWin(f.ex.last_buy_date) || inWin(f.ex.ex_date) }, f.ex) : null,
+    lastDisclosure: f ? f.last_disclosure || null : null,
+  };
+}
+
+async function _fetchPretrade(pat) {
+  const api = 'https://api.github.com/repos/' + GH_PRIVATE_REPO;
+  const auth = { 'Authorization': 'Bearer ' + pat };
+  let r;
+  try {
+    r = await fetch(api + '/contents/' + PC_FILE + '?ref=main',
+                    { headers: { ...auth, 'Accept': 'application/vnd.github.raw+json' }, cache: 'no-store' });
+  } catch (e) { return { err: 'net' }; }
+  if (r.status === 200) {
+    try {
+      const p = await r.json();
+      return (p && p.stocks && p.rules) ? { payload: p } : { err: 'json' };
+    } catch (e) { return { err: 'json' }; }
+  }
+  if (r.status === 401) return { err: 'auth' };
+  if (r.status === 404) {
+    // 鍵に権限の無い非公開リポにも 404 が返る → リポ自体を見て「まだ無い」と「見えない」を分ける
+    try {
+      const rr = await fetch(api, { headers: { ...auth, 'Accept': 'application/vnd.github+json' }, cache: 'no-store' });
+      if (rr.status === 200) return { err: 'none_yet' };
+      if (rr.status === 401) return { err: 'auth' };
+      return { err: 'repo' };
+    } catch (e) { return { err: 'net' }; }
+  }
+  return { err: 'http', status: r.status };
+}
+
+async function loadPretrade(force = false) {
+  if (!_pc) {
+    _pc = {};
+    try {
+      const c = JSON.parse(localStorage.getItem(PC_CACHE_KEY) || 'null');
+      if (c && c.payload) { _pc.payload = c.payload; _pc.fetchedAt = c.fetchedAt; }
+    } catch (e) {}
+  }
+  const pat = (localStorage.getItem('tj_ghpat') || '').trim();
+  if (!pat) { _pc.err = 'nopat'; renderPretrade(); return; }
+  if (_pc.err === 'nopat') _pc.err = null;
+  const recent = !!_pc.triedAt && Date.now() - _pc.triedAt < PC_REFRESH_MS;
+  if (!force && recent) { renderPretrade(); return; }
+  if (_pcBusy) return _pcBusy;
+  _pcBusy = (async () => {
+    _pc.triedAt = Date.now();
+    const res = await _fetchPretrade(pat);
+    if (res.payload) {
+      Object.assign(_pc, { payload: res.payload, fetchedAt: Date.now(), err: null, status: null });
+      try {
+        localStorage.setItem(PC_CACHE_KEY, JSON.stringify({ payload: res.payload, fetchedAt: _pc.fetchedAt }));
+      } catch (e) {}   // 端末の保存の上限 (数百 KB) に当たったら、この回だけ使う
+    } else {
+      Object.assign(_pc, { err: res.err, status: res.status || null });
+    }
+    renderPretrade();
+  })();
+  try { await _pcBusy; } finally { _pcBusy = null; }
+}
+
+function _pcErrText(err, status) {
+  switch (err) {
+    case 'nopat': return '🔑 鍵 (PAT) が無いので、終値・業種・決算の推定を読めません。値段は手で入れてください (「🔑 API設定」に売買記録の公開と同じ鍵を入れると自動で入ります)。';
+    case 'auth': return '🔑 鍵が無効か期限切れで、値段のデータを読めません。値段は手で入れてください。';
+    case 'repo': return '🔑 鍵で非公開リポが見えません (鍵の対象に trade-journal-private が入っているか)。値段は手で入れてください。';
+    case 'none_yet': return 'ℹ️ 値段のデータがまだ届いていません (ボットの設定 PRETRADE_DATA_ENABLED が OFF か、ON にした晩の前)。値段は手で入れてください。';
+    case 'net': return '📶 通信できず、値段のデータを読めません。値段は手で入れてください。';
+    default: return '⚠️ 値段のデータを読めません (' + (status ? 'HTTP ' + status : err) + ')。値段は手で入れてください。';
+  }
+}
+
+// 画面: 💱 売買タブの「🧮 買う前の確認」
+function renderPretrade() {
+  const out = document.getElementById('pcOut');
+  if (!out) return;
+  const st = document.getElementById('pcStatus');
+  const pay = (_pc && _pc.payload) || null;
+  if (st) {
+    st.innerHTML = pay
+      ? '値段: ' + _escape(pcMd(pay.as_of)) + ' の終値 (毎晩 20 時すぎのボットが更新)' +
+        (_pc.err ? '<br><span style="color:#dc2626">' + _escape(_pcErrText(_pc.err, _pc.status)) + ' (前回の分を使っています)</span>' : '')
+      : (_pc && _pc.err ? _escape(_pcErrText(_pc.err, _pc.status)) : '');
+  }
+  const code5 = pcCode5(document.getElementById('pcCode').value);
+  const stocks = (pay && pay.stocks) || {};
+  const s = stocks[code5] || null;
+  const priceEl = document.getElementById('pcPrice');
+  if (priceEl) priceEl.placeholder = s ? String(s.c) : '買う値段';
+  const price = _num(priceEl && priceEl.value) || (s ? s.c : null);
+  const dateEl = document.getElementById('pcDate');
+  const buyDate = (dateEl && dateEl.value) || ymdJST();
+  if (!code5 || !price) {
+    out.innerHTML = code5 && !s && pay
+      ? '<div style="font-size:12px;color:var(--t3)">' + _escape(code5.slice(0, 4)) + ' は値段のデータに無い銘柄です。買う値段を入れてください。</div>'
+      : '';
+    return;
+  }
+  const holdings = (H || []).filter(h => h && h.cd && h.sh).map(h => {
+    const c5 = pcCode5(h.cd), hs = stocks[c5];
+    return { code5: c5, name: h.nm || (hs && hs.n) || c5.slice(0, 4),
+             value: ((hs && hs.c) || h.cp || h.bp || 0) * h.sh, sector: hs ? hs.s : '' };
+  });
+  const facts = pay && pay.facts ? pay.facts[code5] : null;
+  const res = pcPlan({ price, shares: _num(document.getElementById('pcShares').value), code5, buyDate,
+                       rules: pay && pay.rules, holidays: pay && pay.holidays, sector: s ? s.s : '',
+                       facts, holdings });
+  const r = res.rules, lot = r.lot_size;
+  const nm = (s && s.n) || ((H || []).find(h => pcCode5(h.cd) === code5) || {}).nm || '';
+  const row = (k, v, note) => '<div style="display:flex;gap:8px;line-height:1.7"><span style="flex:none;width:6.5em;color:var(--t3)">' +
+    k + '</span><span><b>' + v + '</b>' + (note ? ' <span style="font-size:11px;color:var(--t3)">' + note + '</span>' : '') + '</span></div>';
+  const big = (k, v, note) => '<div style="display:flex;flex-wrap:wrap;align-items:baseline;column-gap:8px;padding:4px 0">' +
+    '<span style="flex:none;width:7.5em;font-size:12px">' + k + '</span>' +
+    '<span style="font-family:var(--mono);font-size:20px;font-weight:700;white-space:nowrap">' + v + '</span>' +
+    '<span style="flex-basis:100%;padding-left:7.5em;font-size:11px;color:var(--t3);line-height:1.4">' + note + '</span></div>';
+  const pctTxt = v => Math.round(v * 100) + '%';
+  let h = '<div style="font-size:13px;font-weight:700;margin-bottom:6px">' + _escape(code5.slice(0, 4) + ' ' + nm) +
+    ' <span style="font-weight:400;font-size:12px;color:var(--t3)">' + pcYen(price) + (s && !_num(priceEl.value) ? ' (' + _escape(pcMd(pay.as_of)) + ' の終値)' : '') + '</span></div>';
+  h += row('株数', res.shares.toLocaleString() + '株 = ' + pcYen(res.cost), '(資産の ' + res.costPct + '%)');
+  h += '<div style="font-size:11px;color:var(--t3);margin:-2px 0 4px 6.5em;line-height:1.5">計画の上限 ' + pcYen(res.planJpy) +
+    ' (資産 ' + Math.round(res.capital / 10000) + '万 × ' + (r.risk_per_trade_pct * 100).toFixed(1) + '% ÷ ' + pctTxt(r.stop_loss_pct) + ')' +
+    (res.planShares ? ' → ' + lot + '株単位で ' + res.planShares.toLocaleString() + '株' : ' → 1単元でも超える') + '</div>';
+  h += row('損切り', pcYen(res.stop) + ' (-' + pctTxt(r.stop_loss_pct) + ')', '終値で判断。このときの損 ' + pcYen(res.riskJpy) + ' = 資産の ' + res.riskPct + '%');
+  h += row('建値の目安', pcYen(res.breakeven) + ' (+' + pctTxt(r.stop_loss_pct * r.breakeven_trigger_rr) + ')', '終値でこれを超えたら、損切りを買値へ');
+  h += row('期限', _escape(pcMd(res.deadline)), '(' + r.time_stop_days + '営業日・土日祝を除く・' + _escape(pcMd(buyDate)) + ' に買った場合)');
+  if (s && s.r) h += row('ふだんの値幅', '1日 ' + s.r.toFixed(1) + '%', '(高値と安値の差・直近20日。-' + pctTxt(r.stop_loss_pct) + ' はその約 ' + (r.stop_loss_pct * 100 / s.r).toFixed(1) + ' 日分)');
+  h += '<div style="background:var(--s2);border:1.5px solid var(--acc);border-radius:10px;padding:8px 12px;margin:10px 0">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--acc);margin-bottom:2px">📋 SBI に写す値段 (' + res.shares.toLocaleString() + '株)</div>' +
+    big('🛡 逆指値 (保険)', pcYen(res.safety), '買値の -' + pctTxt(r.safety_stop_pct) + '・この値段以下で成行') +
+    big('🎯 指値 (利確)', pcYen(res.target), '+' + pctTxt(r.stop_loss_pct * r.target_rr)) +
+    '<div style="font-size:10px;color:var(--t3);line-height:1.5;margin-top:2px">値段は呼値の刻みにそろえ、買値に近い側へ丸めています。' +
+    'SBI の OCO 注文なら 2 つを一度に入れられることがあります (現物・信用のどちらで使えるかは未検証。SBI の画面で確かめてください)。</div></div>';
+  h += '<div style="font-size:12px;font-weight:700;margin:4px 0 2px">買った後</div>';
+  h += res.checks.map(c => '<div style="line-height:1.6;' + (c.ok ? '' : 'color:#dc2626;font-weight:700') + '">' +
+    (c.ok ? '✅ ' : '⚠️ ') + _escape(c.text) + '</div>').join('');
+  if (s && s.s) {
+    h += row('同じ業種', _escape(s.s), res.sameSector.length
+      ? '保有: ' + _escape(res.sameSector.map(x => x.name).join('・')) : '保有なし');
+  }
+  const ev = [];
+  if (res.earnings) ev.push((res.earnings.inWindow ? '⚠️ ' : '') + '決算の推定 ' + pcMd(res.earnings.date) + (res.earnings.inWindow ? ' (期間中)' : ' (期間の外)'));
+  if (res.ex) ev.push((res.ex.inWindow ? '⚠️ ' : '') + '権利付最終日 ' + pcMd(res.ex.last_buy_date) + '・権利落ち ' + pcMd(res.ex.ex_date) +
+    ' (' + res.ex.kind + (res.ex.inWindow ? '・期間中' : '・期間の外') + ')');
+  if (res.lastDisclosure) ev.push('直近の開示 ' + pcMd(res.lastDisclosure.date) + ' ' + res.lastDisclosure.label);
+  h += '<div style="font-size:12px;font-weight:700;margin:8px 0 2px">期間中 (〜' + _escape(pcMd(res.deadline)) + ')</div>';
+  h += ev.length ? ev.map(t => '<div style="line-height:1.6">' + _escape(t) + '</div>').join('')
+                 : '<div style="font-size:12px;color:var(--t3);line-height:1.6">決算日・権利落ちはこのデータに無い銘柄です (👀・建玉・押し目の候補だけ)。会社の IR で確かめてください。</div>';
+  if (res.earnings) h += '<div style="font-size:10px;color:var(--t3)">決算日は前年の同じ四半期の開示日からの推定です。</div>';
+  h += _marketScheduleHtml((window._pullbackData || {}).market_schedule);
+  h += '<div style="font-size:10px;color:var(--t3);margin-top:6px;line-height:1.5">※ 算術と、自分で決めたルールとの照合です。売買の判断はご自身で。</div>';
+  out.innerHTML = h;
 }
 
 // 売買記録
