@@ -3501,12 +3501,14 @@ async function doChat() {
 //  ⚠️ 算術とルールの照合だけ。売買をすすめる言葉・株価の向きの予想は出さない (tests/pr23 で固定)。
 //  ⚠️ 株数は stock-checker の position_sizer と同じ式: 資産 × 1.5% ÷ 8% を 1 銘柄 40% で頭打ち・100 株単位で切り下げ。
 //  ⚠️ SBI に入れる値段は呼値 (値段ごとの刻み・TOPIX500 以外の表) にそろえ、買値に近い側へ丸める
-//     (保険の逆指値は -15% より深くならず、利確は +16% より遠くならない)。TOPIX500 の細かい刻みでも有効な値段。
+//     (保険の逆指値は -12% より深くならず、利確は +16% より遠くならない)。TOPIX500 の細かい刻みでも有効な値段。
+//  ⚠️ PC_DEFAULT_RULES は pretrade.json が無いときだけ使う。値は stock-checker の config に合わせる
+//     (保険の逆指値は 2026-10-30 に -15% → -12%・stock-checker #141)。
 const PC_FILE = 'pretrade.json';
 const PC_CACHE_KEY = 'tj_pretrade';
 const PC_REFRESH_MS = 30 * 60 * 1000;
 const PC_DEFAULT_RULES = { capital_jpy: 2500000, risk_per_trade_pct: 0.015, stop_loss_pct: 0.08,
-  safety_stop_pct: 0.15, target_rr: 2, breakeven_trigger_rr: 1, time_stop_days: 10, max_positions: 5,
+  safety_stop_pct: 0.12, target_rr: 2, breakeven_trigger_rr: 1, time_stop_days: 10, max_positions: 5,
   max_position_pct: 0.4, max_total_exposure_pct: 1.0, lot_size: 100 };
 let _pc = null;
 let _pcBusy = null;
