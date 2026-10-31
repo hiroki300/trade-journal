@@ -45,6 +45,7 @@ function extractFunction(name) {
 const FN_NAMES = [
   '_num', '_normAction', '_normType', '_isOpenAction', 'positionPnl',
   'typeLabel', 'typeBadge',
+  'normStockCode', 'isValidStockCode', 'isMarketLabel',
   'applyHoldImport', 'applyHistImport', 'applyPnlImport', 'applyWatchImport',
 ];
 

@@ -42,6 +42,7 @@ sb.window = sb;
 vm.createContext(sb);
 vm.runInContext([
   grab('_num'), grab('_isOpenAction'), grab('positionPnl'),
+  grab('normStockCode'), grab('isValidStockCode'), grab('isMarketLabel'),
   grab('applyHoldImport'), grab('applyHistImport'),
   grab('getPendingExits'), grab('setPendingExits'),
   grab('addPendingExits'), grab('clearPendingExitsFor'),

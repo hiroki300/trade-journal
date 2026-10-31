@@ -45,7 +45,7 @@ vm.runInContext([
   grab('_escape'), grab('typeLabel'), grab('_num'), grab('_normType'),
   grab('aiNormalizeCall'), grab('aiWeekdaysBetween'), grab('aiRuleLines'), grab('aiRuleConflict'),
   grab('aiUpsertCall'), grab('aiCode5'), grab('aiCandidatesForReview'), grab('aiFilterReview'),
-  grab('markUnseen'), grab('applyHoldImport'), grab('aiCitationsText'),
+  grab('markUnseen'), grab('normStockCode'), grab('isValidStockCode'), grab('isMarketLabel'), grab('applyHoldImport'), grab('aiCitationsText'),
 ].join('\n'), sb);
 const run = c => vm.runInContext(c, sb);
 

@@ -571,7 +571,9 @@ function go(id) {
   if (id==='dash')  rDash();
   if (id==='market') loadMorningCheck();   // 今日の分が届くまでは取り直す (5 分に 1 回まで)
   if (id==='hold')  rHold();
-  if (id==='trade') { rTH(); checkMacroWarning(); loadPretrade(); }  // 🧮 買う前の確認の値段 (30 分に 1 回まで)  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
+  // 2026-10-31: 売買タブを開いたら記録の状態 (コードが読めていない記録・決済の記録待ち・連携) も出す
+  // (以前は取込や公開の後にしか描いておらず、開いただけでは何も出なかった)
+  if (id==='trade') { rTH(); renderJournalStatus(); checkMacroWarning(); loadPretrade(); }  // 🧮 買う前の確認の値段 (30 分に 1 回まで)  // Phase A-2: 売買タブ開いた瞬間にマクロ警告
   if (id==='watchchat') rWatch();
 }
 
@@ -2469,7 +2471,10 @@ function hHTML(h, compact, idx) {
   const pnlDisplay = bpValid ? ((pnl>=0?'¥+':'-¥') + Math.abs(Math.round(pnl)).toLocaleString()) : '<span style="color:var(--t3);font-size:11px">取得単価未確認</span>';
   const pctDisplay = bpValid ? ((pct>=0?'+':'') + pct.toFixed(2) + '%') : '';
   let html = '<div class="hrow">' + al +
-    '<div class="hrt"><div><div class="hnm">' + h.nm + '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
+    '<div class="hrt"><div><div class="hnm">' + h.nm +
+      // 証券コード・銘柄名を直す (2026-10-31: 取込で「東証」と読まれた保有を直せなかった)
+      ' <button onclick="editHoldCode(' + i + ')" title="証券コード・銘柄名を直す" style="background:none;border:none;color:var(--t3);font-size:11px;cursor:pointer;padding:0 2px">✏️</button>' +
+      '</div><div class="hcd">' + h.cd + '｜' + h.dt + '</div></div>' +
     '<div><div class="hpnl ' + cls + '">' + pnlDisplay + '</div>' +
     '<div class="hpct ' + cls + '">' + pctDisplay + '</div></div></div>' +
     '<div class="hmeta">' +
@@ -3937,6 +3942,20 @@ function renderJournalStatus() {
   const pend = getPendingExits();
   const review = window._exportNeedsReview || [];
   let html = '';
+  // 証券コードが読めていない記録 (取込で銘柄名が「東証」などになった行・2026-10-31)。
+  // 売りが買いと組み合わず、成績にも建玉チェックにも入らないので、1 件ずつ直せるボタンを出す。
+  const bad = badCodeRecords();
+  if (bad.t.length || bad.h.length) {
+    const btn = (on, label) => '<button onclick="' + on + '" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.45);border-radius:6px;color:var(--text);font-size:10px;font-weight:700;padding:3px 8px;cursor:pointer;margin:3px 6px 0 0">' + label + '</button>';
+    const rows = bad.t.slice(0, 20).map(x => btn('editTradeRow(\'' + _escape(String(x.id)) + '\')',
+        '✏️ ' + (x.a === 'buy' ? '買' : '売') + ' ' + _escape(x.nm || x.cd || '?') + ' ' + _escape(String(x.sh || '')) + '株 @' +
+        _escape(String(x.p || '')) + ' (' + _escape(x.dt || '') + ')'))
+      .concat(bad.h.map(o => btn('editHoldCode(' + o.i + ')', '✏️ 保有 ' + _escape(o.x.nm || o.x.cd || '?') + ' ' + _escape(String(o.x.sh || '')) + '株')));
+    html += '<div style="background:var(--s1);border:1px solid rgba(239,68,68,.5);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:8px">' +
+      '⚠️ <b>証券コードが読めていない記録 ' + (bad.t.length + bad.h.length) + '件</b>（取込で銘柄名が「東証」などになった行）<br>' +
+      '<span style="font-size:11px;color:var(--t3)">コードが無いと、売りが買いと組み合わず記録になりません。✏️ で 4 文字のコード (例: 7203・247A) と銘柄名を入れてください。同じ読み違いの行がほかにもあれば、まとめて直すかを聞きます。(投資信託などコードの無い保有は、そのままで構いません)</span>' +
+      '<div>' + rows.join('') + '</div></div>';
+  }
   if (pend.length) {
     const names = pend.map(x => _escape((x.name || x.code) + '(' + typeLabel(x.type) + ')')).join('・');
     html += '<div style="background:var(--s1);border:1px solid rgba(245,158,11,.5);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:8px">' +
@@ -4055,10 +4074,56 @@ function dismissPendingExits() {
   toast('⏳ 記録待ちの一覧を消しました');
 }
 
+// 証券コードと銘柄名をたずねる (取り消しは null)。共通: 履歴の行と保有の ✏️
+function _askCodeName(cd, nm) {
+  const c = prompt('証券コード (4 文字・例 7203・247A)', isValidStockCode(cd) ? normStockCode(cd) : '');
+  if (c === null) return null;
+  const code = normStockCode(c);
+  if (!isValidStockCode(code)) { toast('⚠️ 証券コードは 4 文字です (例: 7203・247A)'); return null; }
+  const guess = knownStockName(code) || (isMarketLabel(nm) || normStockCode(nm) === normStockCode(cd) ? '' : (nm || ''));
+  const n = prompt('銘柄名 (例: トヨタ自動車)', guess);
+  if (n === null) return null;
+  const name = isMarketLabel(n) ? '' : n.trim();
+  return {code, name: name || code};
+}
+
+// コードを直したとき、同じ古いコードの記録がほかにもあれば、まとめて直すかを確かめる。
+// 「東証」と読まれた記録が別々の銘柄のこともあるので、黙ってまとめない (2026-10-31)。
+function _renameCodeWithConfirm(oldCd, code, name, selfId) {
+  const others = T.filter(x => x.cd === oldCd && String(x.id) !== String(selfId));
+  const holds = H.filter(h => h.cd === oldCd);
+  let all = false;
+  if (oldCd !== code && (others.length || holds.length)) {
+    const lines = others.slice(0, 8).map(x => (x.a === 'buy' ? '買 ' : '売 ') + (x.dt || '') + ' ' + (x.sh || '') + '株 @' + (x.p || ''))
+      .concat(holds.map(h => '保有 ' + (h.sh || '') + '株'));
+    all = confirm('ほかにもコード「' + oldCd + '」の記録が ' + (others.length + holds.length) + ' 件あります:\n・' +
+      lines.join('\n・') + '\n\n同じ銘柄なら、まとめて「' + code + ' ' + name + '」に直しますか？\n' +
+      '(別の銘柄が混じっているならキャンセルして、1 件ずつ直してください)');
+  }
+  const r = renameStockCode(H, T, oldCd, code, name, all ? null : (selfId != null ? [selfId] : []));
+  H = r.H; T = r.T;
+  if (all) {
+    setPendingExits(getPendingExits().map(x => x.code === oldCd ? {...x, code, name} : x));
+  }
+  return r;
+}
+
+function _afterRecordEdit(msg) {
+  sv(KT, T); sv(KH, H);
+  _buildHumanPaperTradesPayload();   // 要確認リストを作り直す
+  rTH(); calcS(); rHold(); renderJournalStatus();
+  toast(msg);
+  maybeAutoPublish();                // 直した記録をボットに送る (PAT があるとき)
+}
+
 // 履歴の1行を直す (年の入力ミス・OCR の読み違いを本人が直せるように)。
+// 2026-10-31: 証券コード・銘柄名・株数も直せるようにした (取込で銘柄名が「東証」になり、コードが
+// 読めていなかった記録は、売りが買いと組み合わず記録できなかった)。
 function editTradeRow(id) {
   const t = T.find(x => String(x.id) === String(id));
   if (!t) return;
+  const cn = _askCodeName(t.cd, t.nm);
+  if (!cn) return;
   const dt = prompt('約定日 (YYYY-MM-DD)', t.dt || '');
   if (dt === null) return;
   if (dt && !/^\d{4}-\d{2}-\d{2}$/.test(dt.trim())) { toast('⚠️ YYYY-MM-DD の形式で入れてください'); return; }
@@ -4066,12 +4131,48 @@ function editTradeRow(id) {
   if (p === null) return;
   const pv = _num(p);
   if (pv == null || pv <= 0) { toast('⚠️ 価格が読み取れません'); return; }
-  t.dt = dt.trim() || t.dt;
-  t.p = pv;
-  sv(KT, T);
-  _buildHumanPaperTradesPayload();   // 要確認リストを作り直す
-  rTH(); calcS(); renderJournalStatus();
-  toast('✏️ 履歴を直しました (☁️公開で反映されます)');
+  const s = prompt('株数', String(t.sh ?? ''));
+  if (s === null) return;
+  const shv = _num(s);
+  if (shv == null || shv <= 0) { toast('⚠️ 株数が読み取れません'); return; }
+  const oldCd = t.cd;
+  _renameCodeWithConfirm(oldCd, cn.code, cn.name, t.id);
+  const row = T.find(x => String(x.id) === String(id));
+  row.cd = cn.code; row.nm = cn.name;
+  row.dt = dt.trim() || row.dt;
+  row.p = pv;
+  row.sh = shv;
+  _afterRecordEdit('✏️ 履歴を直しました');
+}
+
+// 保有の証券コード・銘柄名を直す (2026-10-31)。同じ古いコードの取引の記録もまとめて直すかを確かめる。
+function editHoldCode(idx) {
+  const h = H[idx];
+  if (!h) return;
+  const cn = _askCodeName(h.cd, h.nm);
+  if (!cn) return;
+  const oldCd = h.cd;
+  if (oldCd === cn.code) { h.nm = cn.name; _afterRecordEdit('✏️ 銘柄名を直しました'); return; }
+  const others = T.filter(x => x.cd === oldCd);
+  const all = !others.length || confirm('取引の記録にもコード「' + oldCd + '」の行が ' + others.length + ' 件あります。\n' +
+    '同じ銘柄なら、まとめて「' + cn.code + ' ' + cn.name + '」に直しますか？\n(キャンセルすると保有だけ直します)');
+  if (all) {
+    const r = renameStockCode(H, T, oldCd, cn.code, cn.name, null);
+    H = r.H; T = r.T;
+    setPendingExits(getPendingExits().map(x => x.code === oldCd ? {...x, code: cn.code, name: cn.name} : x));
+  } else {
+    // この保有だけを直す (同じコード・同じ区分の保有が既にあれば 1 つにまとめる)
+    const rest = H.filter((_, i) => i !== idx);
+    H = renameStockCode(rest.concat([{...h, cd: '__edit__'}]), [], '__edit__', cn.code, cn.name, null).H;
+  }
+  _afterRecordEdit('✏️ 証券コードを直しました');
+}
+
+// 証券コードが読めていない記録 (取込で銘柄名が「東証」などになった行)。売りが買いと組み合わない。
+function badCodeRecords() {
+  const t = T.filter(x => !isValidStockCode(x.cd));
+  const h = H.map((x, i) => ({x, i})).filter(o => !isValidStockCode(o.x.cd));
+  return {t, h};
 }
 
 function rTH() {
@@ -4919,9 +5020,9 @@ async function analyzeScreenshots() {
   const btn=document.getElementById('ssAnalyzeBtn');
   btn.disabled=true;
   const prompts={
-    hold:'あなたは SBI 証券スマホアプリのスクリーンショットを精密に読み取る OCR 専門アシスタントです。\n以下の **3 つの画面パターン** のいずれかが表示されています。\n\n【画面A】口座管理 → 「保有証券」タブ (現物のリスト)\n  - 列: 銘柄(銘柄名+4桁コード+「特定」) / 保有株数(注文数) / 評価額 と 評価額前日比\n  - **取得単価・現在値は per-share では表示されない**\n  - 評価額 (例: 328,600円) は **その銘柄の保有株すべての合計時価**\n  - すべての行を type="spot" で抽出\n  - buy_price=null, current_price=null, evaluation_amount に評価額の数値 (カンマ抜き) を入れる\n\n【画面B】口座管理 → 「信用建玉」タブ (信用のリスト)\n  - 列: 銘柄(銘柄名+4桁コード+「買建/売建」+「特定」+「N ヵ月」) / 建株数(注文数) / 評価額 と 前日比\n  - **買建の行は type="margin"、売建の行は type="margin_short"** で抽出 (行の表記「買建」「売建」で判別)。memo フィールドにも「信用買建」または「信用売建」+「N ヵ月」を確認用の生テキストとして必ず入れる\n  - buy_price=null, current_price=null, evaluation_amount に評価額\n\n【画面C】保有証券詳細 / 信用建玉詳細 (単一銘柄の詳細画面)\n  - 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」が **per-share で明示**\n  - 「現在値」「現値」「時価」「最終値」も per-share で表示される場合あり\n  - buy_price / current_price をそれぞれ数値で埋める。evaluation_amount は null OK\n\n【無視すべきもの】\n- ヘッダーの「評価損益合計」「評価損益率」「明細数」「総資産」「ポートフォリオ計」(集計)\n- 「評価額前日比」(当日の変動量、エントリーには無関係)\n- 株数の括弧内 (例: 100株 (0)、200株 (200)) — 括弧内は注文中の数なので shares には含めない (保有確定数のみ)\n- 「表示・並替」ボタンや「N」マークなどの UI 要素\n\n【数値の読み取りルール】\n- 数値はカンマ区切り (例: 1,234,567)。**カンマを取り除いた純粋な整数または小数**で返す\n- 通貨記号「¥」「円」、単位「株」「口」、空白は除外\n- 「+」プラスは符号維持、「▲」「△」「-」「△印」はマイナスとして扱う\n- 小数点は維持 (例: 「2,850.5」→ 2850.5)\n- 証券コード: 数字 4 桁 (例: 1802, 3231, 7267) または英数字 4 桁 (例: 247A)\n\n【ラベル → JSON フィールド対応表】 ※SBI の表記揺れに対応\n- buy_price ← 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」「単価(建)」 (画面 C のみ)\n- current_price ← 「現在値」「現値」「時価」「最終値」 (画面 C のみ)\n- evaluation_amount ← 「評価額」 (per-row 合計、画面 A/B のみ)\n- shares    ← 「保有株数」「保有数量」「建株数」「建玉数量」「株数」「数量」 (括弧内は除く)\n- type      ← 「保有証券」タブ=spot。「信用建玉」タブは「買建」なら margin、「売建」なら margin_short\n- memo      ← 信用建玉の場合、「信用買建」または「信用売建」+「N ヵ月」を入れる (例: "信用買建 6ヵ月")。現物は null\n- buy_date  ← 「建日」「取得日」「約定日」「買付日」(YYYY-MM-DD に正規化、和暦は西暦変換、無ければ null)\n\n【同一銘柄が複数表示されている場合】\n- 現物と信用が両方ある銘柄は **必ず別オブジェクト** として返す (type が異なる)\n- 同じ type で複数行 (建日違い等) ある場合も **行ごとに別オブジェクト** で返す\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"code":"コード","name":"銘柄名","shares":整数,"buy_price":数値またはnull,"current_price":数値またはnull,"evaluation_amount":数値またはnull,"type":"spot"、"margin"、"margin_short"のいずれか,"memo":文字列またはnull,"buy_date":"YYYY-MM-DD"またはnull}]\n\n【読み取れない項目の扱い】\n- 値が不明なフィールドは null。配列を空にはせず、確実に読めたフィールドのみで返す\n- 画面 A/B では buy_price と current_price は必ず null (表示されないため推測禁止)\n- type が判別できない場合は "spot" にフォールバック\n- 銘柄名が判読困難でも、コード+株数+評価額が読めれば name は推測せず空文字 "" で良い',
-    hist:'あなたはSBI証券スマホアプリの「約定履歴」または「取引履歴」画面のスクリーンショットを精密に読み取る OCR アシスタントです。\n\n【画面の特徴】\n- 各行に、銘柄名、4桁の証券コード、取引区分（現物/信用）、売買区分（買/売）、約定株数、約定単価（約定価格）、約定日（受渡日や注文日ではなく、約定した日付）が表示されています。\n\n【抽出項目】\n- action: この行が実際に「買い」の約定か「売り」の約定かを、そのまま答える。「新規買」「返済買」「現物買」「信用買」など"買"を含む行動は "buy"。「新規売」「返済売」「現物売」「信用売」など"売"を含む行動は "sell"。※ 新規/返済 (建てる/決済する) の区別は type と組み合わせてアプリ側で判定するので、ここでは単純に「約定が買いか売りか」だけを答えること (信用の返済買いも"buy"のまま)。\n- code: 数字 4 桁（例: 7203）または英数字 4 桁（例: 247A）の証券コード。\n- name: 銘柄名。\n- shares: 約定した株数。カンマを抜いた純粋な整数。\n- price: 約定した単価（価格）。カンマを抜いた数値。\n- date: 約定した日付。「YYYY-MM-DD」形式（例: 2026-05-26）。和暦（令X年やR X年）は西暦に変換し、年が省略されている場合は今年の年（2026年など）を補完してください。\n- type: 取引区分。「現物」なら "spot"。信用取引で「買建」「新規買」の表記なら "margin"。信用取引で「売建」「新規売」の表記なら "margin_short"。「返済買」「返済売」は同じ建玉の決済なので、行に建玉種別の表記があればそれに従う (無ければ "margin" にフォールバック)。\n\n【無視すべき項目】\n- 手数料、消費税、受渡金額、注文番号などの取引詳細数値。\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"、"margin"、"margin_short"のいずれか}]',
-    pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
+    hold:'あなたは SBI 証券スマホアプリのスクリーンショットを精密に読み取る OCR 専門アシスタントです。\n以下の **3 つの画面パターン** のいずれかが表示されています。\n\n【画面A】口座管理 → 「保有証券」タブ (現物のリスト)\n  - 列: 銘柄(銘柄名+4桁コード+「特定」) / 保有株数(注文数) / 評価額 と 評価額前日比\n  - **取得単価・現在値は per-share では表示されない**\n  - 評価額 (例: 328,600円) は **その銘柄の保有株すべての合計時価**\n  - すべての行を type="spot" で抽出\n  - buy_price=null, current_price=null, evaluation_amount に評価額の数値 (カンマ抜き) を入れる\n\n【画面B】口座管理 → 「信用建玉」タブ (信用のリスト)\n  - 列: 銘柄(銘柄名+4桁コード+「買建/売建」+「特定」+「N ヵ月」) / 建株数(注文数) / 評価額 と 前日比\n  - **買建の行は type="margin"、売建の行は type="margin_short"** で抽出 (行の表記「買建」「売建」で判別)。memo フィールドにも「信用買建」または「信用売建」+「N ヵ月」を確認用の生テキストとして必ず入れる\n  - buy_price=null, current_price=null, evaluation_amount に評価額\n\n【画面C】保有証券詳細 / 信用建玉詳細 (単一銘柄の詳細画面)\n  - 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」が **per-share で明示**\n  - 「現在値」「現値」「時価」「最終値」も per-share で表示される場合あり\n  - buy_price / current_price をそれぞれ数値で埋める。evaluation_amount は null OK\n\n【無視すべきもの】\n- 銘柄名のそばに出る「東証」「東証P」「名証」「PTS」などの市場の名前 (銘柄名ではないので name に入れない)\n- ヘッダーの「評価損益合計」「評価損益率」「明細数」「総資産」「ポートフォリオ計」(集計)\n- 「評価額前日比」(当日の変動量、エントリーには無関係)\n- 株数の括弧内 (例: 100株 (0)、200株 (200)) — 括弧内は注文中の数なので shares には含めない (保有確定数のみ)\n- 「表示・並替」ボタンや「N」マークなどの UI 要素\n\n【数値の読み取りルール】\n- 数値はカンマ区切り (例: 1,234,567)。**カンマを取り除いた純粋な整数または小数**で返す\n- 通貨記号「¥」「円」、単位「株」「口」、空白は除外\n- 「+」プラスは符号維持、「▲」「△」「-」「△印」はマイナスとして扱う\n- 小数点は維持 (例: 「2,850.5」→ 2850.5)\n- 証券コード: 数字 4 桁 (例: 1802, 3231, 7267) または英数字 4 桁 (例: 247A)\n\n【ラベル → JSON フィールド対応表】 ※SBI の表記揺れに対応\n- buy_price ← 「取得単価」「平均取得単価」「平均約定単価」「建単価」「平均建単価」「建値」「単価(建)」 (画面 C のみ)\n- current_price ← 「現在値」「現値」「時価」「最終値」 (画面 C のみ)\n- evaluation_amount ← 「評価額」 (per-row 合計、画面 A/B のみ)\n- shares    ← 「保有株数」「保有数量」「建株数」「建玉数量」「株数」「数量」 (括弧内は除く)\n- type      ← 「保有証券」タブ=spot。「信用建玉」タブは「買建」なら margin、「売建」なら margin_short\n- memo      ← 信用建玉の場合、「信用買建」または「信用売建」+「N ヵ月」を入れる (例: "信用買建 6ヵ月")。現物は null\n- buy_date  ← 「建日」「取得日」「約定日」「買付日」(YYYY-MM-DD に正規化、和暦は西暦変換、無ければ null)\n\n【同一銘柄が複数表示されている場合】\n- 現物と信用が両方ある銘柄は **必ず別オブジェクト** として返す (type が異なる)\n- 同じ type で複数行 (建日違い等) ある場合も **行ごとに別オブジェクト** で返す\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"code":"コード","name":"銘柄名","shares":整数,"buy_price":数値またはnull,"current_price":数値またはnull,"evaluation_amount":数値またはnull,"type":"spot"、"margin"、"margin_short"のいずれか,"memo":文字列またはnull,"buy_date":"YYYY-MM-DD"またはnull}]\n\n【読み取れない項目の扱い】\n- 値が不明なフィールドは null。配列を空にはせず、確実に読めたフィールドのみで返す\n- 画面 A/B では buy_price と current_price は必ず null (表示されないため推測禁止)\n- type が判別できない場合は "spot" にフォールバック\n- 銘柄名が判読困難でも、コード+株数+評価額が読めれば name は推測せず空文字 "" で良い',
+    hist:'あなたはSBI証券スマホアプリの「約定履歴」または「取引履歴」画面のスクリーンショットを精密に読み取る OCR アシスタントです。\n\n【画面の特徴】\n- 各行に、銘柄名、4桁の証券コード、取引区分（現物/信用）、売買区分（買/売）、約定株数、約定単価（約定価格）、約定日（受渡日や注文日ではなく、約定した日付）が表示されています。\n\n【抽出項目】\n- action: この行が実際に「買い」の約定か「売り」の約定かを、そのまま答える。「新規買」「返済買」「現物買」「信用買」など"買"を含む行動は "buy"。「新規売」「返済売」「現物売」「信用売」など"売"を含む行動は "sell"。※ 新規/返済 (建てる/決済する) の区別は type と組み合わせてアプリ側で判定するので、ここでは単純に「約定が買いか売りか」だけを答えること (信用の返済買いも"buy"のまま)。\n- code: 数字 4 桁（例: 7203）または英数字 4 桁（例: 247A）の証券コード。\n- name: 銘柄名 (会社名。例: トヨタ自動車)。銘柄名のそばに出る「東証」「東証P」「名証」「PTS」などは市場の名前で、銘柄名ではないので name に入れない。\n- shares: 約定した株数。カンマを抜いた純粋な整数。\n- price: 約定した単価（価格）。カンマを抜いた数値。\n- date: 約定した日付。「YYYY-MM-DD」形式（例: 2026-05-26）。和暦（令X年やR X年）は西暦に変換し、年が省略されている場合は今年の年（2026年など）を補完してください。\n- type: 取引区分。「現物」なら "spot"。信用取引で「買建」「新規買」の表記なら "margin"。信用取引で「売建」「新規売」の表記なら "margin_short"。「返済買」「返済売」は同じ建玉の決済なので、行に建玉種別の表記があればそれに従う (無ければ "margin" にフォールバック)。\n\n【無視すべき項目】\n- 手数料、消費税、受渡金額、注文番号などの取引詳細数値。\n\n【出力フォーマット】\n配列 JSON のみ返す。説明・前置き・コードフェンス禁止。\n[{"action":"buy"または"sell","code":"証券コード","name":"銘柄名","shares":株数,"price":約定価格,"date":"YYYY-MM-DD","type":"spot"、"margin"、"margin_short"のいずれか}]',
+    pnl:'この画像は証券会社の損益・実現損益画面です。以下のJSON配列のみ返してください。\ncode は 4 文字の証券コード (例: 7203・247A)。name は会社名で、銘柄名のそばに出る「東証」「東証P」「名証」「PTS」などの市場の名前は name に入れない。\n[{"code":"コード","name":"銘柄名","realized_pnl":実現損益,"shares":株数,"sell_price":売価,"buy_price":取得単価,"date":"YYYY-MM-DD"}]',
     watch:'この画像はウォッチリストや銘柄一覧画面です。以下のJSON配列のみ返してください。\n[{"code":"コード","name":"銘柄名","current_price":現在値,"tag":"テーマ・メモ"}]',
     cash:'この画像はSBI証券アプリの「余力」画面です。以下のJSONのみ返してください（配列ではなくオブジェクト）。\n{"buying_power":買付余力の数値,"cash":委託保証金現金または現引可能額の数値,"margin_power":信用建余力の数値}\n数値のみ（円マーク・カンマなし）。読み取れない項目は0。'
   };
@@ -5019,7 +5120,13 @@ async function analyzeScreenshots() {
     }
     await new Promise(r=>setTimeout(r,500));
   }
+  // 市場名 (東証など) を銘柄名から外し、コードから分かる名前で埋める。コードが読めていない行に印 (2026-10-31)
+  if (ssType === 'hold' || ssType === 'hist' || ssType === 'pnl') cleanImportItems(parsedItems, knownStockName);
   resEl.textContent+='\n合計 '+parsedItems.length+'件（'+ok+'/'+ssImageList.length+'枚成功）\n\n';
+  const nCodeProblem = parsedItems.filter(i => i && i._codeProblem && (ssType === 'hist' || ssType === 'pnl' || !i.name)).length;
+  if (nCodeProblem) {
+    resEl.textContent += '⚠️ 証券コードが読めていない行が ' + nCodeProblem + ' 件あります。「取り込む」の画面で 4 文字のコード (例: 7203・247A) を入れてください (入れないと、その行は取り込みません)。\n\n';
+  }
   if(ssType==='cash'&&parsedItems.length>0){
     const o=parsedItems[0];
     resEl.textContent+='💴 買付余力: '+(o.buying_power?.toLocaleString()||'?')+'円\n';
@@ -5051,6 +5158,16 @@ async function analyzeScreenshots() {
   btn.disabled=false; btn.textContent='🤖 Geminiで一括読み取る';
 }
 
+// 取込の行の注意 (2026-10-31)。証券コードが読めていない行は、コードを入れないと取り込まない
+// (保有はコードの無い投資信託もあるので、銘柄名が読めていれば注意だけ)。
+function _importRowWarn(it, isHold) {
+  if (!it || !it._codeProblem) return '';
+  if (isHold && it.name) return '';
+  return '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:6px">⚠️ 証券コードが読めていません' +
+    (it._marketName ? ' (銘柄名が「東証」などの市場名でした)' : '') +
+    '。4 文字のコード (例: 7203・247A) を入れてください。入れないと、この行は取り込みません。</div>';
+}
+
 // 取り込みモーダル
 // 取り込みモーダル (手動変更可能なインプット付き)
 function showImportModal() {
@@ -5064,7 +5181,7 @@ function showImportModal() {
       if (!cp && it.evaluation_amount && sh > 0) cp = Math.round(it.evaluation_amount / sh * 10) / 10;
       const bpVal = it.buy_price || '';
       const cpVal = cp || '';
-      return '<div class="modal-item">'+
+      return '<div class="modal-item">' + _importRowWarn(it, true) +
         '<div class="modal-item-top">'+
           '<div style="flex:1;margin-right:10px;">'+
             '<div style="display:flex;gap:4px;margin-bottom:6px;">'+
@@ -5093,7 +5210,7 @@ function showImportModal() {
       const dateVal = it.date || TODAY;
       const sh = it.shares || 0;
       const price = it.price || 0;
-      return '<div class="modal-item">'+
+      return '<div class="modal-item">' + _importRowWarn(it) +
         '<div class="modal-item-top">'+
           '<div style="flex:1;margin-right:10px;">'+
             '<div style="display:flex;gap:4px;margin-bottom:6px;">'+
@@ -5123,7 +5240,7 @@ function showImportModal() {
     el.innerHTML=parsedItems.map((it,i)=>{
       const dateVal = it.date || TODAY;
       const realized = it.realized_pnl || 0;
-      return '<div class="modal-item">'+
+      return '<div class="modal-item">' + _importRowWarn(it) +
         '<div class="modal-item-top">'+
           '<div style="flex:1;margin-right:10px;">'+
             '<div style="display:flex;gap:4px;margin-bottom:6px;">'+
@@ -5211,6 +5328,81 @@ function markUnseen(H, removed, today) {
     ? {...h, unseen_since: h.unseen_since || today} : h);
 }
 
+// ── 取込の銘柄コード・銘柄名の点検 (2026-10-31) ──
+// SBI の約定履歴・損益の画面では銘柄名の横に「東証」などの市場名が出て、OCR がそれを銘柄名として
+// 返すことがあった。コードが読めない行は、以前は銘柄名 (= 東証) をコードの代わりにしていたので、
+// 買いと売りが別の銘柄として記録され、売りを組み合わせられなかった (ユーザー報告)。
+// → 証券コードは全角・空白をそろえて 4 文字 (例: 7203・247A) かを確かめ、市場名は銘柄名にしない。
+function normStockCode(cd) {
+  return String(cd == null ? '' : cd).normalize('NFKC').replace(/\s/g, '').toUpperCase();
+}
+function isValidStockCode(cd) {
+  return /^[0-9][0-9A-Z][0-9][0-9A-Z]$/.test(normStockCode(cd));
+}
+function isMarketLabel(s) {
+  const t = String(s == null ? '' : s).normalize('NFKC').replace(/[\s・()（）]/g, '').toUpperCase();
+  if (!t) return false;
+  return /^(東証|名証|福証|札証)(プライム|スタンダード|グロース|P|S|G|M|1部|2部|一部|二部|市場)?$/.test(t) ||
+         /^(プライム|スタンダード|グロース)(市場)?$/.test(t) ||
+         /^(PTS|SOR|JNX|ODX|JAX|東証PTS|SBIPTS|ジャパンネクスト)$/.test(t);
+}
+// 取込の行を点検して直す (純関数・行を書き換える)。lookup(code) は分かっている銘柄名を返す関数。
+//   code: 全角・空白をそろえる / name: 市場名なら空にし、空ならコードから分かる名前で埋める
+//   _codeProblem: 証券コードが読めていない (取込の画面でコードを入れてもらう)
+function cleanImportItems(items, lookup) {
+  for (const it of items || []) {
+    if (!it || typeof it !== 'object') continue;
+    it.code = normStockCode(it.code);
+    if (isMarketLabel(it.name)) { it.name = ''; it._marketName = true; }
+    it.name = String(it.name == null ? '' : it.name).trim();
+    if (!it.name && isValidStockCode(it.code) && typeof lookup === 'function') it.name = lookup(it.code) || '';
+    it._codeProblem = !isValidStockCode(it.code);
+  }
+  return items;
+}
+// 分かっている銘柄名 (保有・取引の記録・買う前の確認の要約・候補) からコードの名前を引く
+function knownStockName(cd) {
+  const c = normStockCode(cd);
+  if (!isValidStockCode(c)) return '';
+  const ok = (nm) => nm && !isMarketLabel(nm) && normStockCode(nm) !== c ? String(nm) : '';
+  for (const h of (typeof H !== 'undefined' && Array.isArray(H)) ? H : []) if (normStockCode(h.cd) === c && ok(h.nm)) return h.nm;
+  for (const t of (typeof T !== 'undefined' && Array.isArray(T)) ? T : []) if (normStockCode(t.cd) === c && ok(t.nm)) return t.nm;
+  try {
+    const st = (_pc && _pc.payload && _pc.payload.stocks) || {};
+    const s = st[c + '0'] || st[c];
+    if (s && ok(s.n)) return s.n;
+  } catch (e) { /* 要約が無いときは引かない */ }
+  try { const f = _candidateByCode(c + '0').name || _candidateByCode(c).name; if (ok(f)) return f; } catch (e) { /* 候補が無い */ }
+  return '';
+}
+// 記録の中のコードを直す (純関数)。oldCd の行だけを newCd / newNm にする。onlyIds を渡すとその行だけ。
+// 保有で同じコード・同じ区分が既にあれば 1 つにまとめる (株数を足し、買値は株数で加重平均)。
+function renameStockCode(H, T, oldCd, newCd, newNm, onlyIds) {
+  const only = onlyIds ? new Set(onlyIds.map(String)) : null;
+  const hit = (cd, id) => cd === oldCd && (!only || only.has(String(id)));
+  let nT = 0, nH = 0;
+  const nextT = (T || []).map(t => {
+    if (!hit(t.cd, t.id)) return t;
+    nT++;
+    return {...t, cd: newCd, nm: newNm || t.nm};
+  });
+  const moved = [];
+  const nextH = [];
+  for (const h of (H || [])) {
+    if (h.cd === oldCd && !only) { nH++; moved.push({...h, cd: newCd, nm: newNm || h.nm}); }
+    else nextH.push(h);
+  }
+  for (const m of moved) {
+    const j = nextH.findIndex(x => x.cd === newCd && (x.type || 'spot') === (m.type || 'spot'));
+    if (j < 0) { nextH.push(m); continue; }
+    const a = nextH[j], tot = (a.sh || 0) + (m.sh || 0);
+    nextH[j] = {...a, sh: tot,
+      bp: tot ? Math.round(((a.bp || 0) * (a.sh || 0) + (m.bp || 0) * (m.sh || 0)) / tot * 10) / 10 : a.bp,
+      dt: [a.dt, m.dt].filter(Boolean).sort()[0] || a.dt};
+  }
+  return {H: nextH, T: nextT, nT, nH};
+}
+
 function applyHoldImport(H, items, opts) {
   opts = opts || {};
   const nextH = H.map(h => ({...h}));
@@ -5219,8 +5411,16 @@ function applyHoldImport(H, items, opts) {
   const seenTypes = new Set();  // スクショに現れた type だけを削除対象にする
 
   for (const it of items) {
-    const cd = String(it.code || '').trim(), nm = String(it.name || '').trim();
-    if (!cd && !nm) { skipped.push({item: it, reason: 'コード・銘柄名とも読めず'}); continue; }
+    // コードが読めない行は、銘柄名で代わりにする (投資信託などコードの無い保有のため)。
+    // ただし銘柄名が「東証」などの市場名なら、どの銘柄か分からないので取り込まない (2026-10-31)。
+    const cd0 = normStockCode(it.code);
+    const cd = isValidStockCode(cd0) ? cd0 : '';
+    const nm = isMarketLabel(it.name) ? '' : String(it.name || '').trim();
+    if (!cd && !nm) {
+      skipped.push({item: it, reason: (cd0 || it.name)
+        ? '証券コードが読めていない (銘柄名が「' + String(it.name || '') + '」)' : 'コード・銘柄名とも読めず'});
+      continue;
+    }
     const t = it.type || 'spot';
     seenTypes.add(t);
     seenKeys.add((cd || nm) + ':' + t);
@@ -5280,8 +5480,15 @@ function applyHistImport(H, T, cash, items, opts) {
   const skipped = [];
 
   for (const it of items) {
-    const cd = String(it.code || '').trim(), nm = String(it.name || '').trim();
-    if (!cd && !nm) { skipped.push({item: it, reason: 'コード・銘柄名とも読めず'}); continue; }
+    // 約定は証券コードで買いと売りを組み合わせるので、コードが読めない行は取り込まない。
+    // 以前は銘柄名をコードの代わりにしていて、銘柄名が「東証」(市場名) と読まれた行が
+    // 別の銘柄として記録され、売りが買いと組み合わなかった (2026-10-31)。
+    const cd = normStockCode(it.code);
+    const nm = isMarketLabel(it.name) ? '' : String(it.name || '').trim();
+    if (!isValidStockCode(cd)) {
+      skipped.push({item: it, reason: '証券コードが読めていない (4 文字のコード、例: 7203・247A を入れてください)'});
+      continue;
+    }
     const a = it.action;
     if (a !== 'buy' && a !== 'sell') { skipped.push({item: it, reason: '売買区分が不明'}); continue; }
     const sh = it.shares || 0, p = it.price || 0;
@@ -5297,11 +5504,11 @@ function applyHistImport(H, T, cash, items, opts) {
     // 「建てる」か「決済する」かは type で買/売が入れ替わる (信用売建は新規売=建てる)
     const opening = _isOpenAction(a, type);
     let pnl = null;
-    const idx = nextH.findIndex(h => h.cd === (cd || nm) && (h.type || 'spot') === type);
+    const idx = nextH.findIndex(h => h.cd === cd && (h.type || 'spot') === type);
     if (!touch) {
       // 履歴のみモード: 損益は保有平均が無いと出せないので null のまま記録する
       // (R の計算は backend が entry/exit から行うので支障はない)
-      nextT.push({id: Date.now() + Math.random(), a, cd: cd || nm, nm, sh, p, dt, type, pnl: null});
+      nextT.push({id: Date.now() + Math.random(), a, cd, nm: nm || cd, sh, p, dt, type, pnl: null});
       continue;
     }
     if (opening) {
@@ -5310,7 +5517,7 @@ function applyHistImport(H, T, cash, items, opts) {
         nextH[idx] = {...ex, sh: tot, bp: Math.round((ex.bp * ex.sh + p * sh) / tot * 10) / 10, bp_unknown: false};
       } else {
         // 約定履歴の取込は約定日 (dt) が読めているので、保有取込と違い建日は事実。
-        nextH.push({cd: cd || nm, nm, sh, bp: p, cp: p, sl: null, tgt: null, memo: 'SS取込', dt, type,
+        nextH.push({cd, nm: nm || cd, sh, bp: p, cp: p, sl: null, tgt: null, memo: 'SS取込', dt, type,
                     dt_unknown: false});
       }
     } else if (idx >= 0) {
@@ -5324,7 +5531,7 @@ function applyHistImport(H, T, cash, items, opts) {
     // 同じスクショでも「買→売」だと途中のマイナスを飲んで残金が過大になり、
     // 「売→買」だと正しく出ていた (2026-09-21 にテストで検出)。差分を溜めて最後に1回丸める。
     cashDelta += (a === 'buy') ? -(p * sh) : (p * sh);
-    nextT.push({id: Date.now() + Math.random(), a, cd: cd || nm, nm, sh, p, dt, type, pnl});
+    nextT.push({id: Date.now() + Math.random(), a, cd, nm: nm || cd, sh, p, dt, type, pnl});
   }
   return {H: nextH, T: nextT, cash: Math.max(0, nextCash + cashDelta), skipped};
 }
@@ -5335,12 +5542,17 @@ function applyPnlImport(T, items) {
   const nextT = T.slice();
   const skipped = [];
   for (const it of items) {
-    const cd = String(it.code || '').trim(), nm = String(it.name || '').trim();
-    if (!cd && !nm) { skipped.push({item: it, reason: 'コード・銘柄名とも読めず'}); continue; }
+    // 売りは証券コードで買いと組み合わせるので、コードが読めない行は取り込まない (2026-10-31)
+    const cd = normStockCode(it.code);
+    const nm = isMarketLabel(it.name) ? '' : String(it.name || '').trim();
+    if (!isValidStockCode(cd)) {
+      skipped.push({item: it, reason: '証券コードが読めていない (4 文字のコード、例: 7203・247A を入れてください)'});
+      continue;
+    }
     const sh = it.shares || 0, p = it.sell_price || 0, dt = it.date || TODAY;
     const dup = nextT.find(t => t.cd === cd && t.a === 'sell' && t.dt === dt && t.sh === sh && t.p === p);
     if (dup) { skipped.push({item: it, reason: '同一内容が記録済み (重複)'}); continue; }
-    nextT.push({id: Date.now() + Math.random(), a: 'sell', cd: cd || nm, nm, sh, p, dt,
+    nextT.push({id: Date.now() + Math.random(), a: 'sell', cd, nm: nm || cd, sh, p, dt,
                type: it.type || 'spot', pnl: it.realized_pnl || 0});
   }
   return {T: nextT, skipped};
@@ -5371,8 +5583,9 @@ function doImport() {
     const it = parsedItems[i];
     const codeEl = document.getElementById('mcode' + i);
     const nameEl = document.getElementById('mname' + i);
-    if (codeEl) it.code = codeEl.value.trim();
+    if (codeEl) it.code = normStockCode(codeEl.value);
     if (nameEl) it.name = nameEl.value.trim();
+    if (ssType === 'hold' || ssType === 'hist' || ssType === 'pnl') cleanImportItems([it], knownStockName);
 
     if (ssType === 'hold') {
       const typeEl = document.getElementById('mtype' + i);
@@ -5414,6 +5627,13 @@ function doImport() {
   }
 
   const checked = parsedItems.filter((_, i) => document.getElementById('mchk' + i)?.checked);
+  // 証券コードが入っていない約定・損益の行は取り込まない (売りが買いと組み合わないため・2026-10-31)
+  if (ssType === 'hist' || ssType === 'pnl') {
+    const noCode = checked.filter(it => !isValidStockCode(it.code));
+    if (noCode.length && !confirm('⚠️ 証券コードが入っていない行が ' + noCode.length + ' 件あります。\n' +
+        'この行は取り込みません (コードが無いと、売りが買いと組み合わないため)。\n\n' +
+        'キャンセルして戻り、4 文字のコード (例: 7203・247A) を入れられます。このまま進めますか？')) return;
+  }
   let count = 0, skipped = [];
 
   if (ssType === 'hold') {

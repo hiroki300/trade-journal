@@ -42,6 +42,7 @@ vm.runInContext([
   grab('typeLabel'), grab('_noteReasonSuffix'), grab('getSkips'),
   grab('matchRoundTrips'), grab('consolidateRounds'), grab('splitImplausibleRounds'),
   grab('getPendingExits'), grab('setPendingExits'), grab('addPendingExits'), grab('clearPendingExitsFor'),
+  grab('normStockCode'), grab('isValidStockCode'), grab('isMarketLabel'),
   grab('applyHoldImport'), grab('applyHistImport'),
   'const MAX_PLAUSIBLE_HOLD_DAYS = 365;',
 ].join('\n'), sb);

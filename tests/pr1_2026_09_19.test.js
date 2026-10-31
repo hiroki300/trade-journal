@@ -109,6 +109,7 @@ chk(ep.includes("(h.dt ? h.dt : '不明')"), '開始日が無いときは「不�
 // ════════════════════════════════════════════════════════════
 console.log('--- 建日が分からない保有を「保有開始日」と言わない ---');
 vm.runInContext([grab('_num'), grab('_normType'), grab('_isOpenAction'), grab('positionPnl'),
+                 grab('normStockCode'), grab('isValidStockCode'), grab('isMarketLabel'),
                  grab('applyHoldImport'), grab('applyHistImport')].join('\n'), sb);
 sb.TODAY = '2026-09-20';
 // 画面A (保有証券リスト) 相当: 建日が無い
