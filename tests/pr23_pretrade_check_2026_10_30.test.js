@@ -6,7 +6,7 @@
  * bot は毎晩、非公開リポ trade-journal-private の pretrade.json に
  * {as_of, rules, holidays, stocks:{5桁:{n,s,c,r}}, facts:{5桁:{next_earnings, ex, last_disclosure}}} を書く。
  * - 株数は position_sizer と同じ式 (資産 × 1.5% ÷ 8%・1 銘柄 40% で頭打ち・100 株単位で切り下げ)
- * - SBI に写す値段は呼値にそろえ、買値に近い側へ丸める (保険は -15% より深くならない・利確は +16% より遠くならない)
+ * - SBI に写す値段は呼値にそろえ、買値に近い側へ丸める (保険は -12% より深くならない・利確は +16% より遠くならない)
  * - 期限は 10 営業日 (土日・祝日・12/31〜1/3 を除く)
  * - 上限 (5 銘柄・1 銘柄 40%・合計 100%・計画の大きさ) を超えたら ⚠️
  * - 売買をすすめる言葉・株価の向きの予想を出さない
@@ -64,10 +64,12 @@ vm.runInContext([
 ].join('\n'), sb);
 const run = c => vm.runInContext(c, sb);
 
-const RULES = { capital_jpy: 2500000, risk_per_trade_pct: 0.015, stop_loss_pct: 0.08, safety_stop_pct: 0.15,
+const RULES = { capital_jpy: 2500000, risk_per_trade_pct: 0.015, stop_loss_pct: 0.08, safety_stop_pct: 0.12,
   target_rr: 2, breakeven_trigger_rr: 1, time_stop_days: 10, max_positions: 5, max_position_pct: 0.4,
   max_total_exposure_pct: 1.0, lot_size: 100 };
 const HOL = ['2026-11-03', '2026-11-23'];
+chk(run('PC_DEFAULT_RULES.safety_stop_pct') === 0.12 && run('PC_DEFAULT_RULES.stop_loss_pct') === 0.08,
+    'データが無いときの既定: 保険の逆指値 -12% (stock-checker の config.SAFETY_STOP_PCT と同じ)・損切り -8%');
 
 console.log('■ 呼値・丸め・営業日');
 chk(run('pcTick(2850)') === 1 && run('pcTick(3000)') === 1 && run('pcTick(3001)') === 5 && run('pcTick(31000)') === 50,
@@ -88,7 +90,7 @@ sb.__o = { price: 2850, code5: '37780', buyDate: '2026-10-30', rules: RULES, hol
                                     last_disclosure: { date: '2026-10-28', label: '決算発表(2Q)' } } };
 const res = run('pcPlan(__o)');
 chk(res.planJpy === 468750 && res.planShares === 100 && res.shares === 100 && res.cost === 285000, '計画 468,750 円 → 100 株 = 285,000 円');
-chk(res.stop === 2622 && res.safety === 2423 && res.breakeven === 3078 && res.target === 3305, '損切り 2,622 / 保険 2,423 / 建値の目安 3,078 / 利確 3,305 (5 円刻み)');
+chk(res.stop === 2622 && res.safety === 2508 && res.breakeven === 3078 && res.target === 3305, '損切り 2,622 / 保険 2,508 / 建値の目安 3,078 / 利確 3,305 (5 円刻み)');
 chk(res.deadline === '2026-11-16', '期限 11/16');
 chk(res.riskJpy === 22800 && res.riskPct === 0.9, '損切りの損 22,800 円 = 資産の 0.9%');
 const txt = res.checks.map(c => (c.ok ? 'OK ' : 'NG ') + c.text);
@@ -127,7 +129,7 @@ const API = 'https://api.github.com/repos/hiroki300/trade-journal-private';
   const out = elem('pcOut').innerHTML;
   chk(calls[0].opt.headers.Authorization === 'Bearer x' && /raw/.test(calls[0].opt.headers.Accept), '売買記録と同じ鍵で非公開リポから読む');
   chk(/さくらインターネット/.test(out) && /100株 = 285,000円/.test(out), '値段が空なら終値で計算・銘柄名');
-  chk(/2,423円/.test(out) && /3,305円/.test(out) && /SBI に写す値段/.test(out), 'SBI に写す値段 (逆指値・指値)');
+  chk(/2,508円/.test(out) && /3,305円/.test(out) && /SBI に写す値段/.test(out), 'SBI に写す値段 (逆指値・指値)');
   chk(/11\/16\(月\)/.test(out), '期限の日付');
   chk(/1日 3\.2%/.test(out) && /約 2\.5 日分/.test(out), 'ふだんの値幅');
   chk(/決算の推定 2\/5/.test(out) && /権利付最終日 3\/29/.test(out) && /直近の開示 10\/28/.test(out), '決算の推定・権利落ち・直近の開示');
