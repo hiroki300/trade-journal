@@ -3500,10 +3500,11 @@ async function doChat() {
 
 // ========= 🧮 買う前の確認 (2026-10-30・stock-checker の pretrade_facts.py / private_publish.py) =========
 //  コードを入れると、計画の株数・損切り・保険の逆指値・建値の目安・目標・期限の日付・買った後の銘柄数と
-//  資産に対する合計・同じ業種の保有・期間中の決算と権利落ちを出し、自分で決めた上限を超えるなら ⚠️。
+//  資産に対する合計・同じ業種の保有・期間中の決算と権利落ちを出し、今のルールの上限を超えるなら ⚠️。
 //  値段・業種・ルールの値・祝日は非公開リポの pretrade.json (毎晩の押し目のジョブが書く・売買記録と同じ鍵)。
 //  無い銘柄・鍵が無いときは値段を手で入れる。
 //  ⚠️ 算術とルールの照合だけ。売買をすすめる言葉・株価の向きの予想は出さない (tests/pr23 で固定)。
+//  ⚠️ 注記は「今の売買ルール」とだけ書く。ルールの多くはアプリの既定なので「自分で決めた」とまとめない (2026-11-03・stock-checker #152・tests/pr25)。
 //  ⚠️ 株数は stock-checker の position_sizer と同じ式: 資産 × 1.5% ÷ 8% を 1 銘柄 40% で頭打ち・100 株単位で切り下げ。
 //  ⚠️ SBI に入れる値段は呼値 (値段ごとの刻み・TOPIX500 以外の表) にそろえ、買値に近い側へ丸める
 //     (保険の逆指値は -12% より深くならず、利確は +16% より遠くならない)。TOPIX500 の細かい刻みでも有効な値段。
@@ -3742,7 +3743,7 @@ function renderPretrade() {
                  : '<div style="font-size:12px;color:var(--t3);line-height:1.6">決算日・権利落ちはこのデータに無い銘柄です (👀・建玉・押し目の候補だけ)。会社の IR で確かめてください。</div>';
   if (res.earnings) h += '<div style="font-size:10px;color:var(--t3)">決算日は前年の同じ四半期の開示日からの推定です。</div>';
   h += _marketScheduleHtml((window._pullbackData || {}).market_schedule);
-  h += '<div style="font-size:10px;color:var(--t3);margin-top:6px;line-height:1.5">※ 算術と、自分で決めたルールとの照合です。売買の判断はご自身で。</div>';
+  h += '<div style="font-size:10px;color:var(--t3);margin-top:6px;line-height:1.5">※ 算術と、今の売買ルールとの照合です。売買の判断はご自身で。</div>';
   out.innerHTML = h;
 }
 
