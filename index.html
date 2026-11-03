@@ -173,8 +173,9 @@ select.fi{appearance:none;-webkit-appearance:none;}
 .btn-sm{border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:700;padding:11px;cursor:pointer;}
 .btn-cancel{background:var(--s2);color:var(--t2);border:1px solid var(--border);}
 .btn-import{background:linear-gradient(135deg,#059669,#0284c7);}
-.key-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;}
-.key-modal{background:var(--s1);border:1px solid var(--border);border-radius:16px;width:100%;max-width:420px;padding:20px;}
+/* 画面より背が高いときは層がスクロールする。カードは margin:auto で真ん中に置く (align-items:center だけだと溢れた上側が切れて届かない) */
+.key-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+.key-modal{background:var(--s1);border:1px solid var(--border);border-radius:16px;width:100%;max-width:420px;padding:20px;margin:auto;}
 .key-modal-title{font-size:16px;font-weight:700;margin-bottom:4px;}
 .key-modal-sub{font-size:12px;color:var(--t3);margin-bottom:16px;line-height:1.6;}
 .key-row{margin-bottom:12px;}
@@ -4952,6 +4953,7 @@ function toast(m) { const e=document.getElementById('toast'); e.textContent=m; e
 // APIキー設定
 function openKeyModal() {
   document.getElementById('keyModal').style.display='flex';
+  document.getElementById('keyModal').scrollTop=0; // 下まで送って閉じた位置が残るので、見出しから開く (表示した後でないと効かない)
   document.getElementById('keyGemini').value=GK;
   document.getElementById('keyAnthropic').value=CK;
   // Phase A-1: ハードロック設定の現在値を反映
