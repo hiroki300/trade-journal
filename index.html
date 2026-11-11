@@ -2495,6 +2495,7 @@ function hHTML(h, compact, idx) {
       '<div class="hl s"><div class="hll">損切り</div><div class="hlv">' + (h.sl ? h.sl.toLocaleString()+'円' : '－') + '</div></div>' +
       '<div class="hl c"><div class="hll">現在値</div><div class="hlv">' + cp.toLocaleString() + '円</div></div>' +
       '<div class="hl t"><div class="hll">目標</div><div class="hlv">' + (h.tgt ? h.tgt.toLocaleString()+'円' : '－') + '</div></div></div>' +
+      ssCardHtml(h, i) +   // 🛡 保険の逆指値を SBI に入れた ✅ (2026-11-12) — 中で ssPrice( と tSS( を使う
       (h.memo ? '<div style="font-size:11px;color:var(--t2);margin-top:5px">📝' + h.memo + '</div>' : '') +
       // Phase B-1: 保有カードにも TradingView チャートボタンを追加 (候補と DOM 衝突しないよう prefix=chart-hold-)
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">'+
@@ -2874,6 +2875,8 @@ function _buildHumanPaperTradesPayload() {
     shares: h.sh || null,
     entry_date_is_import_day: !!h.dt_unknown,   // 保有スクショ由来 = 建日ではない
     ...(h.unseen_since ? {unseen_since: h.unseen_since} : {}),   // 保有スクショに写っていない日
+    // 🛡 保険の逆指値を SBI に入れた ✅ の日 (2026-11-12・効いている ✅ だけ。建玉チェックが読む)
+    ...(ssConfirmedOn(h) ? {safety_stop_confirmed_on: ssConfirmedOn(h)} : {}),
     note: typeLabel(h.type) + (h.sh ? ' ' + h.sh + '株' : '') + ' 未決済'
       + _noteReasonSuffix(h.tags, h.memo),
   }));
@@ -3612,6 +3615,68 @@ function pcPlan(o) {
     ex: f && f.ex ? Object.assign({ inWindow: inWin(f.ex.last_buy_date) || inWin(f.ex.ex_date) }, f.ex) : null,
     lastDisclosure: f ? f.last_disclosure || null : null,
   };
+}
+
+// ========= 🛡 保険の逆指値を SBI に入れた ✅ (2026-11-12・stock-checker の設計 DESIGN_SIZE_STOP_OPEN_2026-11-12.md の B1) =========
+//  ✅ は h.ss = {on: 押した日, bp, sh} で持ち、買値か株数が変わったら効かない (逆指値の値段・株数が合わなくなる)。
+//  SBI の期間指定の注文は発注日を含めて最長 15 営業日 (SBI の国内株式 OCO・IFD・IFDOCO 注文取引ルール・2026-11-12 確認)
+//  → 期限の目安を出し、過ぎたら入れ直しを促す。ボットは SBI の注文を見られない: ここで押したことだけを記録する。
+const SS_VALID_BD = 15;
+const SS_SOON_BD = 2;
+function _ssRules() { return Object.assign({}, PC_DEFAULT_RULES, (_pc && _pc.payload && _pc.payload.rules) || {}); }
+function _ssHolidays() { return (_pc && _pc.payload && _pc.payload.holidays) || []; }
+// 保険の逆指値の値段 (🧮 の「SBI に写す値段」と同じ丸め)。買値が無い・未確認なら null
+function ssPrice(h, rules) {
+  const bp = Number(h && h.bp) || 0;
+  if (!(bp > 0) || h.bp_unknown) return null;
+  const r = Object.assign({}, PC_DEFAULT_RULES, rules || {});
+  return pcToward(bp * (1 - r.safety_stop_pct), bp);
+}
+// ✅ が今の買値・株数のまま効いていれば押した日 (YYYY-MM-DD)、でなければ null
+function ssConfirmedOn(h) {
+  const s = h && h.ss;
+  if (!s || !s.on || Number(s.bp) !== Number(h.bp) || Number(s.sh) !== Number(h.sh)) return null;
+  return s.on;
+}
+// 期限の目安: 押した日を 1 日目として 15 営業日目
+function ssExpiry(on, hol) { return pcAddBiz(on, SS_VALID_BD - 1, hol); }
+// {state: none | ok | soon | expired, on, expiry}
+function ssStatus(h, today, hol) {
+  const on = ssConfirmedOn(h);
+  if (!on) return { state: 'none', on: null, expiry: null };
+  const expiry = ssExpiry(on, hol);
+  const state = today > expiry ? 'expired' : (pcAddBiz(today, SS_SOON_BD, hol) >= expiry ? 'soon' : 'ok');
+  return { state, on, expiry };
+}
+// 保有カードの 🛡 の行 (現物と信用買だけ)
+function ssCardHtml(h, i) {
+  if ((h.type || 'spot') === 'margin_short' || h.yutai) return '';
+  const p = ssPrice(h, _ssRules());
+  if (p == null) return '';
+  const st = ssStatus(h, ymdJST(), _ssHolidays());
+  const btn = (label) => '<button onclick="tSS(' + i + ')" style="background:var(--s2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:4px 8px;cursor:pointer;white-space:nowrap">' + label + '</button>';
+  let msg;
+  if (st.state === 'none') msg = '<span style="color:var(--t3)">SBI に入れたら押す</span>' + btn('SBI に入れた ✅');
+  else if (st.state === 'expired') msg = '<span style="color:#dc2626;font-weight:700">⚠️ ' + pcMd(st.on) + ' の ✅ から 15 営業日を過ぎました (SBI の期限の目安 ' + pcMd(st.expiry) + ')。入れ直したら押す</span>' + btn('入れ直した ✅');
+  else msg = '<span>✅ ' + pcMd(st.on) + ' に入れた <span style="color:' + (st.state === 'soon' ? '#d97706;font-weight:700' : 'var(--t3)') + '">(SBI の期限の目安 ' + pcMd(st.expiry) + ')</span></span>' + btn('取り消す');
+  return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;justify-content:space-between;font-size:11px;margin-top:6px;padding:6px 8px;background:var(--s2);border-radius:8px">' +
+    '<span>🛡 保険の逆指値 <b>' + pcYen(p) + '</b> (買値の -' + Math.round(_ssRules().safety_stop_pct * 100) + '%)</span>' + msg +
+    '<span style="flex-basis:100%;font-size:10px;color:var(--t3)">SBI の期間指定の注文は最長 15 営業日です。アプリは SBI の注文を見られないので、ここで押したことだけを記録します。</span></div>';
+}
+function tSS(idx) {
+  const h = H[idx];
+  if (!h) return;
+  const st = ssStatus(h, ymdJST(), _ssHolidays());
+  if (st.state === 'ok' || st.state === 'soon') {
+    if (!confirm((h.nm || h.cd) + ' の「SBI に入れた ✅」(' + st.on + ') を取り消しますか？')) return;
+    delete h.ss;
+    toast('🛡 ✅ を取り消しました');
+  } else {
+    h.ss = { on: ymdJST(), bp: h.bp, sh: h.sh };
+    toast('🛡 ' + (h.nm || h.cd) + ': SBI に入れた ✅ (期限の目安 ' + pcMd(ssExpiry(h.ss.on, _ssHolidays())) + ')');
+  }
+  sv(KH, H); rHold();
+  maybeAutoPublish();   // 建玉チェック (ボット) に今夜から反映する
 }
 
 async function _fetchPretrade(pat) {
