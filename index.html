@@ -586,9 +586,10 @@ function checkMacroWarning() {
   if (!dangerous) return;
   const lastWarned = ld('tj_macro_warned_at', '');
   if (lastWarned === TODAY) return;  // 1日1回まで
+  // 文は説明書 06 の「地合いによる調整」と同じ決まり (2026-11-12: 説明書に無い「推奨します」「損切り幅も狭めに」を外した)
   const msg = m.regime === 'halt'
-    ? '⛔ HALT モード: 取引停止水準のマクロ環境です。本日の新規買いは原則中止を推奨します。'
-    : '⛈️ STORM モード: 急変動環境です。ポジションサイズを通常の 50% 以下、損切り幅も狭めに。';
+    ? '🔴 地合い halt (停止): アプリの決まりは「新規エントリーは見送り」です。🧮 買う前の確認の計画の株数は 0 になります。'
+    : '⛈ 地合い storm (荒れ): アプリの決まりは「新規は押し目の反発を確認してから・ポジションサイズ 50%」です。🧮 買う前の確認の計画の株数は半分で計算します。';
   alert(msg + '\n\n' + (m.summary || ''));
   sv('tj_macro_warned_at', TODAY);
 }
@@ -3556,12 +3557,25 @@ function pcMd(iso) {
   return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + '(' + '日月火水木金土'[d.getUTCDay()] + ')';
 }
 
+// ふだんの値幅 (%) が入る区切り (純関数・stock-checker の pretrade_facts.range_bucket と同じ境目)。
+// rates = pretrade.json の range_base_rates (過去の数え)。区切りは lo <= 値幅 < hi (hi=null は上限なし)。
+function pcRangeBucket(rates, rangePct) {
+  const v = Number(rangePct);
+  if (!rates || !Array.isArray(rates.buckets) || rangePct == null || !Number.isFinite(v)) return null;
+  return rates.buckets.find(b => b.lo <= v && (b.hi == null || v < b.hi)) || null;
+}
+
 // 純関数: 入力 → 計算の結果。o = {price, shares?, code5, buyDate, rules?, holidays?, sector?, facts?,
-//   holdings: [{code5, name, value, sector}]}
+//   holdings: [{code5, name, value, sector}], regime?}
+// regime (2026-11-12・stock-checker の設計 A): pretrade.json の地合い。計画の大きさに size_factor を掛ける
+// (storm 0.5・halt 0。説明書 06 の「地合いによる調整」・ユーザー決定)。無ければ倍率 1 (画面が「取得できず」と書く)。
 function pcPlan(o) {
   const r = Object.assign({}, PC_DEFAULT_RULES, o.rules || {});
   const cap = r.capital_jpy, lot = r.lot_size, p = o.price;
-  const planJpy = Math.min(cap * r.risk_per_trade_pct / r.stop_loss_pct, cap * r.max_position_pct);
+  const regime = o.regime && typeof o.regime.size_factor === 'number' ? o.regime : null;
+  const sizeFactor = regime ? regime.size_factor : 1;
+  const basePlanJpy = Math.min(cap * r.risk_per_trade_pct / r.stop_loss_pct, cap * r.max_position_pct);
+  const planJpy = basePlanJpy * sizeFactor;
   const planShares = Math.floor(planJpy / (p * lot) + 1e-9) * lot;
   const shares = o.shares > 0 ? o.shares : (planShares || lot);
   const cost = shares * p;
@@ -3579,14 +3593,15 @@ function pcPlan(o) {
     { ok: singleAfter <= cap * r.max_position_pct + 1e-6,
       text: '1銘柄 資産の ' + pct(singleAfter) + '% (上限 ' + Math.round(r.max_position_pct * 100) + '%)' },
     { ok: planShares > 0 && cost <= planJpy + 1e-6,
-      text: planShares > 0 ? (cost <= planJpy + 1e-6 ? '計画の大きさ以内' : '計画の大きさ ' + pcYen(planJpy) + ' を超えています')
+      text: sizeFactor === 0 ? '地合い ' + regime.regime + ': アプリの決まりは「' + regime.guidance + '」(計画の大きさ 0円)'
+          : planShares > 0 ? (cost <= planJpy + 1e-6 ? '計画の大きさ以内' : '計画の大きさ ' + pcYen(planJpy) + ' を超えています')
                            : '1単元 (' + lot + '株) でも計画の大きさ ' + pcYen(planJpy) + ' を超えています' },
   ];
   const deadline = pcAddBiz(o.buyDate, r.time_stop_days, o.holidays);
   const inWin = d => !!d && d >= o.buyDate && d <= deadline;
   const f = o.facts || null;
   return {
-    rules: r, capital: cap, planJpy, planShares, shares, cost, costPct: pct(cost),
+    rules: r, capital: cap, planJpy, basePlanJpy, sizeFactor, regime, planShares, shares, cost, costPct: pct(cost),
     riskJpy: shares * (p - stop), riskPct: Math.round(shares * (p - stop) / cap * 1000) / 10,
     stop, safety: pcToward(p * (1 - r.safety_stop_pct), p),
     breakeven: Math.round(p * (1 + r.stop_loss_pct * r.breakeven_trigger_rr)),
@@ -3701,7 +3716,7 @@ function renderPretrade() {
   const facts = pay && pay.facts ? pay.facts[code5] : null;
   const res = pcPlan({ price, shares: _num(document.getElementById('pcShares').value), code5, buyDate,
                        rules: pay && pay.rules, holidays: pay && pay.holidays, sector: s ? s.s : '',
-                       facts, holdings });
+                       facts, holdings, regime: pay && pay.regime });
   const r = res.rules, lot = r.lot_size;
   const nm = (s && s.n) || ((H || []).find(h => pcCode5(h.cd) === code5) || {}).nm || '';
   const row = (k, v, note) => '<div style="display:flex;gap:8px;line-height:1.7"><span style="flex:none;width:6.5em;color:var(--t3)">' +
@@ -3715,12 +3730,23 @@ function renderPretrade() {
     ' <span style="font-weight:400;font-size:12px;color:var(--t3)">' + pcYen(price) + (s && !_num(priceEl.value) ? ' (' + _escape(pcMd(pay.as_of)) + ' の終値)' : '') + '</span></div>';
   h += row('株数', res.shares.toLocaleString() + '株 = ' + pcYen(res.cost), '(資産の ' + res.costPct + '%)');
   h += '<div style="font-size:11px;color:var(--t3);margin:-2px 0 4px 6.5em;line-height:1.5">計画の上限 ' + pcYen(res.planJpy) +
-    ' (資産 ' + Math.round(res.capital / 10000) + '万 × ' + (r.risk_per_trade_pct * 100).toFixed(1) + '% ÷ ' + pctTxt(r.stop_loss_pct) + ')' +
+    ' (資産 ' + Math.round(res.capital / 10000) + '万 × ' + (r.risk_per_trade_pct * 100).toFixed(1) + '% ÷ ' + pctTxt(r.stop_loss_pct) +
+    (res.sizeFactor !== 1 ? ' × 地合い ' + pctTxt(res.sizeFactor) : '') + ')' +
     (res.planShares ? ' → ' + lot + '株単位で ' + res.planShares.toLocaleString() + '株' : ' → 1単元でも超える') + '</div>';
+  // 地合い (2026-11-12): 前の営業日の TOPIX の終値で bot が判定 (朝チェックと同じ)。無い晩は満額のまま「取得できず」と書く
+  h += res.regime
+    ? row('地合い', _escape(res.regime.icon + ' ' + res.regime.regime + ' (' + res.regime.words + ')'),
+          '(' + _escape(pcMd(res.regime.as_of)) + ' の TOPIX の終値で判定) アプリの決まり: ' + _escape(res.regime.guidance))
+    : row('地合い', '—', '地合いは取得できず・株数に地合いは入っていません');
   h += row('損切り', pcYen(res.stop) + ' (-' + pctTxt(r.stop_loss_pct) + ')', '終値で判断。このときの損 ' + pcYen(res.riskJpy) + ' = 資産の ' + res.riskPct + '%');
   h += row('建値の目安', pcYen(res.breakeven) + ' (+' + pctTxt(r.stop_loss_pct * r.breakeven_trigger_rr) + ')', '終値でこれを超えたら、損切りを買値へ');
   h += row('期限', _escape(pcMd(res.deadline)), '(' + r.time_stop_days + '営業日・土日祝を除く・' + _escape(pcMd(buyDate)) + ' に買った場合)');
   if (s && s.r) h += row('ふだんの値幅', '1日 ' + s.r.toFixed(1) + '%', '(高値と安値の差・直近20日。-' + pctTxt(r.stop_loss_pct) + ' はその約 ' + (r.stop_loss_pct * 100 / s.r).toFixed(1) + ' 日分)');
+  const rb = s && s.r ? pcRangeBucket(pay && pay.range_base_rates, s.r) : null;
+  if (rb) {
+    h += '<div style="font-size:11px;color:var(--t3);margin:-2px 0 4px 6.5em;line-height:1.5">この値幅の株は、買って 10 営業日以内に終値で -8% 以下になった回が ' +
+      Math.round(rb.close_m8 * 100) + '% (過去 10 年の数え・予想ではありません)</div>';
+  }
   h += '<div style="background:var(--s2);border:1.5px solid var(--acc);border-radius:10px;padding:8px 12px;margin:10px 0">' +
     '<div style="font-size:11px;font-weight:700;color:var(--acc);margin-bottom:2px">📋 SBI に写す値段 (' + res.shares.toLocaleString() + '株)</div>' +
     big('🛡 逆指値 (保険)', pcYen(res.safety), '買値の -' + pctTxt(r.safety_stop_pct) + '・この値段以下で成行') +
