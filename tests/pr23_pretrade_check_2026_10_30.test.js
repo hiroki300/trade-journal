@@ -60,7 +60,7 @@ vm.runInContext([
   constBlock('PC_DEFAULT_RULES'), 'let _pc = null; let _pcBusy = null;',
   grab('_escape'), grab('_num'), grab('_marketScheduleHtml'),
   grab('pcTick'), grab('pcToward'), grab('pcCode5'), grab('pcIsBiz'), grab('pcAddBiz'), grab('pcYen'), grab('pcMd'),
-  grab('pcPlan'), grab('_fetchPretrade', 'async '), grab('loadPretrade', 'async '), grab('_pcErrText'), grab('renderPretrade'),
+  grab('pcRangeBucket'), grab('pcPlan'), grab('_fetchPretrade', 'async '), grab('loadPretrade', 'async '), grab('_pcErrText'), grab('renderPretrade'),
 ].join('\n'), sb);
 const run = c => vm.runInContext(c, sb);
 
